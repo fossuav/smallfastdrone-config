@@ -42,7 +42,7 @@ Until then, "testing" means running `bun dev` and confirming the page renders, p
 
 ## What's here right now
 
-A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling, ESLint via `@antfu/eslint-config`, and a 6-route shell with a navigation bar:
+A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV brand palette: purple `#4A1E80` + gold `#C9A35F`), ESLint via `@antfu/eslint-config`, and a 6-route shell with a navigation bar:
 
 - **Connect** (`/`) — splash with SFD logo and a disabled "Connect drone" button
 - **Bringup** (`/wizard`), **Recipes** (`/recipes`), **Logs** (`/logs`), **Firmware** (`/firmware`), **ESC tools** (`/esc`) — operator-friendly "Coming soon" placeholders

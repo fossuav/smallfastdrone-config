@@ -41,6 +41,16 @@ Expert mode is **off by default** and **per-session** — re-enable each session
 
 ## Visual language
 
+### Brand palette
+
+- **Purple** (FOSS UAV): anchor `#4A1E80`, scaled into a `foss-50…950` Tailwind palette. Used as Nuxt UI's `primary` slot — the dominant action colour (buttons, active nav, links, icons that signal "you can act here").
+- **Gold** (FOSS UAV): anchor `#C9A35F`, scaled into a `gold-50…950` palette. Used as Nuxt UI's `secondary` slot — accent for completion / success states, highlighted labels, decorative emphasis. Sparing use: gold draws attention; it isn't a wallpaper.
+- **Neutral** (SFD black/white minimalism): Tailwind's `neutral` palette — true grayscale for text, backgrounds, and structural surfaces. Most of the screen is neutral; brand colour appears where the operator needs to look.
+
+Definitions live in `src/assets/css/main.css` (`@theme` block) and are wired into Nuxt UI via the `ui()` Vite plugin options in `vite.config.ts`. Standard Nuxt UI components pick the right intensities automatically (light mode pulls `-500/-600`, dark mode pulls `-400`).
+
+Don't reach for raw Tailwind colour classes (`bg-blue-500`, etc.) in components — go through Nuxt UI's semantic tokens (`color="primary"`, `text-default`, `bg-elevated`) so a theme change here is the only place to update.
+
 ### 3D drone model
 
 The hero element. Used in:

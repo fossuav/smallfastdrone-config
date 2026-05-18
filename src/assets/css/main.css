@@ -1,2 +1,36 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+
+/*
+ * FOSS UAV brand palette.
+ * Anchor purple #4A1E80 (foss-700) sampled from the corporate logo.
+ * Anchor gold   #C9A35F (gold-400) sampled from the wings + wordmark.
+ * Scales hand-derived to keep the brand tone at the typical Tailwind
+ * "default" intensities for Nuxt UI buttons (500 light, 400 dark).
+ */
+
+@theme static {
+  --color-foss-50:  #F5EDFC;
+  --color-foss-100: #EAD9F8;
+  --color-foss-200: #D4B3F1;
+  --color-foss-300: #B788E5;
+  --color-foss-400: #985CD6;
+  --color-foss-500: #7434C0;
+  --color-foss-600: #5C28A0;
+  --color-foss-700: #4A1E80;
+  --color-foss-800: #371663;
+  --color-foss-900: #240D45;
+  --color-foss-950: #16072B;
+
+  --color-gold-50:  #FCF8EC;
+  --color-gold-100: #F9F0CE;
+  --color-gold-200: #F2DE98;
+  --color-gold-300: #E6C863;
+  --color-gold-400: #C9A35F;
+  --color-gold-500: #B58E45;
+  --color-gold-600: #966E2D;
+  --color-gold-700: #7B5826;
+  --color-gold-800: #5D4319;
+  --color-gold-900: #3F2D11;
+  --color-gold-950: #221809;
+}
