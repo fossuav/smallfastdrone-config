@@ -19,7 +19,10 @@ cleanup() {
   wait 2>/dev/null || true
   echo "[dev:sitl] done."
 }
-trap cleanup EXIT INT TERM
+# EXIT trap always runs cleanup. SIGINT/SIGTERM exit cleanly so bun doesn't
+# print `error: script "dev:sitl" exited with code 130` on Ctrl-C.
+trap cleanup EXIT
+trap 'exit 0' INT TERM
 
 # 1. SITL — uses the subshell-parent trick from scripts/sitl-start.sh.
 #    It logs into /tmp/sfd-sitl-XXXXXX/sitl.log; we don't tail that here.
