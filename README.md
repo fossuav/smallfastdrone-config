@@ -42,9 +42,13 @@ Until then, "testing" means running `bun dev` and confirming the page renders, p
 
 ## What's here right now
 
-A minimal Vite + Vue 3 + TypeScript scaffold with Nuxt UI 4 + Tailwind 4 styling and ESLint via `@antfu/eslint-config`. Renders a styled landing card with the SFD logo and a disabled "Connect drone" button. Subsequent Phase 0 slices add:
+A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling, ESLint via `@antfu/eslint-config`, and a 6-route shell with a navigation bar:
 
-- App shell with Connect / Wizard / Recipes / Logs / Firmware / ESC Tools routes (vue-router 5 is installed; route table is still empty)
+- **Connect** (`/`) — splash with SFD logo and a disabled "Connect drone" button
+- **Bringup** (`/wizard`), **Recipes** (`/recipes`), **Logs** (`/logs`), **Firmware** (`/firmware`), **ESC tools** (`/esc`) — operator-friendly "Coming soon" placeholders
+
+Each route lazy-loads as its own chunk. Subsequent Phase 0 slices add:
+
 - Pinia + `@vueuse/core` + expert-mode toggle (off by default)
 - Tres.js 3D drone visualization on the Connect screen
 - SFD as a git submodule; SITL build + bridge for tests

@@ -16,7 +16,7 @@ Project is at the planning stage. No application code exists yet. The repo curre
 | Phase | Status | Notes |
 |---|---|---|
 | Planning | ✅ Complete (2026-05-15) | Initial plan, architecture, bringup, security docs in place |
-| Phase 0 — Scaffolding | 🔧 In progress | Slices done: 1 (Vite+Vue+TS), 3 (ESLint+antfu), 2 (Nuxt UI 4 + Tailwind 4 + minimal vue-router). Next: real router with placeholder views, Pinia/expert-mode, Tres.js drone, SFD submodule + SITL, transports, Playwright. |
+| Phase 0 — Scaffolding | 🔧 In progress | Slices done: 1 (Vite+Vue+TS), 3 (ESLint+antfu), 2 (Nuxt UI 4 + Tailwind 4 + minimal vue-router), 4 (real router + 6 placeholder views + nav bar). Next: Pinia/expert-mode, Tres.js drone, SFD submodule + SITL, transports, Playwright, HTTPS+PWA. |
 | Phase 1 — MAVLink + params | ⏳ Not started | node-mavlink, param fetch/set, Pinia store, param browser |
 | Phase 2 — Bringup wizard | ⏳ Not started | State machine, phase gates, IndexedDB persistence |
 | Phase 3 — Recipe library | ⏳ Not started | SFD-flavoured tuning recipes, dry-run + commit |
@@ -36,6 +36,7 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-05-18: **Phase 0 slice 4 — app shell with 6 routes**. `src/router.ts` defines lazy-loaded routes for Connect / Bringup / Recipes / Logs / Firmware / ESC tools, each with operator-friendly placeholder content. `App.vue` is now the shell: `<UApp>` + top nav bar (`<UNavigationMenu>` driven by route metadata) + `<RouterView>`. Splash card moved into `ConnectView`. Build now chunks each view (~0.8 KB lazy per route). Main bundle: 405 KB / 127 KB gzip.
 - 2026-05-18: **Phase 0 slice 2 — Nuxt UI 4 + Tailwind 4** wired in. Vite plugin (`@nuxt/ui/vite`) + Tailwind/`@nuxt/ui` CSS imports + vue-plugin in `main.ts`. Landing page now renders a styled `UCard` with a disabled "Connect drone" button. Discovered Nuxt UI 4 requires vue-router (its `<NuxtLink>` override imports `useRoute`), so vue-router 5 came along with this slice — a minimal empty-routes setup until the app-shell slice fills it in. PLAN/CLAUDE updated from "vue-router 4" → "vue-router 5" (current stable). Build: 678 modules, 270 KB JS / 175 KB CSS (gzip 92 / 23). Lint, typecheck, dev server all green.
 - 2026-05-18: **Feedback-into-playbooks discipline pinned.** Substantive user guidance lands in the relevant playbook (`CLAUDE.md`, `PLAN.md`, `PROGRESS.md`, `docs/*`) in the same change — not just applied in-the-moment. Playbooks always reflect current intent. Revisions to prior decisions go in the original row, not bolted on top. Captured in CLAUDE.md "How we work".
 - 2026-05-18: **Working principles pinned.** Bias for working code — every step ships something runnable and reviewable, no big-bang phases. Plan is provisional — phases / decision rows can shift as we learn what the operator actually wants; updating PLAN.md + PROGRESS.md is normal, not exceptional. Captured in CLAUDE.md "How we work" and PLAN.md "Phased delivery" preamble.
