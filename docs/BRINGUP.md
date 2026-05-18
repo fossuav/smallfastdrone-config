@@ -1,0 +1,104 @@
+# Bringup Workflow Design
+
+> Read [PLAN.md](../PLAN.md) and [ARCHITECTURE.md](ARCHITECTURE.md) first.
+
+The bringup workflow is the **primary value of this tool**. It walks an operator from "I have a powered, unconfigured flight controller" to "this drone is tuned and safe to fly," in the shortest reasonable time, with the lowest reasonable risk.
+
+Two interaction modes share the same primitives (read params, write params, verify, prompt operator):
+
+- **Wizard** for first-time bringup of a new drone. Strict, sequential, gated.
+- **Recipes** for tuning, re-tuning, mode setup, and SFD-specific tweaks on an already-flying drone.
+
+## Wizard phases
+
+Each phase has:
+
+- **prerequisites** — what must be true before entering
+- **actions** — what the tool does or asks the operator to do
+- **verification** — automated checks against telemetry / params
+- **gate** — operator confirmation; auto-pass shortcuts when all checks pass
+- **visual** — every phase has a hero visual (3D drone, illustration, live data viz). No text-only phases. See [UX.md](UX.md) for the visual language.
+
+| # | Phase | Owns | Gate | Hero visual |
+|---|---|---|---|---|
+| 00 | **Pre-flight** | Connect, identify FC, read firmware version, confirm SFD build; **optionally** DFU-flash a current SFD firmware image if the operator chose "fresh install" (Phase 5 capability) | Auto: heartbeat + correct build string | Animated USB icon during scan; rotating 3D drone once connected |
+| 01 | **Frame** | Frame class/type, motor count, prop direction | Operator confirms frame against UI render | 3D drone in frame-class variant; operator can rotate to compare with their actual drone |
+| 02 | **Sensors** | Accel cal, compass cal, baro check | Auto: cal status flags clear | 3D drone with animated tilt arrows showing the next required orientation |
+| 03 | **RC** | RC protocol, channel mapping, throttle/yaw/pitch/roll trim, RC failsafe | Operator stick-test pass | SVG sticks animating live with operator's transmitter input |
+| 04 | **Motors / ESCs** | Motor order, direction, ESC calibration; **optionally** flash BLHeli ESC firmware via 4-way passthrough (Phase 6 capability) | Operator visual motor-test pass — **props off** | 3D drone top-down with active motor highlighted + prop-direction arrows |
+| 05 | **First-hover prep** | Battery / RC / GCS / EKF failsafes, arming checks, max angle/throttle | Auto: arming check passes | SVG illustration of failsafe tree with each branch lighting up green as configured |
+| 06 | **First hover** | Operator hovers; tool collects 30–60 s stable hover log | Operator confirms stable hover | Live vibration sparkline + altitude trace + link-quality indicator |
+| 07 | **Filters** | Notch filter from hover-log gyro spectrum, harmonic notch config | Auto: post-tune log shows clean spectrum | Live gyro spectrum plot showing peak detection and notch placement preview |
+| 08 | **PIDs** | AutoTune orchestration **or** initial seed from frame template | Operator AutoTune pass | 3D drone executing AutoTune motions with progress per axis |
+| 09 | **Mode setup** | Configure flight modes the operator wants — including SFD-specific (throw, acro tweaks) | Operator confirm per-mode | Per-mode brief animation showing what each mode "feels like" |
+| 10 | **Verify** | Final audit: failsafes wired, RTL alt sane, geofence (if requested), throw config sanity | Operator review checklist | Checklist with per-item green-check / illustration; final celebratory drone fly-by |
+
+Phases are advisory; an experienced operator can skip ahead but the gate must be acknowledged ("I've done this elsewhere") rather than silently bypassed.
+
+### Phase contract
+
+```ts
+interface BringupPhase {
+  id: string;
+  title: string;
+  prerequisites(state: WizardState): PrereqResult;
+  enter(api: WizardApi): Promise<void>;
+  verify(state: WizardState): VerifyResult;
+}
+```
+
+The wizard runtime is dumb: walk phases in order, block on verify failures, persist progress to IndexedDB.
+
+## Recipe library
+
+Recipes are ordered param batches with optional verify steps. They live in `src/workflow/recipes/`. **Data-first** — JSON/YAML where possible. Lift a recipe to TS code only when it needs branching or computation.
+
+### Initial recipes (SFD-flavoured)
+
+Each recipe is presented to the operator as an **illustrated card with an outcome name**, not a list of parameters. The card shows: hero illustration, plain-language description ("Tighter response and gentler hover for indoor flying"), prerequisites, and a "what will change" summary in operator language. The actual param diff is visible only in expert mode.
+
+| Recipe | Outcome label | What it does (internal) | Notes |
+|---|---|---|---|
+| `indoor-cinewhoop-tune` | "Indoor cinewhoop" | Filter + PID adjustments for indoor ducted quads | References `../smallfastdrone/` indoor-copter playbook |
+| `throw-mode-setup` | "Throw-launch this drone" | `THROW_TYPE`, `THROW_NEXTMODE`, `THROW_MOT_START`, `THROW_ALT_MIN` | Includes `THROW_NEXTMODE=ACRO` (smallfastdrone commit `5534d1f62b`) and `THROW_SRC_INI` audit for carrier-mounted vehicles |
+| `first-flight-failsafes` | "Set safe defaults for first flight" | Battery FS, RC FS, GCS FS, EKF FS — sensible SFD defaults | Conservative; assumes small fast drone |
+| `notch-from-log` | "Smooth out vibration from a recent flight" | Operator points to hover .bin; tool computes peak Hz; writes `INS_HNTCH_*` | Only recipe in v1 that consumes a log |
+
+### Recipe contract
+
+```ts
+interface Recipe {
+  id: string;
+  title: string;
+  description: string;
+  prerequisites: string[];   // human-readable, e.g. "drone is hovering", "frame_class is COPTER"
+  steps: RecipeStep[];
+}
+
+type RecipeStep =
+  | { type: 'set'; param: string; value: number; reason?: string }
+  | { type: 'verify'; param: string; matches: string }              // expression evaluated against current value
+  | { type: 'prompt'; message: string }
+  | { type: 'wait_for'; condition: 'armed' | 'disarmed' | 'hovering'; timeout_s: number };
+```
+
+Recipes never bypass the param store's dirty/write tracking — every change is auditable, reversible, and committed in a single confirmed batch. **Dry-run before commit** is mandatory; the UI must show before/after diff.
+
+## Operator safety rules (must hold across wizard and recipes)
+
+1. **Props-off mode is default during bringup.** UI states this explicitly. Phases that require power are explicitly flagged.
+2. **No write without read.** Always read the current value before writing; show before/after on confirm.
+3. **Batch + commit, don't drip.** Stage param changes in the dirty set; present a single confirm-and-write.
+4. **Persist before reboot.** Always save params to flash before any operation that triggers reboot.
+5. **Gates are auditable.** Why did the operator advance? Logged in wizard state.
+
+## SFD-specific bringup considerations
+
+This tool is for SmallFastDrone, not vanilla ArduPilot. Defaults and recipes assume:
+
+- **Small frame class** (sub-300 mm typical), high power-to-weight.
+- **Indoor / confined-space flight** is common — tighter PIDs, conservative climb rates, careful failsafes.
+- **Throw-mode launching** is a primary use case; bringup must produce a throw-ready config.
+- **Carrier-mounted GPS-poor takeoffs** require `THROW_SRC_INI` handling rather than a blanket "drop SRC_INI" suggestion.
+
+When a recipe or phase has SFD-specific reasoning, link to the relevant doc in `../smallfastdrone/` (e.g. `ArduCopter/CLAUDE.md` indoor playbook) in the recipe description, so the operator can audit the rationale.
