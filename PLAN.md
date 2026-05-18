@@ -87,6 +87,7 @@ Keep this list short. Adding a transitive-heavy lib (lodash, date-fns, three, d3
 - `eslint` + `@antfu/eslint-config`
 - `typescript`
 - `vue-tsc`
+- `@types/bun` (for `test/sitl/bridge.ts` and future Bun CLI scripts)
 
 **External (via git submodule, not npm):**
 - `vendor/smallfastdrone/` — SFD firmware, used to build SITL for tests

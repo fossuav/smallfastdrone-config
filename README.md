@@ -39,7 +39,22 @@ bun run sitl:start   # start it on TCP 127.0.0.1:5760
 bun run sitl:stop    # stop it
 ```
 
-The browser app will gain a WebSocket bridge to talk to this SITL instance in a later slice.
+### Browser → SITL via the bridge
+
+The browser can't speak TCP directly. A small Bun WebSocket bridge translates ws://localhost:5761 ↔ tcp://localhost:5760. Three terminals:
+
+```bash
+# terminal 1
+bun run sitl:start
+
+# terminal 2
+bun run bridge:start
+
+# terminal 3
+bun dev
+```
+
+Then open <http://localhost:5173/?transport=websocket&host=localhost:5761> and click **Connect drone**. The page shows live bytes received from SITL (MAVLink parsing arrives in the next slice).
 
 ## Test
 
@@ -60,11 +75,11 @@ A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV br
 - **Bringup** (`/wizard`), **Recipes** (`/recipes`), **Logs** (`/logs`), **Firmware** (`/firmware`), **ESC tools** (`/esc`) — operator-friendly "Coming soon" placeholders
 - **Expert mode** toggle (top-right of nav, off by default, per-session) reveals a **Parameters** (`/params`) route
 
-Each route lazy-loads as its own chunk. State lives in Pinia setup stores (currently just the UI/expert-mode store, persisted via `@vueuse/core`'s `useSessionStorage`). SmallFastDrone is vendored as a git submodule with `sitl:build/start/stop` scripts (see [SITL](#sitl) below). Subsequent Phase 0 slices add:
+Each route lazy-loads as its own chunk. State lives in Pinia setup stores (UI/expert-mode + drone session). SmallFastDrone is vendored as a git submodule with `sitl:build/start/stop` scripts; the Connect screen can already talk to SITL via a WebSocket bridge (see [SITL](#sitl) below). Subsequent Phase 0 slices add:
 
+- MAVLink parsing (node-mavlink) so we can show "Connected to your drone — quadrotor running SFD 4.7-beta" instead of just a byte count
 - Tres.js 3D drone visualization on the Connect screen
-- SITL bridge + transport abstraction so the browser can talk to SITL
-- MAVLink session via node-mavlink (WebSerial)
+- WebSerial transport (real USB drones)
 - First Playwright E2E test (drives SITL through a heartbeat connect)
 - HTTPS dev via mkcert + PWA shell via vite-plugin-pwa
 
