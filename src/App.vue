@@ -29,7 +29,7 @@ const navItems = computed(() =>
               <img
                 :src="logoUrl"
                 alt="SmallFastDrone"
-                class="h-8 w-auto dark:invert"
+                class="h-10 w-auto dark:invert"
               >
             </RouterLink>
             <UNavigationMenu :items="navItems" />
