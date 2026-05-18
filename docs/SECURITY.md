@@ -42,13 +42,13 @@ v1 of `smallfastdrone-config` does not duplicate or replace either. v1 must:
 ```ts
 interface SignedArtifactUploader {
   // Returns true if FC requires signed artifacts of the given kind.
-  requires_signature(kind: ArtifactKind): Promise<boolean>;
+  requires_signature: (kind: ArtifactKind) => Promise<boolean>
 
   // Verify-then-upload. v1 impl: passthrough. v2+: real signature verification.
-  upload(kind: ArtifactKind, bytes: Uint8Array, opts?: UploadOpts): Promise<UploadResult>;
+  upload: (kind: ArtifactKind, bytes: Uint8Array, opts?: UploadOpts) => Promise<UploadResult>
 }
 
-type ArtifactKind = 'firmware' | 'lua_script' | 'mission' | 'param_blob' | 'esc_firmware';
+type ArtifactKind = 'firmware' | 'lua_script' | 'mission' | 'param_blob' | 'esc_firmware'
 ```
 
 **The rule:** every upload from the tool to the FC (or to an ESC via the FC) goes through this. UI never calls `protocol/files.ts`, `protocol/dfu.ts`, or `protocol/fourway.ts` upload primitives directly. Stores route uploads through the artifacts store, which delegates to the uploader.

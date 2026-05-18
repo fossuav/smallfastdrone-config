@@ -39,11 +39,11 @@ Phases are advisory; an experienced operator can skip ahead but the gate must be
 
 ```ts
 interface BringupPhase {
-  id: string;
-  title: string;
-  prerequisites(state: WizardState): PrereqResult;
-  enter(api: WizardApi): Promise<void>;
-  verify(state: WizardState): VerifyResult;
+  id: string
+  title: string
+  prerequisites: (state: WizardState) => PrereqResult
+  enter: (api: WizardApi) => Promise<void>
+  verify: (state: WizardState) => VerifyResult
 }
 ```
 
@@ -68,18 +68,18 @@ Each recipe is presented to the operator as an **illustrated card with an outcom
 
 ```ts
 interface Recipe {
-  id: string;
-  title: string;
-  description: string;
-  prerequisites: string[];   // human-readable, e.g. "drone is hovering", "frame_class is COPTER"
-  steps: RecipeStep[];
+  id: string
+  title: string
+  description: string
+  prerequisites: string[] // human-readable, e.g. "drone is hovering", "frame_class is COPTER"
+  steps: RecipeStep[]
 }
 
-type RecipeStep =
-  | { type: 'set'; param: string; value: number; reason?: string }
-  | { type: 'verify'; param: string; matches: string }              // expression evaluated against current value
-  | { type: 'prompt'; message: string }
-  | { type: 'wait_for'; condition: 'armed' | 'disarmed' | 'hovering'; timeout_s: number };
+type RecipeStep
+  = | { type: 'set', param: string, value: number, reason?: string }
+    | { type: 'verify', param: string, matches: string } // expression evaluated against current value
+    | { type: 'prompt', message: string }
+    | { type: 'wait_for', condition: 'armed' | 'disarmed' | 'hovering', timeout_s: number }
 ```
 
 Recipes never bypass the param store's dirty/write tracking — every change is auditable, reversible, and committed in a single confirmed batch. **Dry-run before commit** is mandatory; the UI must show before/after diff.

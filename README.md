@@ -25,6 +25,8 @@ bun dev          # Vite dev server at http://localhost:5173
 bun run build    # production build to dist/
 bun run preview  # serve the production build locally
 bun run typecheck
+bun run lint     # ESLint via @antfu/eslint-config (lint + format check)
+bun run lint:fix # auto-fix what's auto-fixable
 ```
 
 ## Test

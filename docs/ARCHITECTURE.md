@@ -106,19 +106,19 @@ The directory layout deliberately mirrors the layered view: each layer is a top-
 
 ```ts
 interface DroneSession {
-  connected: boolean;
-  sysid: number;             // from heartbeat
-  compid: number;
-  autopilot: 'ardupilot' | 'unknown';
-  vehicle_type: 'copter' | 'plane' | 'rover' | string;
-  firmware_version: string;  // e.g. "SFD 4.7.0-beta3"
-  frame_class?: number;      // populated once params loaded
-  frame_type?: number;
+  connected: boolean
+  sysid: number // from heartbeat
+  compid: number
+  autopilot: 'ardupilot' | 'unknown'
+  vehicle_type: 'copter' | 'plane' | 'rover' | string
+  firmware_version: string // e.g. "SFD 4.7.0-beta3"
+  frame_class?: number // populated once params loaded
+  frame_type?: number
   link: {
-    rssi?: number;
-    drop_rate: number;
-    last_heartbeat_at: number;
-  };
+    rssi?: number
+    drop_rate: number
+    last_heartbeat_at: number
+  }
 }
 ```
 
@@ -126,13 +126,13 @@ interface DroneSession {
 
 ```ts
 interface Param {
-  name: string;
-  value: number;
-  default?: number;
-  source: 'fc' | 'user-staged' | 'recipe-staged';
-  dirty: boolean;
-  last_write_status?: 'pending' | 'acked' | 'failed';
-  meta?: ParamMeta;          // range, units, group — from apm.pdef.xml at build time
+  name: string
+  value: number
+  default?: number
+  source: 'fc' | 'user-staged' | 'recipe-staged'
+  dirty: boolean
+  last_write_status?: 'pending' | 'acked' | 'failed'
+  meta?: ParamMeta // range, units, group — from apm.pdef.xml at build time
 }
 ```
 
@@ -152,11 +152,11 @@ Stored in IndexedDB keyed by `sysid + frame_fingerprint`. Schema is the wizard s
 
 ```ts
 interface SignedArtifactUploader {
-  requires_signature(kind: ArtifactKind): Promise<boolean>;
-  upload(kind: ArtifactKind, bytes: Uint8Array, opts?: UploadOpts): Promise<UploadResult>;
+  requires_signature: (kind: ArtifactKind) => Promise<boolean>
+  upload: (kind: ArtifactKind, bytes: Uint8Array, opts?: UploadOpts) => Promise<UploadResult>
 }
 
-type ArtifactKind = 'firmware' | 'lua_script' | 'mission' | 'param_blob';
+type ArtifactKind = 'firmware' | 'lua_script' | 'mission' | 'param_blob'
 ```
 
 v1 implementation: passthrough to `protocol/files.ts`. Future implementations layer in:
