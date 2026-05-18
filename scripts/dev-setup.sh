@@ -69,6 +69,35 @@ check_sitl_build_deps() {
   fi
 }
 
+install_playwright_browser() {
+  info "installing Playwright chromium browser (~115 MB, first time only)"
+  bun x playwright install chromium
+  ok "Playwright browser ready"
+}
+
+check_playwright_system_deps() {
+  info "checking Chromium runtime libs for Playwright"
+  # Try a quick smoke run; if Chromium can't load its libs the binary exits
+  # with code 127 immediately and ldd lists what's missing.
+  local bin
+  bin="$(find "$HOME/.cache/ms-playwright" -name 'chrome-headless-shell' -executable 2>/dev/null | head -1)"
+  if [ -z "$bin" ]; then
+    warn "Playwright Chromium not found; rerun install_playwright_browser"
+    return
+  fi
+  local missing
+  missing="$(ldd "$bin" 2>/dev/null | awk '/not found/ {print $1}' | sort -u)"
+  if [ -n "$missing" ]; then
+    warn "Chromium is missing system libraries:"
+    while IFS= read -r lib; do warn "  $lib"; done <<<"$missing"
+    warn "install via:"
+    warn "  sudo bun x playwright install-deps chromium"
+    warn "(or sudo apt install libnss3 libnspr4 libatk-bridge2.0-0 libxss1 libasound2t64 libxcomposite1 libxdamage1 libxrandr2 libxkbcommon0)"
+  else
+    ok "all Chromium runtime libs present"
+  fi
+}
+
 # ----- main -----------------------------------------------------------
 
 main() {
@@ -81,17 +110,20 @@ main() {
   install_project_deps
   init_submodules
   check_sitl_build_deps
+  install_playwright_browser
+  check_playwright_system_deps
 
   echo
   ok "dev environment ready"
   echo
   echo "Try:"
-  echo "  bun dev             # start the Vite dev server"
+  echo "  bun run dev:sitl    # SITL + bridge + Vite dev server in one terminal"
   echo "  bun run build       # production build"
   echo "  bun run typecheck"
   echo "  bun run sitl:build  # build ArduCopter SITL (5-10 min cold; cached after)"
   echo "  bun run sitl:start  # start SITL on TCP 127.0.0.1:5760"
   echo "  bun run sitl:stop"
+  echo "  bun run test:e2e    # Playwright E2E (auto-starts SITL + bridge + Vite)"
 }
 
 main "$@"

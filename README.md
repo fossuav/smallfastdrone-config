@@ -59,14 +59,15 @@ bun dev               # terminal 3
 
 ## Test
 
-Test infrastructure (Vitest + Playwright + SITL bridge) lands in later Phase 0 slices — see [docs/TESTING.md](docs/TESTING.md) for the design. Once it lands:
+Playwright E2E lands first; Vitest unit + integration come in later Phase 0 slices. See [docs/TESTING.md](docs/TESTING.md) for the design.
 
 ```bash
-bun run test            # unit + integration tests
-bun run test:e2e        # end-to-end against SITL
+bun run test:e2e           # Playwright: starts SITL + bridge + Vite, runs the suite, tears down
+bun run test:e2e:headed    # Same with a visible browser, useful for debugging
+bun run test:e2e:debug     # Pause / step through tests interactively
 ```
 
-Until then, "testing" means running `bun dev` and confirming the page renders, plus `bun run build` succeeds.
+`dev-setup.sh` installs the Playwright Chromium browser (~115 MB, first time only) and warns if the system libs Chromium needs (`libnss3`, `libnspr4`, …) are missing — install with `sudo bun x playwright install-deps chromium` if so.
 
 ## What's here right now
 

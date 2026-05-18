@@ -4,6 +4,18 @@ import { defineConfig } from 'vite'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 export default defineConfig({
+  // Pre-optimise node-mavlink + its polyfilled deps so the first browser
+  // load doesn't trigger a "new dependencies optimized" reload mid-test
+  // (Playwright sees it as a navigation race).
+  optimizeDeps: {
+    include: [
+      'node-mavlink',
+      'mavlink-mappings',
+      'vite-plugin-node-polyfills/shims/buffer',
+      'vite-plugin-node-polyfills/shims/global',
+      'vite-plugin-node-polyfills/shims/process',
+    ],
+  },
   plugins: [
     vue(),
     ui({
