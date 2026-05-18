@@ -15,6 +15,7 @@ import { Buffer } from 'node:buffer'
 import * as ardupilotmega from 'mavlink-mappings/dist/lib/ardupilotmega'
 import * as common from 'mavlink-mappings/dist/lib/common'
 import * as minimal from 'mavlink-mappings/dist/lib/minimal'
+import * as standard from 'mavlink-mappings/dist/lib/standard'
 import {
   MavLinkPacketParser,
   MavLinkPacketSplitter,
@@ -27,6 +28,7 @@ import {
 // way. Cost is small for the benefit of one decoder path for everything.
 const REGISTRY = {
   ...minimal.REGISTRY,
+  ...standard.REGISTRY,
   ...common.REGISTRY,
   ...ardupilotmega.REGISTRY,
 } as Record<number, MavLinkDataConstructor<MavLinkData>>
@@ -42,14 +44,22 @@ export interface DecodedMessage {
 
 export type MessageHandler = (msg: DecodedMessage) => void
 
+export interface MavLinkSessionOptions {
+  /** Our GCS source system id when sending. Default 255 (conventional GCS). */
+  sysid?: number
+  /** Our GCS source component id when sending. Default 190 (MAV_COMP_ID_USER1). */
+  compid?: number
+}
+
 export class MavLinkSession {
   private readonly splitter = new MavLinkPacketSplitter()
   private readonly parser = new MavLinkPacketParser()
-  private readonly protocol = new MavLinkProtocolV2()
+  private readonly protocol: MavLinkProtocolV2
   private readonly listeners = new Set<MessageHandler>()
   private seq = 0
 
-  constructor() {
+  constructor(opts: MavLinkSessionOptions = {}) {
+    this.protocol = new MavLinkProtocolV2(opts.sysid ?? 255, opts.compid ?? 190)
     this.splitter.pipe(this.parser)
     this.parser.on('data', (packet) => {
       const clazz = REGISTRY[packet.header.msgid]
@@ -92,9 +102,62 @@ export class MavLinkSession {
   }
 }
 
-// MAVLink common HEARTBEAT message id. Re-exported so callers don't need
-// to dig into the mappings tree just to identify a heartbeat.
+// Common MAVLink message ids re-exported so callers don't need to dig
+// into the mappings tree.
 export const MSGID_HEARTBEAT = minimal.Heartbeat.MSG_ID
+export const MSGID_AUTOPILOT_VERSION = standard.AutopilotVersion.MSG_ID
+
+// Decode AUTOPILOT_VERSION's flight_sw_version (uint32) + flight_custom_version
+// (uint8[8] containing the build's git short hash as ASCII) into an
+// operator-readable string like "4.7.0-beta (d0615774)". The custom_version
+// bytes can also arrive as a number[] depending on how the mavlink-mappings
+// decoder handed them back; accept either.
+export function decodeFirmwareVersion(swVersion: number, customVersion: ArrayLike<number>): string {
+  const type = swVersion & 0xFF
+  const patch = (swVersion >> 8) & 0xFF
+  const minor = (swVersion >> 16) & 0xFF
+  const major = (swVersion >>> 24) & 0xFF
+
+  const typeStr = type === 0
+    ? '-dev'
+    : type === 64
+      ? '-alpha'
+      : type === 128
+        ? '-beta'
+        : type === 192
+          ? '-rc'
+          : '' // 255 = official, no suffix
+
+  // The custom_version is 8 bytes of ASCII git hash (ArduPilot convention),
+  // null-terminated if shorter than 8 chars.
+  const bytes = Uint8Array.from(customVersion)
+  let end = bytes.indexOf(0)
+  if (end === -1)
+    end = bytes.length
+  const hash = new TextDecoder().decode(bytes.slice(0, end)).trim()
+
+  const ver = `${major}.${minor}.${patch}${typeStr}`
+  return hash ? `${ver} (${hash})` : ver
+}
+
+// Build a COMMAND_LONG that asks the target FC to send a specific message.
+// We use this immediately after the first heartbeat to ask for
+// AUTOPILOT_VERSION (msgid 148) so the UI can show firmware details.
+export function buildRequestMessage(targetSystem: number, targetComponent: number, requestedMsgId: number): common.CommandLong {
+  const cmd = new common.CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  cmd.command = common.MavCmd.REQUEST_MESSAGE
+  cmd._param1 = requestedMsgId
+  cmd._param2 = 0
+  cmd._param3 = 0
+  cmd._param4 = 0
+  cmd._param5 = 0
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
+}
 
 // Operator-friendly label for a vehicle type, per docs/UX.md microcopy
 // rule (no MAVLink jargon in user-facing strings).

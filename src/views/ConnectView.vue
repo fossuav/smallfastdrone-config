@@ -42,7 +42,9 @@ function toggle() {
         </p>
         <dl class="mt-2 inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-1 text-left text-xs text-muted">
           <dt>Autopilot:</dt><dd class="text-default">
-            {{ session.autopilotLabelText }}
+            {{ session.autopilotLabelText }}<template v-if="session.firmwareVersion">
+              {{ session.firmwareVersion }}
+            </template>
           </dd>
           <dt>System ID:</dt><dd class="text-default">
             {{ session.sysid }}
