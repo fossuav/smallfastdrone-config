@@ -1,0 +1,4 @@
+[submodule "vendor/smallfastdrone"]
+	path = vendor/smallfastdrone
+	url = https://github.com/fossuav/smallfastdrone.git
+	branch = SmallFastDrone-4.7-beta

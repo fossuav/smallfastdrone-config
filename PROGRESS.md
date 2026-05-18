@@ -16,7 +16,7 @@ Project is at the planning stage. No application code exists yet. The repo curre
 | Phase | Status | Notes |
 |---|---|---|
 | Planning | ✅ Complete (2026-05-15) | Initial plan, architecture, bringup, security docs in place |
-| Phase 0 — Scaffolding | 🔧 In progress | Slices done: 1 (Vite+Vue+TS), 3 (ESLint+antfu), 2 (Nuxt UI 4 + Tailwind 4 + minimal vue-router), 4 (real router + 6 placeholder views + nav bar), 5 (Pinia + @vueuse/core + expert-mode toggle + Params route). Next: Tres.js drone, SFD submodule + SITL, transports, Playwright, HTTPS+PWA. |
+| Phase 0 — Scaffolding | 🔧 In progress | Slices done: 1 (Vite+Vue+TS), 3 (ESLint+antfu), 2 (Nuxt UI 4 + Tailwind 4 + minimal vue-router), 4 (real router + 6 placeholder views + nav bar), 5 (Pinia + @vueuse/core + expert-mode toggle + Params route), 7 (SFD submodule + SITL build/start/stop). Next: SITL bridge + transport abstraction (slice 9–10), then heartbeat in browser; later Tres.js drone, Playwright, HTTPS+PWA. |
 | Phase 1 — MAVLink + params | ⏳ Not started | node-mavlink, param fetch/set, Pinia store, param browser |
 | Phase 2 — Bringup wizard | ⏳ Not started | State machine, phase gates, IndexedDB persistence |
 | Phase 3 — Recipe library | ⏳ Not started | SFD-flavoured tuning recipes, dry-run + commit |
@@ -28,14 +28,15 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 | Item | Status | Notes |
 |---|---|---|
-| SFD submodule at `vendor/smallfastdrone/` | ⏳ Not started | Pinned commit; bumps via deliberate PR |
-| SITL build orchestration | ⏳ Not started | `bun run sitl:build` / `start` / `stop` |
+| SFD submodule at `vendor/smallfastdrone/` | ✅ Landed (slice 7) | Pinned to SFD `SmallFastDrone-4.7-beta` HEAD `d0615774f4`. `dev-setup.sh` runs `git submodule update --init --recursive` (5-10 min first time) |
+| SITL build orchestration | ✅ Landed (slice 7) | `bun run sitl:build` / `start` / `stop`. `dev-setup.sh` checks for gcc/g++/python3/ccache and warns if missing. |
 | SITL bridge (`test/sitl/bridge.ts`) | ⏳ Not started | Zero-dep Bun script; WebSocket ↔ TCP MAVLink |
 | Transport abstraction (incl. `WebSocketTransport`) | ⏳ Not started | URL-param-driven selection; no conditional compilation |
 | CI workflow | ⏳ Not started | Submodule checkout, ccache, layered test runs |
 
 ## Recent log
 
+- 2026-05-18: **Phase 0 slice 7 — SFD submodule + SITL build orchestration.** SmallFastDrone added as a git submodule at `vendor/smallfastdrone/`, pinned to current `SmallFastDrone-4.7-beta` HEAD (`d0615774f4`). Scripts added: `scripts/sitl-build.sh` (waf configure --board sitl + ./waf copter), `scripts/sitl-start.sh` (runs ArduCopter SITL on TCP 127.0.0.1:5760 from a temp workdir, pidfile-tracked), `scripts/sitl-stop.sh`. `bun run sitl:build` / `sitl:start` / `sitl:stop` wired in `package.json`. `dev-setup.sh` extended to recursively init submodules and probe for SITL build prerequisites. Verified: setup completes; recursive submodule init pulled mavlink, ChibiOS, DroneCAN, gtest et al. SITL build run-time on this machine still being measured.
 - 2026-05-18: **Phase 0 slice 5 — Pinia + @vueuse/core + expert-mode toggle.** First Pinia setup store (`src/stores/ui.ts`) holds the expert flag, persisted per-session via `useSessionStorage` (clears on tab close, per UX.md). A `<USwitch color="secondary">` in the nav-bar header toggles it. Added `/params` route with `meta.expert: true`; nav items filter on `expert`, so the Parameters tab appears only when the switch is on. The route URL stays reachable for deep-linking either way — the toggle gates *visibility in nav*, not access. Lazy bundle: ParamsView 0.97 KB. Main bundle 421 KB / 131 KB gzip (+16 KB raw, +5 KB gzip for Pinia + the parts of @vueuse we use).
 - 2026-05-18: **FOSS UAV brand palette applied.** Sampled from `fossuav_logo.PNG`: purple anchor `#4A1E80`, gold anchor `#C9A35F`. Hand-derived 11-stop scales (`foss-*`, `gold-*`) defined in `src/assets/css/main.css` via Tailwind 4 `@theme`, wired into Nuxt UI as `primary: foss`, `secondary: gold`, `neutral: neutral`. Updated `docs/UX.md` "Visual language" with a Brand palette subsection documenting the choice.
 - 2026-05-18: **Phase 0 slice 4 — app shell with 6 routes**. `src/router.ts` defines lazy-loaded routes for Connect / Bringup / Recipes / Logs / Firmware / ESC tools, each with operator-friendly placeholder content. `App.vue` is now the shell: `<UApp>` + top nav bar (`<UNavigationMenu>` driven by route metadata) + `<RouterView>`. Splash card moved into `ConnectView`. Build now chunks each view (~0.8 KB lazy per route). Main bundle: 405 KB / 127 KB gzip.

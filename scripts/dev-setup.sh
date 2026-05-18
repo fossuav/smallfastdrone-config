@@ -45,6 +45,30 @@ install_project_deps() {
   ok "deps installed"
 }
 
+init_submodules() {
+  info "initialising git submodules (vendor/smallfastdrone for SITL builds)"
+  info "  first run pulls SFD + nested submodules (ChibiOS, mavlink, ...) — can take several minutes"
+  git submodule update --init --recursive
+  ok "submodules ready"
+}
+
+check_sitl_build_deps() {
+  info "checking SITL build prerequisites"
+  local missing=()
+  for tool in gcc g++ python3 ccache; do
+    have "$tool" || missing+=("$tool")
+  done
+
+  if [ ${#missing[@]} -ne 0 ]; then
+    warn "missing tools needed to build SITL: ${missing[*]}"
+    warn "install via your distro (Debian/Ubuntu):"
+    warn "  sudo apt install build-essential python3 python3-pip ccache"
+    warn "see vendor/smallfastdrone/Tools/environment_install/install-prereqs-ubuntu.sh for the full SFD/ArduPilot prereq list"
+  else
+    ok "all SITL build tools present"
+  fi
+}
+
 # ----- main -----------------------------------------------------------
 
 main() {
@@ -55,14 +79,19 @@ main() {
 
   install_bun
   install_project_deps
+  init_submodules
+  check_sitl_build_deps
 
   echo
   ok "dev environment ready"
   echo
   echo "Try:"
-  echo "  bun dev          # start the Vite dev server"
-  echo "  bun run build    # production build"
+  echo "  bun dev             # start the Vite dev server"
+  echo "  bun run build       # production build"
   echo "  bun run typecheck"
+  echo "  bun run sitl:build  # build ArduCopter SITL (5-10 min cold; cached after)"
+  echo "  bun run sitl:start  # start SITL on TCP 127.0.0.1:5760"
+  echo "  bun run sitl:stop"
 }
 
 main "$@"

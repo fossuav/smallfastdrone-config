@@ -5,6 +5,9 @@
   "private": true,
   "scripts": {
     "setup": "./scripts/dev-setup.sh",
+    "sitl:build": "./scripts/sitl-build.sh",
+    "sitl:start": "./scripts/sitl-start.sh",
+    "sitl:stop": "./scripts/sitl-stop.sh",
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",

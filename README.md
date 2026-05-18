@@ -29,9 +29,21 @@ bun run lint     # ESLint via @antfu/eslint-config (lint + format check)
 bun run lint:fix # auto-fix what's auto-fixable
 ```
 
+## SITL
+
+SmallFastDrone source is vendored as a git submodule at `vendor/smallfastdrone/`. `bun run setup` initialises it. Then:
+
+```bash
+bun run sitl:build   # build ArduCopter SITL (5-10 min cold, fast after — uses ccache)
+bun run sitl:start   # start it on TCP 127.0.0.1:5760
+bun run sitl:stop    # stop it
+```
+
+The browser app will gain a WebSocket bridge to talk to this SITL instance in a later slice.
+
 ## Test
 
-Test infrastructure (Vitest + Playwright + SITL via git submodule) lands in later Phase 0 slices — see [docs/TESTING.md](docs/TESTING.md) for the design. Once it lands:
+Test infrastructure (Vitest + Playwright + SITL bridge) lands in later Phase 0 slices — see [docs/TESTING.md](docs/TESTING.md) for the design. Once it lands:
 
 ```bash
 bun run test            # unit + integration tests
@@ -48,10 +60,10 @@ A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV br
 - **Bringup** (`/wizard`), **Recipes** (`/recipes`), **Logs** (`/logs`), **Firmware** (`/firmware`), **ESC tools** (`/esc`) — operator-friendly "Coming soon" placeholders
 - **Expert mode** toggle (top-right of nav, off by default, per-session) reveals a **Parameters** (`/params`) route
 
-Each route lazy-loads as its own chunk. State lives in Pinia setup stores (currently just the UI/expert-mode store, persisted via `@vueuse/core`'s `useSessionStorage`). Subsequent Phase 0 slices add:
+Each route lazy-loads as its own chunk. State lives in Pinia setup stores (currently just the UI/expert-mode store, persisted via `@vueuse/core`'s `useSessionStorage`). SmallFastDrone is vendored as a git submodule with `sitl:build/start/stop` scripts (see [SITL](#sitl) below). Subsequent Phase 0 slices add:
 
 - Tres.js 3D drone visualization on the Connect screen
-- SFD as a git submodule; SITL build + bridge for tests
+- SITL bridge + transport abstraction so the browser can talk to SITL
 - MAVLink session via node-mavlink (WebSerial)
 - First Playwright E2E test (drives SITL through a heartbeat connect)
 - HTTPS dev via mkcert + PWA shell via vite-plugin-pwa
