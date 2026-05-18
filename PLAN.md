@@ -32,7 +32,7 @@ See [docs/UX.md](docs/UX.md) for the operator-first design playbook.
 | 1 | Frontend stack | Vue 3.5+ + Vite 7 + Tailwind 4 + Nuxt UI 4 + vue-router 5 | Modern Vue + Tailwind 4 (Oxide engine). Same family as `../betaflight-configurator/` minus its legacy baggage. vue-router updated 4 → 5 (current stable as of slice 2 install). |
 | 2 | Language | TypeScript end-to-end | No JS in `src/`. Modern toolchain expects TS first-class. |
 | 3 | State | Pinia (Setup Stores) | Modern Vue store; composition-API native. |
-| 4 | MAVLink lib | `mavlink-mappings` (enums + message constants) + in-house Uint8Array v2 stream parser | node-mavlink and mavlink-mappings's per-message decoders rely on Node `Buffer`/`stream` and don't bundle for the browser. mavlink-mappings's enum constants are pure TS — we use those for typed labels and roll our own ~100-line frame splitter against `DataView`/`Uint8Array`. Revisit if message-decode complexity outgrows hand-rolling. |
+| 4 | MAVLink lib | `node-mavlink` + `mavlink-mappings` with `vite-plugin-node-polyfills` for browser `Buffer`/`stream` | Ecosystem-standard MAVLink JS/TS stack — typed message classes for every common + ardupilotmega message, streaming v2 packet splitter with CRC validation, serialize for sending. Costs ~30-80 KB gzip in polyfills + the dialect registries. Initially tried mavlink-mappings-only with hand-rolled framing; switched to full node-mavlink for evolution + ecosystem alignment (operator wants typed bindings throughout). |
 | 5 | Platform v1 | Browser PWA | Lowest install friction; matches operator workflow on a bench laptop. |
 | 6 | Transports v1 | WebSerial (MAVLink, MSP, 4-way) + WebUSB (DFU) | Bench bringup is the dominant flow. WebUSB needed for DFU class flashing. UDP/SITL deferred. |
 | 6a | DFU | WebUSB-based STM32 DFU class, our own implementation | Mirrors betaflight-configurator's `dfu.js`. Mission Planner does this poorly; this is a key differentiator. DFU uploads route through the security seam. |
@@ -76,12 +76,13 @@ Keep this list short. Adding a transitive-heavy lib (lodash, date-fns, three, d3
 - `@nuxt/ui` (4) + `tailwindcss` (4)
 - `@vueuse/core` — composition utilities
 - `@tresjs/core` + `@tresjs/cientos` — 3D drone visualization (pulls `three`)
-- `mavlink-mappings` — MAVLink enums + message constants (consumed for typed labels; we hand-roll frame parsing, see decision 4)
+- `node-mavlink` + `mavlink-mappings` — MAVLink v2 parsing, typed message classes, serialize for sending (browser via polyfills, see decision 4)
 
 **Dev:**
 - `vite` (7)
 - `vite-plugin-mkcert`
 - `vite-plugin-pwa`
+- `vite-plugin-node-polyfills` — Buffer/stream/etc. shims so node-mavlink runs in the browser
 - `vitest`
 - `playwright`
 - `eslint` + `@antfu/eslint-config`
