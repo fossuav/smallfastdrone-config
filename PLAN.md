@@ -95,6 +95,10 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
 
 ## Phased delivery
 
+**Phases are destinations, not commits.** Each phase below lists what's true at its conclusion. The work to get there lands as a sequence of small, independently runnable, reviewable slices — never a big-bang merge. Each slice ends green and demonstrable before the next starts.
+
+**The plan is provisional.** Phases can split, merge, reorder, or be re-scoped as the operator discovers what's actually needed. Decision rows can flip. When that happens, update this file and `PROGRESS.md` — don't diverge silently and don't treat the plan as a contract.
+
 **Every phase has a paired automated test acceptance criterion** that drives SITL through the same path the operator would. See [docs/TESTING.md](docs/TESTING.md) "What we test, by phase" for the per-phase test contract.
 
 ### Phase 0 — Scaffolding (app + test infrastructure)

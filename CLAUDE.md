@@ -24,6 +24,15 @@ See [docs/UX.md](docs/UX.md) for the full operator-first design playbook. Practi
 
 When implementing UI, ask: *would a non-expert operator understand this and feel confident?* If not, find a way to show it instead of telling it.
 
+## How we work
+
+- **Bias for working code.** Every step ships something runnable and reviewable. Don't build three layers of scaffolding before there's anything to demo. Prefer a minimal end-to-end vertical slice that works over a complete horizontal layer that doesn't run yet.
+- **The plan is provisional.** [PLAN.md](PLAN.md) is the current best guess, not a contract. Decision rows can flip, phases can split/merge/reorder, scope can shift as the operator discovers what they actually want. When that happens, update PLAN.md + PROGRESS.md — don't quietly diverge from the plan, and don't refuse to change it.
+- **Small reviewable steps.** Break work into commits that are independently runnable, testable, and reviewable. If a step needs three commits before anything works, the step is too big.
+- **Phases are destinations, not commits.** A phase in PLAN.md lists what's true at its conclusion. The work to get there lands as a sequence of small slices, each one green before the next starts.
+- **Demonstrate, then iterate.** Land the minimum that demonstrates a capability; let the operator react to it before polishing. Polishing something the operator hasn't seen often turns out to be polishing the wrong thing.
+- **Feedback flows into the playbooks.** When the operator gives substantive guidance — a new requirement, scope change, working principle, correction to a prior decision — that guidance lands in the relevant playbook (`CLAUDE.md`, `PLAN.md`, `PROGRESS.md`, or `docs/*`) in the same change. Don't apply guidance in-the-moment and let it evaporate. The playbooks should always reflect current intent, so a future reader (operator or Claude) sees the live model, not a stale snapshot. If a piece of guidance contradicts a prior decision row, revise the row in place — don't bolt the new intent on top of the old.
+
 ## Read first
 
 - [PLAN.md](PLAN.md) — phase plan, decisions log, scope.
