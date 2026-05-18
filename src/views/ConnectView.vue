@@ -90,8 +90,8 @@ function toggle() {
           {{ buttonLabel }}
         </UButton>
         <p class="text-muted mt-2 text-center text-xs">
-          Real-drone (USB) support arrives in a later slice. For now: start SITL and the bridge, then load this page with
-          <code class="bg-muted rounded px-1 py-0.5">?transport=websocket&amp;host=localhost:5761</code>.
+          Plug your drone in via USB and click <em>Connect drone</em>. For SITL testing, load this page with
+          <code class="bg-muted rounded px-1 py-0.5">?transport=websocket&amp;host=localhost:5761</code> instead.
         </p>
       </template>
     </UCard>
