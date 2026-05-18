@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import logoUrl from './assets/sfd-logo.png'
 </script>
 
 <template>
@@ -6,12 +7,14 @@
     <main class="min-h-dvh flex items-center justify-center bg-default p-6">
       <UCard class="w-full max-w-md">
         <template #header>
-          <h1 class="text-xl font-semibold text-highlighted">
-            SmallFastDrone Config
-          </h1>
+          <img
+            :src="logoUrl"
+            alt="SmallFastDrone"
+            class="mx-auto h-20 w-auto dark:invert"
+          >
         </template>
 
-        <p class="text-muted">
+        <p class="text-center text-muted">
           Get your drone configured and flying well — fast, and safely.
         </p>
 
