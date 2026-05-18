@@ -29,7 +29,7 @@ See [docs/UX.md](docs/UX.md) for the operator-first design playbook.
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| 1 | Frontend stack | Vue 3.5+ + Vite 7 + Tailwind 4 + Nuxt UI 4 | Modern Vue + Tailwind 4 (Oxide engine). Same family as `../betaflight-configurator/` minus its legacy baggage. |
+| 1 | Frontend stack | Vue 3.5+ + Vite 7 + Tailwind 4 + Nuxt UI 4 + vue-router 5 | Modern Vue + Tailwind 4 (Oxide engine). Same family as `../betaflight-configurator/` minus its legacy baggage. vue-router updated 4 → 5 (current stable as of slice 2 install). |
 | 2 | Language | TypeScript end-to-end | No JS in `src/`. Modern toolchain expects TS first-class. |
 | 3 | State | Pinia (Setup Stores) | Modern Vue store; composition-API native. |
 | 4 | MAVLink lib | node-mavlink (TS) | Most actively maintained TS MAVLink lib; browser-compatible. |
@@ -71,9 +71,9 @@ Keep this list short. Adding a transitive-heavy lib (lodash, date-fns, three, d3
 
 **Runtime:**
 - `vue` (3.5+)
-- `vue-router` (4)
+- `vue-router` (5)
 - `pinia`
-- `@nuxt/ui` (4) — pulls Tailwind 4
+- `@nuxt/ui` (4) + `tailwindcss` (4)
 - `@vueuse/core` — composition utilities
 - `@tresjs/core` + `@tresjs/cientos` — 3D drone visualization (pulls `three`)
 - `node-mavlink`

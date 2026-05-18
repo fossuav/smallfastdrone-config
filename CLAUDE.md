@@ -52,7 +52,7 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 - **TypeScript** end-to-end — no `.js` files in `src/`
 - **Bun** as package manager and runtime
 - **Pinia** for state (Setup Stores style)
-- **vue-router 4** for navigation
+- **vue-router 5** for navigation
 - **`@vueuse/core`** for composition utilities (`useRafFn`, debounce, `useElementSize`, etc.)
 - **`@tresjs/core` + `@tresjs/cientos`** for 3D drone visualization (Vue-native three.js)
 - **node-mavlink** (TS) for the MAVLink protocol — primary

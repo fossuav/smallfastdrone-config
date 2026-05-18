@@ -16,7 +16,7 @@ Project is at the planning stage. No application code exists yet. The repo curre
 | Phase | Status | Notes |
 |---|---|---|
 | Planning | ✅ Complete (2026-05-15) | Initial plan, architecture, bringup, security docs in place |
-| Phase 0 — Scaffolding | ⏳ Not started | Vue 3 + Vite + Nuxt UI app skeleton, WebSerial connect/disconnect |
+| Phase 0 — Scaffolding | 🔧 In progress | Slices done: 1 (Vite+Vue+TS), 3 (ESLint+antfu), 2 (Nuxt UI 4 + Tailwind 4 + minimal vue-router). Next: real router with placeholder views, Pinia/expert-mode, Tres.js drone, SFD submodule + SITL, transports, Playwright. |
 | Phase 1 — MAVLink + params | ⏳ Not started | node-mavlink, param fetch/set, Pinia store, param browser |
 | Phase 2 — Bringup wizard | ⏳ Not started | State machine, phase gates, IndexedDB persistence |
 | Phase 3 — Recipe library | ⏳ Not started | SFD-flavoured tuning recipes, dry-run + commit |
@@ -36,6 +36,7 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-05-18: **Phase 0 slice 2 — Nuxt UI 4 + Tailwind 4** wired in. Vite plugin (`@nuxt/ui/vite`) + Tailwind/`@nuxt/ui` CSS imports + vue-plugin in `main.ts`. Landing page now renders a styled `UCard` with a disabled "Connect drone" button. Discovered Nuxt UI 4 requires vue-router (its `<NuxtLink>` override imports `useRoute`), so vue-router 5 came along with this slice — a minimal empty-routes setup until the app-shell slice fills it in. PLAN/CLAUDE updated from "vue-router 4" → "vue-router 5" (current stable). Build: 678 modules, 270 KB JS / 175 KB CSS (gzip 92 / 23). Lint, typecheck, dev server all green.
 - 2026-05-18: **Feedback-into-playbooks discipline pinned.** Substantive user guidance lands in the relevant playbook (`CLAUDE.md`, `PLAN.md`, `PROGRESS.md`, `docs/*`) in the same change — not just applied in-the-moment. Playbooks always reflect current intent. Revisions to prior decisions go in the original row, not bolted on top. Captured in CLAUDE.md "How we work".
 - 2026-05-18: **Working principles pinned.** Bias for working code — every step ships something runnable and reviewable, no big-bang phases. Plan is provisional — phases / decision rows can shift as we learn what the operator actually wants; updating PLAN.md + PROGRESS.md is normal, not exceptional. Captured in CLAUDE.md "How we work" and PLAN.md "Phased delivery" preamble.
 - 2026-05-18: **Test infrastructure plan.** Added [docs/TESTING.md](docs/TESTING.md). SFD becomes a git submodule at `vendor/smallfastdrone/` (URL: `https://github.com/fossuav/smallfastdrone.git`) so we can build SITL and validate the tool against real ArduPilot in CI. Test pyramid: Vitest unit (fixtures), Vitest integration (Bun→TCP→SITL), Playwright E2E (browser→WebSocket bridge→SITL). Zero-dep Bun bridge at `test/sitl/bridge.ts`. Test transport selected via URL param — production bundle contains no test code. Each phase now has a paired test acceptance criterion. Phase 0 expanded to include the full test infrastructure. Added `playwright` to dev deps. See PLAN.md decisions rows 26–30 and updated Phase 0.

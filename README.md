@@ -42,16 +42,15 @@ Until then, "testing" means running `bun dev` and confirming the page renders, p
 
 ## What's here right now
 
-A minimal Vite + Vue 3 + TypeScript scaffold that renders a placeholder landing page. That's it. Subsequent Phase 0 slices add:
+A minimal Vite + Vue 3 + TypeScript scaffold with Nuxt UI 4 + Tailwind 4 styling and ESLint via `@antfu/eslint-config`. Renders a styled landing card with a disabled "Connect drone" button. Subsequent Phase 0 slices add:
 
-- Nuxt UI 4 + Tailwind 4 styling
-- App shell with Connect / Wizard / Recipes / Logs / Firmware / ESC Tools routes
-- Expert-mode toggle (off by default)
+- App shell with Connect / Wizard / Recipes / Logs / Firmware / ESC Tools routes (vue-router 5 is installed; route table is still empty)
+- Pinia + `@vueuse/core` + expert-mode toggle (off by default)
 - Tres.js 3D drone visualization on the Connect screen
-- ESLint + antfu config; `.editorconfig`
 - SFD as a git submodule; SITL build + bridge for tests
 - MAVLink session via node-mavlink (WebSerial)
 - First Playwright E2E test (drives SITL through a heartbeat connect)
+- HTTPS dev via mkcert + PWA shell via vite-plugin-pwa
 
 After Phase 0, the bigger pieces land in order: param browser, bringup wizard, recipe library, log download, DFU firmware flashing, BLHeli ESC passthrough.
 
