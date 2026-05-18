@@ -7,3 +7,8 @@ dist/
 
 # TS build info
 node_modules/.tmp/
+
+# MAVProxy telemetry logs (written to cwd by default)
+mav.tlog
+mav.tlog.raw
+mav.parm

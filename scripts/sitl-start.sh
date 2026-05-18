@@ -27,8 +27,23 @@ WORK=$(mktemp -d /tmp/sfd-sitl-XXXXXX)
 cd "$WORK"
 
 echo "Starting SITL in $WORK"
-"$BIN" -S --model copter --defaults "$DEFAULTS" >sitl.log 2>&1 &
-PID=$!
+# --model + is a plus-config quad (the canonical SITL multirotor model).
+# --speedup 1 forces real-time.
+#
+# The intermediate "( : ; ... ) &" subshell is load-bearing: ArduPilot's
+# SITL _fdm_input_step self-terminates if it sees its parent is init (orphan).
+# The subshell stays alive waiting for arducopter, keeping it parented.
+# The leading ":" (true) is needed so bash doesn't optimise away the subshell.
+# This trick is borrowed verbatim from
+# vendor/smallfastdrone/Tools/autotest/run_in_terminal_window.sh.
+( : ; "$BIN" --model + --speedup 1 --defaults "$DEFAULTS" </dev/null >sitl.log 2>&1 ) &
+sleep 0.8
+PID=$(pgrep -f "$BIN" -n || true)
+if [ -z "$PID" ]; then
+  echo "SITL did not appear to start. Log:" >&2
+  cat sitl.log >&2
+  exit 1
+fi
 echo "$PID" >"$PIDFILE"
 echo "$WORK" >"${PIDFILE}.workdir"
 

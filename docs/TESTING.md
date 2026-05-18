@@ -65,6 +65,18 @@ bun run sitl:stop
 
 Build takes ~5–10 min cold, ~30 s with warm `ccache`. CI caches the `vendor/smallfastdrone/build/sitl/` directory keyed on the submodule SHA.
 
+### SITL launch gotcha — keep a parent alive
+
+SITL's `_fdm_input_step` self-terminates if it sees its parent process is `init` (orphan PID 1). A naïve `arducopter ... &` from a script will work until a client connects, then SITL silently dies as the parent script exits. `setsid` / `nohup` style detachment makes it *worse*, not better.
+
+The fix (copied verbatim from `vendor/smallfastdrone/Tools/autotest/run_in_terminal_window.sh`): wrap SITL in an intermediate subshell that waits on it.
+
+```bash
+( : ; "$BIN" --model + --speedup 1 --defaults "$DEFAULTS" </dev/null >sitl.log 2>&1 ) &
+```
+
+The leading `:` (true) is load-bearing — without it bash optimises away the subshell and we're back to orphan. `scripts/sitl-start.sh` uses this; any new SITL launcher (CI script, alternate harness) must too.
+
 ## SITL bridge
 
 SITL exposes MAVLink over TCP. The browser PWA speaks WebSerial in production. For E2E, we use a small bridge:
