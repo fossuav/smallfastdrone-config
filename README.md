@@ -71,9 +71,9 @@ bun run test:e2e:debug     # Pause / step through tests interactively
 
 ## What's here right now
 
-A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV brand palette: purple `#4A1E80` + gold `#C9A35F`), ESLint via `@antfu/eslint-config`, and a 6-route shell with a navigation bar:
+A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV brand palette: purple `#4A1E80` + gold `#C9A35F`), ESLint via `@antfu/eslint-config`, and a 6-route shell with a navigation bar (SFD logo top-left):
 
-- **Connect** (`/`) — splash with SFD logo and a disabled "Connect drone" button
+- **Connect** (`/`) — splash with a slowly rotating 3D X-quad and a live "Connect drone" button
 - **Bringup** (`/wizard`), **Recipes** (`/recipes`), **Logs** (`/logs`), **Firmware** (`/firmware`), **ESC tools** (`/esc`) — operator-friendly "Coming soon" placeholders
 - **Expert mode** toggle (top-right of nav, off by default, per-session) reveals a **Parameters** (`/params`) route
 

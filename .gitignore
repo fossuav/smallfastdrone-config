@@ -12,3 +12,8 @@ node_modules/.tmp/
 mav.tlog
 mav.tlog.raw
 mav.parm
+
+# Playwright artefacts
+test-results/
+playwright-report/
+playwright/.cache/

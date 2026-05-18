@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
+import logoUrl from './assets/sfd-logo.png'
 import { routes } from './router'
 import { useUiStore } from './stores/ui'
 
@@ -24,8 +25,12 @@ const navItems = computed(() =>
       <header class="border-b border-default bg-elevated">
         <div class="mx-auto max-w-7xl flex items-center justify-between gap-6 px-4 py-3">
           <div class="flex items-center gap-6">
-            <RouterLink to="/" class="text-lg text-highlighted font-semibold">
-              SFD Config
+            <RouterLink to="/" class="flex items-center" aria-label="SmallFastDrone home">
+              <img
+                :src="logoUrl"
+                alt="SmallFastDrone"
+                class="h-8 w-auto dark:invert"
+              >
             </RouterLink>
             <UNavigationMenu :items="navItems" />
           </div>

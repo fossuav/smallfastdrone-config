@@ -22,6 +22,8 @@
   },
   "dependencies": {
     "@nuxt/ui": "^4.7.1",
+    "@tresjs/cientos": "^5.7.1",
+    "@tresjs/core": "^5.8.1",
     "@vueuse/core": "^14.3.0",
     "mavlink-mappings": "^1.0.22-20260311",
     "node-mavlink": "^2.3.0",

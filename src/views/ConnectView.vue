@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import logoUrl from '../assets/sfd-logo.png'
 import { useSessionStore } from '../stores/session'
+import Drone3D from '../ui/visuals/Drone3D.vue'
 
 const session = useSessionStore()
 
@@ -33,11 +33,12 @@ function toggle() {
   <div class="flex items-center justify-center py-12">
     <UCard class="w-full max-w-md">
       <template #header>
-        <img
-          :src="logoUrl"
-          alt="SmallFastDrone"
-          class="mx-auto h-20 w-auto dark:invert"
-        >
+        <!-- Hero visual: gentle X-quad rotation. The fixed-height wrapper
+             gives the WebGL canvas something to fill; if WebGL fails the
+             div is just empty space and the rest of the card still works. -->
+        <div class="mx-auto h-40 w-full max-w-xs">
+          <Drone3D />
+        </div>
       </template>
 
       <p class="text-center text-muted">
