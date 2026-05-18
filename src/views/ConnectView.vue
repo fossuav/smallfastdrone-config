@@ -35,16 +35,38 @@ function toggle() {
         Get your drone configured and flying well — fast, and safely.
       </p>
 
-      <div v-if="session.connected" class="mt-4 text-center text-sm">
-        <p class="text-highlighted font-medium">
-          Connected via {{ session.transport.description }}
+      <!-- Connected, with a heartbeat: we know what the drone is. -->
+      <div v-if="session.connected && session.hasHeartbeat" class="mt-4 text-center text-sm">
+        <p class="text-highlighted text-base font-medium">
+          Connected to your {{ session.vehicleLabel }}
+        </p>
+        <dl class="mt-2 inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-1 text-left text-xs text-muted">
+          <dt>Autopilot:</dt><dd class="text-default">
+            {{ session.autopilotLabelText }}
+          </dd>
+          <dt>System ID:</dt><dd class="text-default">
+            {{ session.sysid }}
+          </dd>
+          <dt>State:</dt><dd class="text-default">
+            {{ session.systemStatusText }}
+          </dd>
+          <dt>Link:</dt><dd class="text-default">
+            {{ session.bytesReceived.toLocaleString() }} bytes
+          </dd>
+        </dl>
+      </div>
+
+      <!-- Connected, no heartbeat yet: link is up but the drone hasn't said hi. -->
+      <div v-else-if="session.connected" class="mt-4 text-center text-sm">
+        <p class="text-default">
+          Connected. Waiting for your drone to say hello…
         </p>
         <p class="text-muted">
           {{ session.bytesReceived.toLocaleString() }} bytes received
         </p>
       </div>
 
-      <div v-if="session.lastError" class="mt-4 text-center text-sm text-error">
+      <div v-if="session.lastError" class="text-error mt-4 text-center text-sm">
         {{ session.lastError }}
       </div>
 
@@ -57,9 +79,9 @@ function toggle() {
         >
           {{ buttonLabel }}
         </UButton>
-        <p class="mt-2 text-center text-xs text-muted">
+        <p class="text-muted mt-2 text-center text-xs">
           Real-drone (USB) support arrives in a later slice. For now: start SITL and the bridge, then load this page with
-          <code class="rounded bg-muted px-1 py-0.5">?transport=websocket&amp;host=localhost:5761</code>.
+          <code class="bg-muted rounded px-1 py-0.5">?transport=websocket&amp;host=localhost:5761</code>.
         </p>
       </template>
     </UCard>

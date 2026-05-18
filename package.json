@@ -20,6 +20,7 @@
   "dependencies": {
     "@nuxt/ui": "^4.7.1",
     "@vueuse/core": "^14.3.0",
+    "mavlink-mappings": "^1.0.22-20260311",
     "pinia": "^3.0.4",
     "tailwindcss": "^4.3.0",
     "vue": "^3.5.13",
