@@ -10,6 +10,7 @@
     "sitl:stop": "./scripts/sitl-stop.sh",
     "bridge:start": "bun run test/sitl/bridge.ts",
     "dev": "vite",
+    "dev:sitl": "./scripts/dev-with-sitl.sh",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc -b --noEmit",

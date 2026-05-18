@@ -41,20 +41,21 @@ bun run sitl:stop    # stop it
 
 ### Browser → SITL via the bridge
 
-The browser can't speak TCP directly. A small Bun WebSocket bridge translates ws://localhost:5761 ↔ tcp://localhost:5760. Three terminals:
+The browser can't speak TCP directly. A small Bun WebSocket bridge translates ws://localhost:5761 ↔ tcp://localhost:5760. One command starts SITL + bridge + dev server with interleaved output; Ctrl-C stops everything:
 
 ```bash
-# terminal 1
-bun run sitl:start
-
-# terminal 2
-bun run bridge:start
-
-# terminal 3
-bun dev
+bun run dev:sitl
 ```
 
-Then open <http://localhost:5173/?transport=websocket&host=localhost:5761> and click **Connect drone**. The page shows live bytes received from SITL (MAVLink parsing arrives in the next slice).
+Open the URL it prints (<http://localhost:5173/?transport=websocket&host=localhost:5761>) and click **Connect drone**. The page shows live bytes received from SITL (MAVLink parsing arrives in the next slice).
+
+For finer control during debugging — three terminals, individual logs:
+
+```bash
+bun run sitl:start    # terminal 1
+bun run bridge:start  # terminal 2
+bun dev               # terminal 3
+```
 
 ## Test
 
