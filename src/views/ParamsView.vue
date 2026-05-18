@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { formatParamValue, paramTypeLabel } from '../protocol/params'
+import { formatParamValue, getParamMeta } from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
 
@@ -22,9 +22,28 @@ const progressPct = computed(() => {
   return Math.min(100, Math.round((store.progress.received / store.progress.total) * 100))
 })
 
+// Compose a one-line description for the table: displayName, then a fallback
+// to the first sentence of the long description. Full description lands in
+// a title attribute so hover shows it.
+interface RowMeta {
+  short: string
+  full: string
+  units: string
+}
+function meta(name: string): RowMeta {
+  const m = getParamMeta(name)
+  if (!m)
+    return { short: '', full: '', units: '' }
+  const short = m.displayName ?? (m.description ? firstSentence(m.description) : '')
+  const full = m.description ?? m.displayName ?? ''
+  return { short, full, units: m.units ?? '' }
+}
+function firstSentence(s: string): string {
+  const i = s.search(/[.!?](\s|$)/)
+  return i === -1 ? s : s.slice(0, i + 1)
+}
+
 onMounted(() => {
-  // Auto-load if we have an active session. The store handles the
-  // not-connected case with a friendly error.
   if (session.connected && session.hasHeartbeat && store.count === 0 && !store.loading) {
     store.load()
   }
@@ -32,7 +51,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <UCard class="mx-auto w-full max-w-5xl">
+  <UCard class="mx-auto w-full max-w-6xl">
     <template #header>
       <div class="flex items-center gap-3">
         <UIcon name="i-lucide-sliders-horizontal" class="size-6 text-primary" />
@@ -94,18 +113,18 @@ onMounted(() => {
         {{ filtered.length.toLocaleString() }} of {{ store.count.toLocaleString() }} parameters
       </p>
 
-      <div class="border-default max-h-[60vh] overflow-y-auto rounded-md border">
+      <div class="border-default max-h-[70vh] overflow-y-auto rounded-md border">
         <table class="w-full text-left text-sm">
           <thead class="bg-elevated text-muted sticky top-0 text-xs uppercase">
             <tr>
-              <th class="px-3 py-2 font-medium">
+              <th class="w-[22%] px-3 py-2 font-medium">
                 Name
               </th>
-              <th class="px-3 py-2 text-right font-medium">
+              <th class="w-[12%] px-3 py-2 text-right font-medium">
                 Value
               </th>
               <th class="px-3 py-2 font-medium">
-                Type
+                Description
               </th>
             </tr>
           </thead>
@@ -114,23 +133,21 @@ onMounted(() => {
               v-for="p in filtered"
               :key="p.name"
               class="border-default border-t"
+              :title="meta(p.name).full || undefined"
             >
-              <td class="text-highlighted px-3 py-1.5 font-mono text-xs">
+              <td class="text-highlighted px-3 py-1.5 font-mono text-xs whitespace-nowrap">
                 {{ p.name }}
               </td>
-              <td class="text-default px-3 py-1.5 text-right font-mono text-xs">
-                {{ formatParamValue(p.value, p.type) }}
+              <td class="text-default px-3 py-1.5 text-right font-mono text-xs whitespace-nowrap">
+                {{ formatParamValue(p.value, p.type) }}<span v-if="meta(p.name).units" class="text-muted ml-1">{{ meta(p.name).units }}</span>
               </td>
-              <td class="text-muted px-3 py-1.5 font-mono text-xs">
-                {{ paramTypeLabel(p.type) }}
+              <td class="text-muted px-3 py-1.5 text-xs">
+                {{ meta(p.name).short || '—' }}
               </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
-
-    <!-- Connected but no params yet, not loading: nothing to render here;
-         the auto-load on mount will kick in. -->
   </UCard>
 </template>

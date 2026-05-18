@@ -1,5 +1,6 @@
 import type { MavParamType } from 'mavlink-mappings/dist/lib/common'
 import { ParamRequestList } from 'mavlink-mappings/dist/lib/common'
+import metadataRaw from './param-metadata.json'
 
 // PARAM_REQUEST_LIST / PARAM_VALUE flow.
 //
@@ -57,4 +58,26 @@ export function paramTypeLabel(type: MavParamType): string {
     case 10: return 'double'
     default: return `type ${type}`
   }
+}
+
+// Per-parameter metadata extracted from the SFD source by
+// scripts/build-param-metadata.py and committed at
+// src/protocol/param-metadata.json. ~5700 entries.
+// Regenerate after `git submodule update --remote vendor/smallfastdrone`
+// via `bun run params:rebuild`.
+export interface ParamMeta {
+  displayName?: string
+  description?: string
+  units?: string
+  range?: { low?: string, high?: string }
+  bitmask?: Record<string, string>
+  values?: Record<string, string>
+  user?: string
+  rebootRequired?: string
+}
+
+const metadata = metadataRaw as Record<string, ParamMeta>
+
+export function getParamMeta(name: string): ParamMeta | undefined {
+  return metadata[name]
 }

@@ -9,6 +9,7 @@
     "sitl:start": "./scripts/sitl-start.sh",
     "sitl:stop": "./scripts/sitl-stop.sh",
     "bridge:start": "bun run test/sitl/bridge.ts",
+    "params:rebuild": "python3 ./scripts/build-param-metadata.py",
     "dev": "vite",
     "dev:sitl": "./scripts/dev-with-sitl.sh",
     "build": "vue-tsc -b && vite build",
