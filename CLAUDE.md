@@ -105,6 +105,7 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 - **No mocked MAVLink in production code.** Use SITL when testing against an actual link. Param fixtures are fine in unit tests.
 - **Every protocol-layer change needs an integration test against SITL.** Every new wizard phase needs an E2E test that drives it end-to-end against SITL. Pick the lowest test layer that genuinely validates the thing (see [docs/TESTING.md](docs/TESTING.md)).
 - **Production code never imports test transports.** `WebSocketTransport` and `TcpTransport` live in test paths; production imports `WebSerialTransport` / `WebUSBTransport` only.
+- **`scripts/dev-setup.sh` is the source of truth for dev prerequisites.** When a slice introduces a new prerequisite (a CLI tool, a system package, a global install, Playwright browsers, SITL build deps), extend the script in the same commit. The script must remain idempotent. A contributor running `bun run setup` on a fresh machine should end up with a working environment for whatever slices have landed.
 
 ## File / commit conventions
 
@@ -125,7 +126,8 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 
 To be filled in as Phase 0 lands. Anticipated:
 
-- `bun install` — install deps
+- `bun run setup` — runs `scripts/dev-setup.sh` — idempotent install of all dev prerequisites (bun, project deps, and — as slices land — node, mkcert, Playwright browsers, SITL build deps)
+- `bun install` — install project deps only
 - `git submodule update --init --recursive` — pull SFD submodule (first checkout)
 - `bun dev` — Vite dev server (HTTPS via mkcert)
 - `bun run build` — production build
