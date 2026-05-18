@@ -79,9 +79,9 @@ A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV br
 
 Each route lazy-loads as its own chunk. State lives in Pinia setup stores (UI/expert-mode + drone session). SmallFastDrone is vendored as a git submodule with `sitl:build/start/stop` scripts. The Connect screen talks to either a real USB-attached drone (Web Serial) or SITL via a WebSocket bridge, parses MAVLink heartbeats, requests AUTOPILOT_VERSION on first heartbeat, and reports the vehicle type, autopilot, firmware version + git hash, system ID, and state (see [SITL](#sitl) below).
 
-Subsequent Phase 0 slices add:
+The app is an installable PWA — `vite-plugin-pwa` generates a service worker, web manifest, and icons. Drop into Chrome's "Install" menu to get a standalone window.
 
-- HTTPS dev (mkcert) + installable PWA shell (vite-plugin-pwa)
+Phase 0 is now substantively complete. Next up: the actual feature work (param browser, recipe runner, tuning workflows). See [PROGRESS.md](PROGRESS.md).
 - First Playwright E2E test (drives SITL through a heartbeat connect)
 - HTTPS dev via mkcert + PWA shell via vite-plugin-pwa
 
