@@ -1,5 +1,7 @@
+import type { MavLinkData } from 'mavlink-mappings'
 import type { Heartbeat, MavAutopilot, MavState, MavType } from 'mavlink-mappings/dist/lib/minimal'
 import type { AutopilotVersion } from 'mavlink-mappings/dist/lib/standard'
+import type { MessageHandler } from '../protocol/mavlink'
 import type { Transport } from '../transport/types'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -121,6 +123,15 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  // Helpers for downstream stores (params, etc.) that need to send + receive
+  // MAVLink. Encapsulated here so the MavLinkSession instance stays private.
+  async function sendMessage(msg: MavLinkData): Promise<void> {
+    await transport.value.send(session.serialize(msg))
+  }
+  function subscribeMessages(cb: MessageHandler): () => void {
+    return session.on(cb)
+  }
+
   async function disconnect() {
     unsubscribeData?.()
     unsubscribeClose?.()
@@ -148,5 +159,7 @@ export const useSessionStore = defineStore('session', () => {
     hasHeartbeat,
     connect,
     disconnect,
+    sendMessage,
+    subscribeMessages,
   }
 })
