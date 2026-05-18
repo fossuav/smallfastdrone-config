@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+.vscode/
+.idea/
+
+# TS build info
+node_modules/.tmp/
