@@ -46,10 +46,10 @@ A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV br
 
 - **Connect** (`/`) — splash with SFD logo and a disabled "Connect drone" button
 - **Bringup** (`/wizard`), **Recipes** (`/recipes`), **Logs** (`/logs`), **Firmware** (`/firmware`), **ESC tools** (`/esc`) — operator-friendly "Coming soon" placeholders
+- **Expert mode** toggle (top-right of nav, off by default, per-session) reveals a **Parameters** (`/params`) route
 
-Each route lazy-loads as its own chunk. Subsequent Phase 0 slices add:
+Each route lazy-loads as its own chunk. State lives in Pinia setup stores (currently just the UI/expert-mode store, persisted via `@vueuse/core`'s `useSessionStorage`). Subsequent Phase 0 slices add:
 
-- Pinia + `@vueuse/core` + expert-mode toggle (off by default)
 - Tres.js 3D drone visualization on the Connect screen
 - SFD as a git submodule; SITL build + bridge for tests
 - MAVLink session via node-mavlink (WebSerial)

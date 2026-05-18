@@ -38,6 +38,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('./views/EscToolsView.vue'),
     meta: { label: 'ESC tools', icon: 'i-lucide-zap' },
   },
+  {
+    path: '/params',
+    name: 'params',
+    component: () => import('./views/ParamsView.vue'),
+    meta: { label: 'Parameters', icon: 'i-lucide-sliders-horizontal', expert: true },
+  },
 ]
 
 export const router = createRouter({

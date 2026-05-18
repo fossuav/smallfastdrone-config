@@ -2,10 +2,14 @@
 import { computed } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import { routes } from './router'
+import { useUiStore } from './stores/ui'
+
+const ui = useUiStore()
 
 const navItems = computed(() =>
   routes
     .filter(r => r.meta?.label)
+    .filter(r => !r.meta?.expert || ui.expert)
     .map(r => ({
       label: r.meta!.label as string,
       icon: r.meta!.icon as string,
@@ -19,10 +23,17 @@ const navItems = computed(() =>
     <div class="min-h-dvh flex flex-col bg-default">
       <header class="border-b border-default bg-elevated">
         <div class="mx-auto max-w-7xl flex items-center justify-between gap-6 px-4 py-3">
-          <RouterLink to="/" class="text-lg text-highlighted font-semibold">
-            SFD Config
-          </RouterLink>
-          <UNavigationMenu :items="navItems" />
+          <div class="flex items-center gap-6">
+            <RouterLink to="/" class="text-lg text-highlighted font-semibold">
+              SFD Config
+            </RouterLink>
+            <UNavigationMenu :items="navItems" />
+          </div>
+
+          <label class="flex cursor-pointer items-center gap-2 text-sm">
+            <span class="text-muted select-none">Expert</span>
+            <USwitch v-model="ui.expert" color="secondary" />
+          </label>
         </div>
       </header>
 
