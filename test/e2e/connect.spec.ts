@@ -34,12 +34,20 @@ test('Connect view talks to SITL, decodes heartbeat + AUTOPILOT_VERSION', async 
   // Sysid 1 is the SITL default
   await expect(page.getByText('System ID:')).toBeVisible()
 
+  // System status panel: SYS_STATUS arrives within a heartbeat or two.
+  // SITL on a fresh boot reports the IMU bits healthy; we just check
+  // that *some* subsystem reads OK to confirm the panel is wired.
+  await expect(page.getByRole('status', { name: /Gyro:/ })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('status', { name: /Gyro: OK/ })).toBeVisible({ timeout: 5_000 })
+
   // The message bell in the nav has accrued the boot STATUSTEXTs.
   await page.getByRole('button', { name: 'Recent messages from your drone' }).click()
   // Boot banner — sent by ArduPilot in response to our DO_SEND_BANNER.
   await expect(page.getByText(/ArduCopter V.*SFD/)).toBeVisible({ timeout: 5_000 })
-  // One of the routine boot lines we always see from SITL.
-  await expect(page.getByText(/ArduPilot Ready|Barometer 1 calibration/)).toBeVisible()
+  // One of the routine boot lines we always see from SITL. `.first()`
+  // because either side of the regex may match — they both show up in
+  // the bell on a normal SITL boot, and toBeVisible() forbids multi-match.
+  await expect(page.getByText(/ArduPilot Ready|Barometer 1 calibration/).first()).toBeVisible()
   // Close the popover by clicking the bell again (or pressing Escape).
   await page.keyboard.press('Escape')
 

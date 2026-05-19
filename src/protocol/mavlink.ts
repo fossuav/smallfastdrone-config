@@ -108,6 +108,77 @@ export const MSGID_HEARTBEAT = minimal.Heartbeat.MSG_ID
 export const MSGID_AUTOPILOT_VERSION = standard.AutopilotVersion.MSG_ID
 // STATUSTEXT — operator-readable banner / prearm / runtime messages.
 export const MSGID_STATUSTEXT = common.StatusText.MSG_ID
+// SYS_STATUS — per-subsystem present/enabled/healthy bitmasks. Drives
+// the operator-facing status panel on the Connect view.
+export const MSGID_SYS_STATUS = common.SysStatus.MSG_ID
+
+// Subset of MAV_SYS_STATUS_SENSOR bit values we surface to the operator.
+// Full enum has 30+ bits; the ones below are the "is the drone ready"
+// indicators that matter for a multicopter bringup.
+export const SYS_STATUS_BITS = {
+  gyro: 1 << 0,
+  accel: 1 << 1,
+  mag: 1 << 2,
+  baro: 1 << 3,
+  gps: 1 << 5,
+  rc: 1 << 16,
+  ahrs: 1 << 21,
+  battery: 1 << 25,
+  prearm: 1 << 28,
+} as const
+
+export type SubsystemKey = keyof typeof SYS_STATUS_BITS
+export type SubsystemState = 'ok' | 'unhealthy' | 'off'
+
+export interface SubsystemStatus {
+  key: SubsystemKey
+  state: SubsystemState
+}
+
+// Given a SYS_STATUS message's three bitmasks, classify each surfaced
+// subsystem as ok / unhealthy / off. 'ok' means enabled AND healthy;
+// 'unhealthy' means enabled but the FC says it's failing; 'off' means
+// not enabled (so not contributing to the ready-to-arm verdict).
+export function deriveSubsystemStatus(
+  present: number,
+  enabled: number,
+  health: number,
+): SubsystemStatus[] {
+  const out: SubsystemStatus[] = []
+  for (const key of Object.keys(SYS_STATUS_BITS) as SubsystemKey[]) {
+    const mask = SYS_STATUS_BITS[key]
+    const isPresent = (present & mask) !== 0
+    const isEnabled = (enabled & mask) !== 0
+    const isHealthy = (health & mask) !== 0
+    let state: SubsystemState
+    if (!isPresent || !isEnabled)
+      state = 'off'
+    else if (!isHealthy)
+      state = 'unhealthy'
+    else state = 'ok'
+    out.push({ key, state })
+  }
+  return out
+}
+
+// Build a REQUEST_DATA_STREAM to ask the FC to start streaming all of
+// its standard telemetry (SYS_STATUS, ATTITUDE, VFR_HUD, …) at the
+// given rate. ArduPilot honours the legacy stream request and is what
+// MAVProxy uses by default. Without this, SITL only emits heartbeat
+// until something asks for more.
+export function buildRequestDataStream(
+  targetSystem: number,
+  targetComponent: number,
+  rateHz: number,
+): common.RequestDataStream {
+  const r = new common.RequestDataStream()
+  r.targetSystem = targetSystem
+  r.targetComponent = targetComponent
+  r.reqStreamId = 0 // MAV_DATA_STREAM_ALL
+  r.reqMessageRate = rateHz
+  r.startStop = 1
+  return r
+}
 
 // Build an ardupilotmega DO_SEND_BANNER command. ArduPilot replies with
 // several STATUSTEXTs including the vehicle + version string (which is

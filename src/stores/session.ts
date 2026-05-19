@@ -1,8 +1,8 @@
 import type { MavLinkData } from 'mavlink-mappings'
-import type { StatusText } from 'mavlink-mappings/dist/lib/common'
+import type { StatusText, SysStatus } from 'mavlink-mappings/dist/lib/common'
 import type { Heartbeat, MavAutopilot, MavState, MavType } from 'mavlink-mappings/dist/lib/minimal'
 import type { AutopilotVersion } from 'mavlink-mappings/dist/lib/standard'
-import type { MessageHandler } from '../protocol/mavlink'
+import type { MessageHandler, SubsystemStatus } from '../protocol/mavlink'
 import type { Transport } from '../transport/types'
 import { useToast } from '@nuxt/ui/composables/useToast'
 import { defineStore } from 'pinia'
@@ -10,14 +10,17 @@ import { computed, ref } from 'vue'
 import {
   autopilotLabel,
   buildDoSendBanner,
+  buildRequestDataStream,
   buildRequestMessage,
   decodeFirmwareVersion,
+  deriveSubsystemStatus,
   MAV_SEVERITY_ERROR_MAX,
   MAV_SEVERITY_WARNING,
   MavLinkSession,
   MSGID_AUTOPILOT_VERSION,
   MSGID_HEARTBEAT,
   MSGID_STATUSTEXT,
+  MSGID_SYS_STATUS,
   systemStatusLabel,
   vehicleTypeLabel,
 } from '../protocol/mavlink'
@@ -60,6 +63,16 @@ export const useSessionStore = defineStore('session', () => {
   // pane; toasts for the WARNING-or-worse subset happen as they arrive.
   const recentStatusTexts = ref<StatusTextEntry[]>([])
   const STATUSTEXT_HISTORY = 50
+
+  // Per-subsystem present/enabled/healthy status from SYS_STATUS. Drives
+  // the operator-facing status panel on the Connect view.
+  const subsystems = ref<SubsystemStatus[]>([])
+  // True when the FC's PREARM_CHECK bit is enabled and healthy — i.e. it
+  // has run all its prearm checks and is willing to arm.
+  const readyToArm = computed(() => {
+    const prearm = subsystems.value.find(s => s.key === 'prearm')
+    return prearm?.state === 'ok'
+  })
 
   const vehicleLabel = computed(() =>
     vehicleType.value === null ? null : vehicleTypeLabel(vehicleType.value),
@@ -115,8 +128,10 @@ export const useSessionStore = defineStore('session', () => {
       lastHeartbeatAt.value = Date.now()
 
       // First heartbeat after connect: ask for AUTOPILOT_VERSION (for the
-      // structured firmware fields) and DO_SEND_BANNER (for the
-      // human-readable string that carries the SFD suffix).
+      // structured firmware fields), DO_SEND_BANNER (for the human-readable
+      // string that carries the SFD suffix), and REQUEST_DATA_STREAM (to
+      // kick the FC into streaming SYS_STATUS / ATTITUDE / VFR_HUD etc.,
+      // which it doesn't do by default until asked).
       if (!versionRequested && connected.value) {
         versionRequested = true
         try {
@@ -124,11 +139,13 @@ export const useSessionStore = defineStore('session', () => {
           await transport.value.send(session.serialize(ver))
           const banner = buildDoSendBanner(msg.sysid, COMP_ID_AUTOPILOT)
           await transport.value.send(session.serialize(banner))
+          const stream = buildRequestDataStream(msg.sysid, COMP_ID_AUTOPILOT, 2)
+          await transport.value.send(session.serialize(stream))
         }
         catch (e) {
-          // Non-fatal — heartbeat info still displayed; firmware/banner
-          // just stays blank.
-          lastError.value = `couldn't request firmware info: ${e instanceof Error ? e.message : String(e)}`
+          // Non-fatal — heartbeat info still displayed; firmware/banner/status
+          // streams just stay blank.
+          lastError.value = `couldn't request telemetry: ${e instanceof Error ? e.message : String(e)}`
         }
       }
     }
@@ -142,6 +159,14 @@ export const useSessionStore = defineStore('session', () => {
       const text = st.text.replace(/\0.*$/, '').trim()
       if (text)
         recordStatusText(text, st.severity)
+    }
+    else if (msg.msgid === MSGID_SYS_STATUS) {
+      const ss = msg.data as SysStatus
+      subsystems.value = deriveSubsystemStatus(
+        ss.onboardControlSensorsPresent,
+        ss.onboardControlSensorsEnabled,
+        ss.onboardControlSensorsHealth,
+      )
     }
   })
 
@@ -157,6 +182,7 @@ export const useSessionStore = defineStore('session', () => {
     firmwareVersion.value = null
     isSfd.value = false
     recentStatusTexts.value = []
+    subsystems.value = []
     bytesReceived.value = 0
     versionRequested = false
     session.reset()
@@ -220,6 +246,8 @@ export const useSessionStore = defineStore('session', () => {
     firmwareVersion,
     isSfd,
     recentStatusTexts,
+    subsystems,
+    readyToArm,
     vehicleLabel,
     autopilotLabelText,
     systemStatusText,

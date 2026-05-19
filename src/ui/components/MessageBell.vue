@@ -8,19 +8,19 @@ const session = useSessionStore()
 const messages = computed(() => [...session.recentStatusTexts].reverse())
 const count = computed(() => session.recentStatusTexts.length)
 
-// Severity → (icon, color-token class). Mirrors the thresholds in
-// recordStatusText (session store) so toasts and the bell agree on
-// what "important" looks like.
-function severityStyle(sev: number): { icon: string, klass: string } {
+// Severity → (icon, icon color, row left-border color). Mirrors the
+// thresholds in recordStatusText (session store) so toasts, bell icons,
+// and row tints agree on what "important" looks like.
+function severityStyle(sev: number): { icon: string, klass: string, border: string } {
   if (sev <= 2)
-    return { icon: 'i-lucide-octagon-alert', klass: 'text-error' }
+    return { icon: 'i-lucide-octagon-alert', klass: 'text-error', border: 'border-l-error' }
   if (sev === 3)
-    return { icon: 'i-lucide-circle-x', klass: 'text-error' }
+    return { icon: 'i-lucide-circle-x', klass: 'text-error', border: 'border-l-error' }
   if (sev === 4)
-    return { icon: 'i-lucide-triangle-alert', klass: 'text-warning' }
+    return { icon: 'i-lucide-triangle-alert', klass: 'text-warning', border: 'border-l-warning' }
   if (sev === 5)
-    return { icon: 'i-lucide-info', klass: 'text-primary' }
-  return { icon: 'i-lucide-message-square', klass: 'text-muted' }
+    return { icon: 'i-lucide-info', klass: 'text-primary', border: 'border-l-primary' }
+  return { icon: 'i-lucide-message-square', klass: 'text-muted', border: 'border-l-transparent' }
 }
 
 function timeAgo(ms: number): string {
@@ -69,7 +69,8 @@ function timeAgo(ms: number): string {
         <li
           v-for="(m, i) in messages"
           :key="`${m.receivedAt}-${i}`"
-          class="flex items-start gap-2 px-3 py-2 text-sm"
+          class="flex items-start gap-2 border-l-4 px-3 py-2 text-sm"
+          :class="severityStyle(m.severity).border"
         >
           <UIcon
             :name="severityStyle(m.severity).icon"

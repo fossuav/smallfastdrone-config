@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSessionStore } from '../stores/session'
+import SystemStatus from '../ui/components/SystemStatus.vue'
 import Drone3D from '../ui/visuals/Drone3D.vue'
 
 const session = useSessionStore()
@@ -46,24 +47,29 @@ function toggle() {
       </p>
 
       <!-- Connected, with a heartbeat: we know what the drone is. -->
-      <div v-if="session.connected && session.hasHeartbeat" class="mt-4 text-center text-sm">
-        <p class="text-highlighted text-base font-medium">
-          Connected to your {{ session.vehicleLabel }}
-        </p>
-        <dl class="mt-2 inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-1 text-left text-xs text-muted">
-          <dt>Autopilot:</dt><dd class="text-default">
-            {{ autopilotLine }}
-          </dd>
-          <dt>System ID:</dt><dd class="text-default">
-            {{ session.sysid }}
-          </dd>
-          <dt>State:</dt><dd class="text-default">
-            {{ session.systemStatusText }}
-          </dd>
-          <dt>Link:</dt><dd class="text-default">
-            {{ session.bytesReceived.toLocaleString() }} bytes
-          </dd>
-        </dl>
+      <div v-if="session.connected && session.hasHeartbeat" class="mt-4 space-y-4 text-center text-sm">
+        <div>
+          <p class="text-highlighted text-base font-medium">
+            Connected to your {{ session.vehicleLabel }}
+          </p>
+          <dl class="mt-2 inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-1 text-left text-xs text-muted">
+            <dt>Autopilot:</dt><dd class="text-default">
+              {{ autopilotLine }}
+            </dd>
+            <dt>System ID:</dt><dd class="text-default">
+              {{ session.sysid }}
+            </dd>
+            <dt>State:</dt><dd class="text-default">
+              {{ session.systemStatusText }}
+            </dd>
+            <dt>Link:</dt><dd class="text-default">
+              {{ session.bytesReceived.toLocaleString() }} bytes
+            </dd>
+          </dl>
+        </div>
+        <div class="border-default border-t pt-3">
+          <SystemStatus />
+        </div>
       </div>
 
       <!-- Connected, no heartbeat yet: link is up but the drone hasn't said hi. -->
