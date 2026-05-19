@@ -22,12 +22,13 @@ test('Connect view talks to SITL, decodes heartbeat + AUTOPILOT_VERSION', async 
   // Heartbeat-driven vehicle line appears within a few seconds
   await expect(page.getByText('Connected to your Quadcopter')).toBeVisible({ timeout: 15_000 })
 
-  // AUTOPILOT_VERSION arrives and the firmware string is rendered.
-  // Loose-match on the version number + git hash so submodule bumps
-  // don't break the test — what matters is the shape, not the exact
-  // bytes pinned this week.
+  // AUTOPILOT_VERSION arrives and the firmware string is rendered, plus
+  // the boot banner (requested via DO_SEND_BANNER) flips the autopilot
+  // label from "ArduPilot" to "SmallFastDrone" via the SFD detector.
+  // Loose-match the version number + git hash so submodule bumps don't
+  // break the test.
   await expect(
-    page.getByText(/ArduPilot 4\.\d+\.\d+(?:-alpha|-beta|-rc|-dev)? \([0-9a-f]{6,}\)/),
+    page.getByText(/SmallFastDrone 4\.\d+\.\d+(?:-alpha|-beta|-rc|-dev)? \([0-9a-f]{6,}\)/),
   ).toBeVisible({ timeout: 10_000 })
 
   // Sysid 1 is the SITL default

@@ -106,6 +106,38 @@ export class MavLinkSession {
 // into the mappings tree.
 export const MSGID_HEARTBEAT = minimal.Heartbeat.MSG_ID
 export const MSGID_AUTOPILOT_VERSION = standard.AutopilotVersion.MSG_ID
+// STATUSTEXT — operator-readable banner / prearm / runtime messages.
+export const MSGID_STATUSTEXT = common.StatusText.MSG_ID
+
+// Build an ardupilotmega DO_SEND_BANNER command. ArduPilot replies with
+// several STATUSTEXTs including the vehicle + version string (which is
+// the only place the SFD suffix shows up — AUTOPILOT_VERSION doesn't
+// carry it).
+export function buildDoSendBanner(targetSystem: number, targetComponent: number): common.CommandLong {
+  const cmd = new common.CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  // DO_SEND_BANNER lives in the ardupilotmega dialect; common.MavCmd
+  // doesn't declare it. Cast through unknown to keep TS happy without
+  // weakening the common.CommandLong type elsewhere.
+  cmd.command = ardupilotmega.MavCmd.DO_SEND_BANNER as unknown as common.MavCmd
+  cmd._param1 = 0
+  cmd._param2 = 0
+  cmd._param3 = 0
+  cmd._param4 = 0
+  cmd._param5 = 0
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
+}
+
+// MAV_SEVERITY thresholds we care about for operator-facing toasting.
+//   0..3  EMERGENCY / ALERT / CRITICAL / ERROR — surface as error toast
+//   4     WARNING — surface as warning toast
+//   5..7  NOTICE / INFO / DEBUG — log only, don't interrupt
+export const MAV_SEVERITY_ERROR_MAX = 3
+export const MAV_SEVERITY_WARNING = 4
 
 // Decode AUTOPILOT_VERSION's flight_sw_version (uint32) + flight_custom_version
 // (uint8[8] containing the build's git short hash as ASCII) into an
