@@ -229,7 +229,7 @@ onMounted(() => {
         <span v-if="store.dirtyCount > 0"> · {{ store.dirtyCount }} changed</span>
       </p>
 
-      <div class="border-default max-h-[70vh] overflow-y-auto rounded-md border">
+      <div class="border-default max-h-[70vh] overflow-x-auto overflow-y-auto rounded-md border">
         <table class="w-full text-left text-sm">
           <thead class="bg-elevated text-muted sticky top-0 text-xs uppercase">
             <tr>
@@ -258,13 +258,13 @@ onMounted(() => {
               <td class="text-highlighted px-3 py-1.5 font-mono text-xs whitespace-nowrap">
                 {{ p.name }}
               </td>
-              <td class="px-3 py-1.5 text-right font-mono text-xs whitespace-nowrap">
+              <td class="px-3 py-1.5 text-right text-xs align-top">
                 <!-- Edit mode: dropdown if enum-style (Values meta), else text input. -->
                 <select
                   v-if="editingName === p.name && getParamMeta(p.name)?.values"
                   ref="editInput"
                   v-model="editText"
-                  class="border-secondary-500 bg-default text-highlighted max-w-[18rem] rounded border px-1 py-0.5 text-left font-mono text-xs outline-none"
+                  class="border-secondary-500 bg-default text-highlighted w-full rounded border px-1 py-0.5 text-left font-mono text-xs outline-none"
                   @change="commitEdit"
                   @keydown.escape.prevent="cancelEdit"
                   @blur="commitEdit"
@@ -293,28 +293,29 @@ onMounted(() => {
                 <button
                   v-else
                   type="button"
-                  class="hover:bg-elevated -mx-1 cursor-text rounded px-1 py-0.5 text-right font-mono"
+                  class="hover:bg-elevated -mx-1 cursor-text rounded px-1 py-0.5 text-right font-mono whitespace-nowrap"
                   :class="store.isDirty(p.name) ? 'text-secondary font-semibold' : 'text-default'"
                   :title="getRangeHint(p.name) || undefined"
                   @click="startEdit(p.name, formatParamValue(store.effectiveValue(p.name) ?? p.value, p.type))"
                 >
                   {{ formatParamValue(store.effectiveValue(p.name) ?? p.value, p.type) }}<span v-if="meta(p.name).units" class="text-muted ml-1 font-normal">{{ meta(p.name).units }}</span>
                 </button>
-                <!-- Decoded label for enums/bitmasks. -->
+                <!-- Decoded label for enums/bitmasks. Allowed to wrap so long
+                     bitmask decodes don't force the column wider. -->
                 <div
                   v-if="describeParamValue(p.name, store.effectiveValue(p.name) ?? p.value)"
-                  class="text-muted mt-0.5 text-[10px] font-normal italic"
+                  class="text-muted mt-0.5 text-[10px] font-normal italic break-words whitespace-normal"
                 >
                   {{ describeParamValue(p.name, store.effectiveValue(p.name) ?? p.value) }}
                 </div>
                 <div
                   v-if="store.isDirty(p.name)"
-                  class="text-muted mt-0.5 text-[10px] font-normal"
+                  class="text-muted mt-0.5 text-[10px] font-normal whitespace-nowrap"
                 >
                   was {{ formatParamValue(p.value, p.type) }}
                 </div>
               </td>
-              <td class="text-muted px-3 py-1.5 text-xs">
+              <td class="text-muted px-3 py-1.5 text-xs break-words align-top">
                 {{ meta(p.name).short || '—' }}
               </td>
               <td class="px-1 py-1.5">
