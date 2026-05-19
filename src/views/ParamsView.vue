@@ -61,6 +61,13 @@ function cancelEdit() {
   editText.value = ''
 }
 
+// Fill the editor with a suggested value and commit. Used by the inline
+// suggestion chips for params with Values metadata.
+function pickSuggestion(value: string) {
+  editText.value = value
+  commitEdit()
+}
+
 // Per-row helpers.
 interface RowMeta {
   short: string
@@ -259,38 +266,41 @@ onMounted(() => {
                 {{ p.name }}
               </td>
               <td class="px-3 py-1.5 text-right text-xs align-top">
-                <!-- Edit mode: a free-text input with a datalist of documented
-                     Values as suggestions when metadata has them. The Values
-                     are hints, not constraints — many float params (filter
-                     frequencies, PID gains) have documented examples even
-                     though any value is valid. The FC will clamp / reject
-                     if it doesn't like the operator's value, and we surface
-                     that via the mismatched / failed states. -->
+                <!-- Edit mode: free-text input. For params with Values
+                     metadata we render every documented value as a clickable
+                     chip below — the values are hints, not constraints, so
+                     the operator can pick a documented one *or* type any
+                     value. The FC clamps/rejects if it doesn't like what
+                     arrived (surfaced via mismatched / failed states).
+                     @mousedown.prevent on each chip stops the input from
+                     blurring before our click handler runs. -->
                 <template v-if="editingName === p.name">
                   <input
                     ref="editInput"
                     v-model="editText"
                     type="text"
                     inputmode="decimal"
-                    :list="getParamMeta(p.name)?.values ? `dl-${p.name}` : undefined"
                     :title="getRangeHint(p.name) || undefined"
                     class="border-secondary-500 bg-default text-highlighted w-full rounded border px-1 py-0.5 text-right font-mono text-xs outline-none"
                     @keydown.enter.prevent="commitEdit"
                     @keydown.escape.prevent="cancelEdit"
                     @blur="commitEdit"
                   >
-                  <datalist
+                  <div
                     v-if="getParamMeta(p.name)?.values"
-                    :id="`dl-${p.name}`"
+                    class="mt-1 flex flex-col items-end gap-0.5"
                   >
-                    <option
+                    <button
                       v-for="(label, key) in getParamMeta(p.name)?.values"
                       :key="key"
-                      :value="key"
+                      type="button"
+                      class="bg-elevated hover:bg-secondary-100 dark:hover:bg-secondary-900/50 text-default w-full max-w-full rounded px-1.5 py-0.5 text-right text-[10px] whitespace-normal break-words"
+                      @mousedown.prevent
+                      @click="pickSuggestion(String(key))"
                     >
-                      {{ label }}
-                    </option>
-                  </datalist>
+                      <span class="text-muted font-mono">{{ key }}</span> · {{ label }}
+                    </button>
+                  </div>
                 </template>
                 <!-- Display mode: click to edit -->
                 <button

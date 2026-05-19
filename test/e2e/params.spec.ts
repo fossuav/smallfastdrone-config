@@ -66,7 +66,7 @@ test('Param editor: edit a value, see it pending, discard', async ({ page }) => 
   await expect(row.getByText(/was [-\d]/)).not.toBeVisible()
 })
 
-test('Param editor: enum-style params offer suggestions + accept any value', async ({ page }) => {
+test('Param editor: enum-style params show all suggestions as chips', async ({ page }) => {
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText('Connected to your Quadcopter')).toBeVisible({ timeout: 15_000 })
@@ -79,26 +79,21 @@ test('Param editor: enum-style params offer suggestions + accept any value', asy
   const row = page.locator('tbody tr').first()
   await expect(row.locator('td').first()).toHaveText('RTL_ALT_TYPE')
 
-  // Click to edit → text input + datalist of suggested values appears.
+  // Click to edit → input + all suggestion chips appear (visible, not
+  // filtered by input contents).
   await row.locator('button[type="button"]').first().click()
   const input = row.locator('input[type="text"]')
   await expect(input).toBeVisible()
+  await expect(row.getByRole('button', { name: /Relative to Home/ })).toBeVisible()
+  await expect(row.getByRole('button', { name: /Terrain/ })).toBeVisible()
 
-  // The datalist is in the DOM, populated with the documented values as
-  // suggestions (the operator can still type any value).
-  const datalist = row.locator('datalist')
-  await expect(datalist.locator('option')).toContainText([
-    /Relative to Home/,
-    /Terrain/,
-  ])
-
-  // Type the value 1 directly → commits → decoded "Terrain" label appears.
-  await input.fill('1')
-  await input.press('Enter')
-
+  // Click the "Terrain" chip → commits the value and the decoded label
+  // appears in display mode.
+  await row.getByRole('button', { name: /Terrain/ }).click()
   await expect(page.getByText('1 change pending', { exact: false })).toBeVisible()
   await expect(row.getByText(/was [-\d]/)).toBeVisible()
-  await expect(row.getByText(/Terrain/)).toBeVisible()
+  // The decoded caption shows "Terrain" beneath the value.
+  await expect(row.locator('.italic').filter({ hasText: /Terrain/ })).toBeVisible()
 })
 
 test('Param editor: Apply writes to SITL and saves to flash', async ({ page }) => {
