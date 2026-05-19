@@ -75,7 +75,7 @@ A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV br
 
 - **Connect** (`/`) — splash with a slowly rotating 3D X-quad and a live "Connect drone" button
 - **Bringup** (`/wizard`), **Recipes** (`/recipes`), **Logs** (`/logs`), **Firmware** (`/firmware`), **ESC tools** (`/esc`) — operator-friendly "Coming soon" placeholders
-- **Expert mode** toggle (top-right of nav, off by default, per-session) reveals a **Parameters** (`/params`) route — auto-fetches the FC's full param set on mount, searchable table with descriptions + units pulled from the SFD source (regenerate after submodule bumps with `bun run params:rebuild`), read-only for now (edit + commit in next slices)
+- **Expert mode** toggle (top-right of nav, off by default, per-session) reveals a **Parameters** (`/params`) route — auto-fetches the FC's full param set on mount, searchable table with descriptions + units pulled from the SFD source (regenerate after submodule bumps with `bun run params:rebuild`), click any value to edit inline with dirty tracking + Discard. Writing changes back to the drone (Apply) lands in the next slice.
 
 Each route lazy-loads as its own chunk. State lives in Pinia setup stores (UI/expert-mode + drone session). SmallFastDrone is vendored as a git submodule with `sitl:build/start/stop` scripts. The Connect screen talks to either a real USB-attached drone (Web Serial) or SITL via a WebSocket bridge, parses MAVLink heartbeats, requests AUTOPILOT_VERSION on first heartbeat, and reports the vehicle type, autopilot, firmware version + git hash, system ID, and state (see [SITL](#sitl) below).
 

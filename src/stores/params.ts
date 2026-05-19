@@ -20,10 +20,53 @@ export const useParamsStore = defineStore('params', () => {
   const error = ref<string | null>(null)
   const loadedAt = ref<number | null>(null)
 
+  // Pending edits keyed by param name. An entry exists only while the
+  // operator's value differs from the FC's value. The store doesn't push
+  // these anywhere — Apply / commit lands in the next slice.
+  const edits = ref<Map<string, number>>(new Map())
+
   const sortedList = computed<ParamRecord[]>(() =>
     [...params.value.values()].sort((a, b) => a.name.localeCompare(b.name)),
   )
   const count = computed(() => params.value.size)
+
+  const dirtyCount = computed(() => edits.value.size)
+  const dirtyList = computed<ParamRecord[]>(() =>
+    [...edits.value.keys()]
+      .map(name => params.value.get(name))
+      .filter((p): p is ParamRecord => p !== undefined)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  )
+
+  function isDirty(name: string): boolean {
+    return edits.value.has(name)
+  }
+  function editedValue(name: string): number | undefined {
+    return edits.value.get(name)
+  }
+  function effectiveValue(name: string): number | undefined {
+    const e = edits.value.get(name)
+    if (e !== undefined)
+      return e
+    return params.value.get(name)?.value
+  }
+  function setEdit(name: string, newValue: number) {
+    const fc = params.value.get(name)
+    if (!fc)
+      return
+    if (Object.is(newValue, fc.value)) {
+      edits.value.delete(name)
+    }
+    else {
+      edits.value.set(name, newValue)
+    }
+  }
+  function revertParam(name: string) {
+    edits.value.delete(name)
+  }
+  function discardAll() {
+    edits.value.clear()
+  }
 
   async function load() {
     if (loading.value)
@@ -40,6 +83,10 @@ export const useParamsStore = defineStore('params', () => {
     loading.value = true
     error.value = null
     progress.value = null
+    // A reload represents "I want the current state on the FC", so pending
+    // edits are dropped. Surfacing conflicts with in-flight edits is a
+    // later slice.
+    edits.value.clear()
 
     try {
       params.value = await streamParams(session.sysid)
@@ -107,6 +154,7 @@ export const useParamsStore = defineStore('params', () => {
 
   function clear() {
     params.value = new Map()
+    edits.value = new Map()
     progress.value = null
     error.value = null
     loadedAt.value = null
@@ -120,6 +168,15 @@ export const useParamsStore = defineStore('params', () => {
     progress,
     error,
     loadedAt,
+    edits,
+    dirtyCount,
+    dirtyList,
+    isDirty,
+    editedValue,
+    effectiveValue,
+    setEdit,
+    revertParam,
+    discardAll,
     load,
     clear,
   }
