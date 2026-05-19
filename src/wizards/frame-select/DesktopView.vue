@@ -25,9 +25,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
+import { useWizardProgressStore } from '../../stores/wizardProgress'
 
 const session = useSessionStore()
 const paramsStore = useParamsStore()
+const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 
 // Frame option a card represents — visible to the operator under a
@@ -236,6 +238,7 @@ async function confirm() {
   if (!paramsStore.isDirty('FRAME_CLASS') && !paramsStore.isDirty('FRAME_TYPE')) {
     noChangeNeeded.value = true
     phase.value = 'done'
+    wizardProgress.markComplete(session.fcUid, 'frame-select', `Already a ${target.label}`)
     return
   }
 
@@ -247,6 +250,7 @@ async function confirm() {
     return
   }
   phase.value = 'done'
+  wizardProgress.markComplete(session.fcUid, 'frame-select', `Set as a ${target.label}`)
 }
 
 // Return to the library — bound to the Done button after a successful
