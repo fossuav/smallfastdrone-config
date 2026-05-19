@@ -21,7 +21,7 @@
 // the actual motor positions for that frame, with a forward-direction
 // arrow so operators can match it against their physical drone.
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
@@ -93,18 +93,93 @@ function polarN(n: number, startDeg: number): { x: number, y: number }[] {
   return out
 }
 
-// On entry, make sure we have the FC's current parameter set. The
-// wizard needs FRAME_CLASS + FRAME_TYPE to exist in the store before
-// setEdit() can touch them — setEdit is a silent no-op for unknown
-// params, which would let the wizard report "done" with no actual write.
+// Wait for an in-flight params store load to complete. Resolves the
+// next time the store's `loading` flag flips false. Used when the
+// wizard mounts and finds load() already running (e.g. the operator
+// clicked Refresh in the param browser moments earlier) — in that case
+// paramsStore.load() itself returns immediately, so we have to watch
+// the flag rather than just await it.
+function waitForLoad(): Promise<void> {
+  return new Promise((resolve) => {
+    const stop = watch(
+      () => paramsStore.loading,
+      (loading) => {
+        if (!loading) {
+          stop()
+          resolve()
+        }
+      },
+    )
+  })
+}
+
+// On entry: make sure we have the FC's current parameter set, then
+// confirm FRAME_CLASS + FRAME_TYPE are part of it. setEdit() is a
+// silent no-op for unknown params, so the wizard cannot advance into
+// picking until both names are present — otherwise the operator would
+// see a successful-looking flow that wrote nothing.
 onMounted(async () => {
-  if (paramsStore.count === 0 && session.connected && session.sysid !== null) {
+  if (!session.connected || session.sysid === null) {
+    phase.value = 'error'
+    errorMessage.value = 'Please connect to your drone first, then come back.'
+    return
+  }
+
+  // Trigger a fetch if we haven't done one yet; if one is already
+  // running, just wait it out.
+  if (paramsStore.count === 0 && !paramsStore.loading) {
     await paramsStore.load()
   }
-  // Move out of loading regardless of whether load succeeded — if it
-  // didn't, confirm() will surface the failure when we try to write.
+  else if (paramsStore.loading) {
+    await waitForLoad()
+  }
+
+  if (paramsStore.error) {
+    phase.value = 'error'
+    errorMessage.value = `Couldn't load your drone's settings: ${paramsStore.error}. Try again, or check the connection.`
+    return
+  }
+
+  if (!paramsStore.params.has('FRAME_CLASS') || !paramsStore.params.has('FRAME_TYPE')) {
+    phase.value = 'error'
+    errorMessage.value = 'Your drone\'s firmware doesn\'t expose the frame settings this wizard configures — that means it isn\'t a multicopter, or it\'s running a build with frame selection compiled out.'
+    return
+  }
+
   phase.value = 'picking'
 })
+
+// Operator hit Retry from an error state. Reset to loading and run the
+// onMounted logic again — covers transient fetch failures and the case
+// where the operator reconnected after the wizard hit the no-connection
+// branch.
+async function retry() {
+  errorMessage.value = null
+  phase.value = 'loading'
+
+  if (!session.connected || session.sysid === null) {
+    phase.value = 'error'
+    errorMessage.value = 'Please connect to your drone first, then come back.'
+    return
+  }
+  if (paramsStore.count === 0 && !paramsStore.loading) {
+    await paramsStore.load()
+  }
+  else if (paramsStore.loading) {
+    await waitForLoad()
+  }
+  if (paramsStore.error) {
+    phase.value = 'error'
+    errorMessage.value = `Couldn't load your drone's settings: ${paramsStore.error}. Try again, or check the connection.`
+    return
+  }
+  if (!paramsStore.params.has('FRAME_CLASS') || !paramsStore.params.has('FRAME_TYPE')) {
+    phase.value = 'error'
+    errorMessage.value = 'Your drone\'s firmware doesn\'t expose the frame settings this wizard configures — that means it isn\'t a multicopter, or it\'s running a build with frame selection compiled out.'
+    return
+  }
+  phase.value = 'picking'
+}
 
 // Operator clicked a frame card. Just record the pick; the dedicated
 // confirm step keeps Next-equals-action surprises off the table.
@@ -163,6 +238,12 @@ function back() {
       <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin" />
       <p class="mt-2 text-sm">
         Loading your drone's current settings…
+      </p>
+      <p
+        v-if="paramsStore.progress"
+        class="mt-1 text-xs"
+      >
+        {{ paramsStore.progress.received }} of {{ paramsStore.progress.total }}
       </p>
     </div>
 
@@ -267,10 +348,10 @@ function back() {
         {{ errorMessage }}
       </p>
       <div class="mt-4 flex justify-center gap-2">
-        <UButton color="neutral" variant="outline" @click="backToPicking">
-          Try again
+        <UButton color="primary" variant="outline" @click="retry">
+          Retry
         </UButton>
-        <UButton color="primary" @click="back">
+        <UButton color="neutral" @click="back">
           Back to the library
         </UButton>
       </div>
