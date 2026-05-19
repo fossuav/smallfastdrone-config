@@ -33,8 +33,15 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/wizard',
     name: 'wizard',
-    component: () => import('./views/WizardView.vue'),
+    component: () => import('./views/WizardLibraryView.vue'),
     meta: { label: 'Bringup', icon: 'i-lucide-wand-2' },
+  },
+  {
+    // Per-wizard runner. No `meta.label` so it doesn't appear in the
+    // nav; the library is the entry point and links into here.
+    path: '/wizard/:id',
+    name: 'wizard-runner',
+    component: () => import('./views/WizardRunnerView.vue'),
   },
   {
     path: '/recipes',
