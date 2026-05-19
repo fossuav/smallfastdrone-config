@@ -194,24 +194,48 @@ function backToPicking() {
   phase.value = 'picking'
 }
 
+// True when the picked frame matches the FC's current configuration
+// for both params — covered out separately so confirm() can short-
+// circuit instead of writing nothing and looking broken.
+const noChangeNeeded = ref(false)
+
 // Operator confirmed. Stage the two param edits and hand off to the
-// params store's apply pipeline. Success / failure is reflected via
-// the store's per-write states and the lastApplyAcked / Failed counters.
+// params store's apply pipeline. Three outcomes:
+//
+//   - Params aren't in the store at all → real error (the onMounted
+//     guard should already have caught this, but it's checked again
+//     for defence-in-depth in case the store was cleared between
+//     mount and confirm).
+//   - Picked frame matches what the FC already has → setEdit() is a
+//     no-op for both params, nothing is dirty, we short-circuit to
+//     done with a "no change needed" note. (This is the case that
+//     used to mis-fire the "doesn't expose" error.)
+//   - Picked frame is different → apply through the params store,
+//     classify based on the store's failed counter.
 async function confirm() {
   if (!selected.value)
     return
   phase.value = 'applying'
   errorMessage.value = null
+  noChangeNeeded.value = false
 
   const target = selected.value
+
+  if (!paramsStore.params.has('FRAME_CLASS') || !paramsStore.params.has('FRAME_TYPE')) {
+    phase.value = 'error'
+    errorMessage.value = 'Your drone\'s settings no longer include the frame parameters — try reconnecting and starting over.'
+    return
+  }
+
   paramsStore.setEdit('FRAME_CLASS', target.class_)
   paramsStore.setEdit('FRAME_TYPE', target.type_)
 
-  // Both params must exist in the FC's set, or setEdit silently dropped
-  // them. Surface that as a clear error rather than a misleading success.
-  if (!paramsStore.isDirty('FRAME_CLASS') || !paramsStore.isDirty('FRAME_TYPE')) {
-    phase.value = 'error'
-    errorMessage.value = 'Your drone\'s firmware doesn\'t expose FRAME_CLASS / FRAME_TYPE — this wizard works on multicopters with current ArduPilot.'
+  // No dirty entries means both setEdit calls saw the new value equal
+  // the current FC value. The drone is already configured the way the
+  // operator just picked — that's a successful no-op, not a failure.
+  if (!paramsStore.isDirty('FRAME_CLASS') && !paramsStore.isDirty('FRAME_TYPE')) {
+    noChangeNeeded.value = true
+    phase.value = 'done'
     return
   }
 
@@ -332,7 +356,12 @@ function back() {
         Done — your drone knows its motor layout.
       </h2>
       <p v-if="selected" class="text-muted mt-1 text-sm">
-        Set as a {{ selected.label }}.
+        <template v-if="noChangeNeeded">
+          Already set as a {{ selected.label }} — nothing to write.
+        </template>
+        <template v-else>
+          Set as a {{ selected.label }}.
+        </template>
       </p>
       <UButton class="mt-4" color="primary" @click="back">
         Back to the wizard library
