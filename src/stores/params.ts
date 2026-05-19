@@ -1,3 +1,24 @@
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Parameter browser store. Owns the full fetched-from-FC parameter map,
+// the pending-edits map, the apply pipeline (PARAM_SET per edit, wait for
+// echo, then PREFLIGHT_STORAGE save), and the per-row write state the UI
+// renders. The session store provides send + subscribe helpers so this
+// store stays free of direct MavLinkSession references.
+
 import type { CommandAck, ParamValue } from 'mavlink-mappings/dist/lib/common'
 import type { ParamRecord } from '../protocol/params'
 import { MavCmd, MavResult } from 'mavlink-mappings/dist/lib/common'
@@ -11,9 +32,6 @@ import {
   MSGID_PARAM_VALUE,
 } from '../protocol/params'
 import { useSessionStore } from './session'
-
-// Parameter browser store — fetch + cache; read-only today, editing +
-// commit land in follow-up slices.
 
 const COMP_ID_AUTOPILOT = 1
 const SILENCE_TIMEOUT_MS = 10_000
@@ -76,22 +94,33 @@ export const useParamsStore = defineStore('params', () => {
   const lastApplyMismatched = ref(0)
   const lastApplyFailed = ref(0)
 
+  // Look up the current apply-time write state for a single param row.
+  // Undefined when no apply has touched the row this session.
   function writeStateOf(name: string): WriteState | undefined {
     return writeStates.value.get(name)
   }
 
+  // Has the operator queued an edit for this param that hasn't been
+  // committed to the FC yet?
   function isDirty(name: string): boolean {
     return edits.value.has(name)
   }
+  // Operator's pending value for this param (undefined if not edited).
   function editedValue(name: string): number | undefined {
     return edits.value.get(name)
   }
+  // What the param "is" right now from the operator's point of view —
+  // the pending edit if there is one, otherwise the FC's last reported
+  // value. Used by display code that doesn't care about the distinction.
   function effectiveValue(name: string): number | undefined {
     const e = edits.value.get(name)
     if (e !== undefined)
       return e
     return params.value.get(name)?.value
   }
+  // Stage an edit. If the new value matches the FC's current value the
+  // edit is cleared rather than stored (the row stops looking dirty).
+  // No-op if the param doesn't exist in the fetched set.
   function setEdit(name: string, newValue: number) {
     const fc = params.value.get(name)
     if (!fc)
@@ -103,13 +132,18 @@ export const useParamsStore = defineStore('params', () => {
       edits.value.set(name, newValue)
     }
   }
+  // Drop a single pending edit; the row reverts to the FC's value.
   function revertParam(name: string) {
     edits.value.delete(name)
   }
+  // Drop every pending edit. Bound to the Discard button.
   function discardAll() {
     edits.value.clear()
   }
 
+  // Fetch every parameter from the FC into the store. Re-fetching clears
+  // pending edits — a reload means "give me the live state," and merging
+  // live state with pending edits would surface confusing diffs.
   async function load() {
     if (loading.value)
       return
@@ -311,6 +345,10 @@ export const useParamsStore = defineStore('params', () => {
     })
   }
 
+  // Ask the FC to commit current parameters to non-volatile storage. Best
+  // effort: ArduPilot auto-saves within ~10s of a PARAM_SET regardless,
+  // and the storage command is marked deprecated in modern MAVLink — SITL
+  // doesn't ack. Returns true only if we received an explicit ACCEPTED.
   async function sendStorageSave(targetSys: number): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       let timer: ReturnType<typeof setTimeout> | null = null
@@ -339,6 +377,9 @@ export const useParamsStore = defineStore('params', () => {
     })
   }
 
+  // Clear the post-apply banner + per-row badges. Bound to the close
+  // affordance on the result banner so the operator can dismiss it after
+  // reading.
   function dismissApplyResult() {
     applyStage.value = null
     writeStates.value.clear()
@@ -348,6 +389,9 @@ export const useParamsStore = defineStore('params', () => {
     applyError.value = null
   }
 
+  // Wipe every piece of store state. Called on disconnect so the next
+  // connection starts with a clean slate; a leftover params map would
+  // bleed yesterday's drone into today's view.
   function clear() {
     params.value = new Map()
     edits.value = new Map()

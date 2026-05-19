@@ -1,3 +1,35 @@
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Drone session store. Owns the transport, the MavLinkSession, the
+// connection lifecycle (connect / disconnect / error surfacing), and the
+// derived state every other store + view reads: vehicle type, autopilot,
+// firmware string, recent STATUSTEXTs, subsystem health, ready-to-arm.
+//
+// On first heartbeat after a successful connect the store kicks off the
+// telemetry handshake — REQUEST_MESSAGE for AUTOPILOT_VERSION (firmware
+// fields), DO_SEND_BANNER (operator-readable banner that carries the
+// SFD suffix), and REQUEST_DATA_STREAM (kicks SITL into streaming the
+// SYS_STATUS / ATTITUDE / VFR_HUD / etc. messages it withholds from
+// fresh clients by default).
+//
+// The send + subscribe helpers at the bottom (`sendMessage`,
+// `subscribeMessages`) are the public hooks downstream stores (params,
+// future wizards) use to participate in the session without holding
+// onto the raw MavLinkSession instance.
+
 import type { MavLinkData } from 'mavlink-mappings'
 import type { StatusText, SysStatus } from 'mavlink-mappings/dist/lib/common'
 import type { Heartbeat, MavAutopilot, MavState, MavType } from 'mavlink-mappings/dist/lib/minimal'
@@ -97,6 +129,9 @@ export const useSessionStore = defineStore('session', () => {
   // state list that <UApp> renders. Safe to call once at store init.
   const toast = useToast()
 
+  // Append a STATUSTEXT to the rolling history and surface meaningful ones
+  // as operator toasts. The "is this SFD?" sniffer also lives here — the
+  // boot banner is the only place the SFD suffix shows up.
   function recordStatusText(text: string, severity: number) {
     const entry: StatusTextEntry = { text, severity, receivedAt: Date.now() }
     recentStatusTexts.value = [...recentStatusTexts.value, entry].slice(-STATUSTEXT_HISTORY)
@@ -173,6 +208,9 @@ export const useSessionStore = defineStore('session', () => {
   let unsubscribeData: (() => void) | null = null
   let unsubscribeClose: (() => void) | null = null
 
+  // Wipe parsed session state back to "no drone known." Called both on
+  // disconnect and on connect (before transport setup), so a stale heartbeat
+  // from a prior drone never bleeds into a new session.
   function resetParsed() {
     sysid.value = null
     vehicleType.value = null
@@ -188,6 +226,10 @@ export const useSessionStore = defineStore('session', () => {
     session.reset()
   }
 
+  // Open the transport and start consuming bytes. Idempotent — repeated
+  // calls while already connected or connecting return without doing
+  // anything. Errors are surfaced via `lastError` rather than thrown so
+  // the Connect button can render them inline.
   async function connect() {
     if (connected.value || connecting.value)
       return
@@ -214,15 +256,23 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  // Helpers for downstream stores (params, etc.) that need to send + receive
-  // MAVLink. Encapsulated here so the MavLinkSession instance stays private.
+  // Helpers for downstream stores (params, future wizards) that need to
+  // send + receive MAVLink. Encapsulated here so the MavLinkSession
+  // instance itself stays private to this store.
+
+  // Serialize and ship one MAVLink message over the active transport.
   async function sendMessage(msg: MavLinkData): Promise<void> {
     await transport.value.send(session.serialize(msg))
   }
+  // Subscribe to every decoded message the session sees. Returns an
+  // unsubscribe function; the subscriber must invoke it when its
+  // owner goes away.
   function subscribeMessages(cb: MessageHandler): () => void {
     return session.on(cb)
   }
 
+  // Tear the transport down. Subscriber unsubscribe runs first so we
+  // don't get a final close-event echo bouncing around mid-teardown.
   async function disconnect() {
     unsubscribeData?.()
     unsubscribeClose?.()
