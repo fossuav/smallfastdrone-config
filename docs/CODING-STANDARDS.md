@@ -128,7 +128,7 @@ TypeScript file template:
 // take. Cross-reference adjacent files when the boundary isn't obvious. A
 // new reader picks up cold from this.>
 
-import ...
+import { /* … */ } from './…'
 ```
 
 Vue SFC template — the block goes at the top of `<script setup>`, since SFCs don't have a stable "top of file" before the first block:
@@ -143,7 +143,7 @@ Vue SFC template — the block goes at the top of `<script setup>`, since SFCs d
 
 // <File purpose: what this component is, what it renders, when it's used.>
 
-import ...
+import { /* … */ } from './…'
 </script>
 ```
 

@@ -31,14 +31,14 @@ Each wizard ships as a folder at `src/wizards/<id>/`. Mandatory file: `manifest.
 
 ```ts
 interface WizardManifest {
-  id: string                              // stable identifier, kebab-case
-  title: string                           // operator-facing, plain language
-  description: string                     // one-line operator-facing
+  id: string // stable identifier, kebab-case
+  title: string // operator-facing, plain language
+  description: string // one-line operator-facing
   category: 'bringup' | 'tune' | 'recipe' | 'diagnostic' | 'safety'
-  hero: string                            // illustration path or 3D scene id
+  hero: string // illustration path or 3D scene id
 
   // What the operator gets at the end. Used in cards and completion messaging.
-  outcome: string                         // e.g. "Drone ready for first hover"
+  outcome: string // e.g. "Drone ready for first hover"
 
   // Engines the wizard supports. Runtime picks first viable in order.
   engines: EngineDescriptor[]
@@ -57,13 +57,13 @@ interface WizardManifest {
   prerequisites: Prereq[]
 
   // Lifecycle flags.
-  in_flight: boolean                      // runs while armed?
-  requires_props_off: boolean             // operator must confirm props off to start
+  in_flight: boolean // runs while armed?
+  requires_props_off: boolean // operator must confirm props off to start
 
   // Commercial / gating. v1 honours `locked: true` as "show greyed-out card
   // with description + Pro badge." Real entitlement check lands later.
   locked?: boolean
-  unlock_blurb?: string                   // shown on the locked card
+  unlock_blurb?: string // shown on the locked card
 }
 ```
 
@@ -78,9 +78,9 @@ type EngineDescriptor
     | { kind: 'desktop' }
 
 interface LuaRequires {
-  scripting: true                         // SCR_ENABLE settable + non-zero
-  min_heap_kb?: number                    // checked against SCR_HEAP_SIZE
-  ardupilot_min_version?: string          // e.g. "4.7.0"
+  scripting: true // SCR_ENABLE settable + non-zero
+  min_heap_kb?: number // checked against SCR_HEAP_SIZE
+  ardupilot_min_version?: string // e.g. "4.7.0"
 }
 ```
 
