@@ -1,9 +1,25 @@
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
 // SITL bridge — pipes a single browser WebSocket client to SITL's TCP
 // MAVLink port (default 127.0.0.1:5760). Zero external deps; uses Bun's
 // built-in `Bun.serve` (WebSocket) and `Bun.connect` (TCP).
 //
 // Started manually (`bun run bridge:start`) or by the Playwright fixture
-// in a later slice. See docs/TESTING.md for the architecture.
+// (playwright.config.ts) when running the E2E suite. See
+// docs/TESTING.md for the bridge's place in the test architecture.
 //
 // Run:
 //   bun run bridge:start

@@ -1,12 +1,27 @@
-import { expect, test } from '@playwright/test'
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
 
-// First end-to-end test: drive the browser through the connect flow
-// against a real SITL instance via the bridge. Validates the full stack:
-// transport (WebSocket) → MAVLink parser → session store → ConnectView.
+// End-to-end test of the connect flow against a real SITL instance via
+// the bridge. Validates the full stack: transport (WebSocket) → MAVLink
+// parser → session store → ConnectView.
 //
-// Per docs/TESTING.md: assertions are operator-facing ("Connected to your
-// Quadcopter"), not implementation-facing — the test enforces the
+// Per docs/TESTING.md: assertions are operator-facing ("Connected to
+// your Quadcopter"), not implementation-facing — the test enforces the
 // microcopy contract from docs/UX.md.
+
+import { expect, test } from '@playwright/test'
 
 const SITL_URL = '/?transport=websocket&host=localhost:5761'
 
