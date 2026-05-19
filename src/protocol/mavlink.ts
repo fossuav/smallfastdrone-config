@@ -238,6 +238,32 @@ export function buildDoSendBanner(targetSystem: number, targetComponent: number)
 export const MAV_SEVERITY_ERROR_MAX = 3
 export const MAV_SEVERITY_WARNING = 4
 
+// Project an AUTOPILOT_VERSION uid / uid2 pair into a stable hex string
+// that identifies the connected flight controller across reboots and
+// reflashes. uid2 is the modern 18-byte hardware identifier (MCU device
+// id + extra) and is preferred when present; uid is the legacy 64-bit
+// field and is used as a fallback. Returns null if neither is set
+// (e.g. the FC didn't reply with AUTOPILOT_VERSION). Used as the
+// per-drone partition key for wizard-progress persistence.
+export function formatFcUid(uid: bigint | number | string, uid2?: ArrayLike<number>): string | null {
+  if (uid2 && uid2.length > 0) {
+    let allZero = true
+    let hex = ''
+    for (let i = 0; i < uid2.length; i++) {
+      const b = uid2[i] ?? 0
+      if (b !== 0)
+        allZero = false
+      hex += b.toString(16).padStart(2, '0')
+    }
+    if (!allZero)
+      return hex
+  }
+  const n = typeof uid === 'bigint' ? uid : BigInt(uid)
+  if (n === 0n)
+    return null
+  return n.toString(16)
+}
+
 // Decode AUTOPILOT_VERSION's flight_sw_version (uint32) + flight_custom_version
 // (uint8[8] containing the build's git short hash as ASCII) into an
 // operator-readable string like "4.7.0-beta (d0615774)". The custom_version
