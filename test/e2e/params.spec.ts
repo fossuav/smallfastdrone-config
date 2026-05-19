@@ -65,3 +65,32 @@ test('Param editor: edit a value, see it pending, discard', async ({ page }) => 
   await expect(page.getByText(/change pending/)).not.toBeVisible()
   await expect(row.getByText(/was [-\d]/)).not.toBeVisible()
 })
+
+test('Param editor: Apply writes to SITL and saves to flash', async ({ page }) => {
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText('Connected to your Quadcopter')).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('switch', { name: 'Expert' }).click()
+  await page.getByRole('link', { name: 'Parameters' }).click()
+  await expect(page.getByText(/Fetching parameters/)).not.toBeVisible({ timeout: 30_000 })
+
+  // Filter + edit a value
+  await page.getByPlaceholder(/Filter by name/).fill('RTL_ALT')
+  const row = page.locator('tbody tr').first()
+  await row.locator('button[type="button"]').first().click()
+  const input = row.locator('input[type="text"]')
+  await input.fill('1234')
+  await input.press('Enter')
+
+  // Click Apply (in the pending-changes banner)
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+
+  // Success banner appears
+  await expect(page.getByText(/saved to your drone/)).toBeVisible({ timeout: 10_000 })
+
+  // The pending-changes "was X" tag is gone (edit cleared after ack)
+  await expect(row.getByText(/was [-\d]/)).not.toBeVisible()
+
+  // The row's value is now what we set (the FC accepted it)
+  await expect(row.locator('button[type="button"]').first()).toContainText('1234')
+})

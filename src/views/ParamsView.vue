@@ -133,9 +133,10 @@ onMounted(() => {
 
     <!-- Loaded -->
     <div v-else-if="store.count > 0" class="space-y-3">
-      <!-- Pending-changes banner -->
+      <!-- Pending-changes banner: only when not mid-apply and not showing a
+           just-completed result. -->
       <div
-        v-if="store.dirtyCount > 0"
+        v-if="store.dirtyCount > 0 && !store.applying && store.applyStage !== 'done'"
         class="bg-secondary-50 border-secondary-300 text-secondary-900 dark:bg-secondary-950 dark:border-secondary-700 dark:text-secondary-100 flex flex-wrap items-center justify-between gap-3 border rounded-md px-4 py-2 text-sm"
       >
         <div class="flex items-center gap-3">
@@ -148,15 +149,54 @@ onMounted(() => {
           <UButton size="xs" variant="soft" @click="store.discardAll()">
             Discard
           </UButton>
-          <UButton
-            size="xs"
-            color="primary"
-            disabled
-            title="Writing to the drone lands in the next slice"
-          >
+          <UButton size="xs" color="primary" @click="store.apply()">
             Apply
           </UButton>
         </div>
+      </div>
+
+      <!-- Apply-in-progress banner -->
+      <div
+        v-if="store.applying"
+        class="bg-primary-50 border-primary-300 text-primary-900 dark:bg-primary-950 dark:border-primary-700 dark:text-primary-100 flex items-center gap-3 border rounded-md px-4 py-2 text-sm"
+      >
+        <UIcon name="i-lucide-loader" class="text-primary size-4 animate-spin" />
+        <span v-if="store.applyStage === 'writing'">
+          Writing {{ store.writeStates.size }} {{ store.writeStates.size === 1 ? 'parameter' : 'parameters' }} to your drone…
+        </span>
+        <span v-else-if="store.applyStage === 'saving'">
+          Saving to your drone's storage so the changes survive a reboot…
+        </span>
+      </div>
+
+      <!-- Apply-result banner -->
+      <div
+        v-if="!store.applying && store.applyStage === 'done'"
+        class="flex flex-wrap items-center justify-between gap-3 rounded-md border px-4 py-2 text-sm"
+        :class="store.lastApplyFailed > 0 || store.lastApplyMismatched > 0 || store.applyError
+          ? 'bg-warning-50 border-warning-300 text-warning-900 dark:bg-warning-950 dark:border-warning-700 dark:text-warning-100'
+          : 'bg-success-50 border-success-300 text-success-900 dark:bg-success-950 dark:border-success-700 dark:text-success-100'"
+      >
+        <div class="flex items-center gap-3">
+          <UIcon
+            :name="store.lastApplyFailed > 0 || store.lastApplyMismatched > 0 || store.applyError
+              ? 'i-lucide-circle-alert'
+              : 'i-lucide-circle-check'"
+            class="size-4"
+          />
+          <span>
+            <template v-if="store.applyError">{{ store.applyError }}</template>
+            <template v-else-if="store.lastApplyFailed === 0 && store.lastApplyMismatched === 0">
+              {{ store.lastApplyAcked }} {{ store.lastApplyAcked === 1 ? 'change' : 'changes' }} saved to your drone.
+            </template>
+            <template v-else>
+              {{ store.lastApplyAcked }} saved<template v-if="store.lastApplyMismatched">, {{ store.lastApplyMismatched }} accepted with a different value</template><template v-if="store.lastApplyFailed">, {{ store.lastApplyFailed }} didn't respond</template>.
+            </template>
+          </span>
+        </div>
+        <UButton size="xs" variant="soft" @click="store.dismissApplyResult()">
+          Done
+        </UButton>
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
@@ -245,8 +285,33 @@ onMounted(() => {
                 {{ meta(p.name).short || '—' }}
               </td>
               <td class="px-1 py-1.5">
+                <!-- Per-row write-state indicator (during/after apply). -->
+                <UIcon
+                  v-if="store.writeStateOf(p.name) === 'writing'"
+                  name="i-lucide-loader"
+                  class="text-primary size-4 animate-spin"
+                  :title="`Writing ${p.name}`"
+                />
+                <UIcon
+                  v-else-if="store.writeStateOf(p.name) === 'acked'"
+                  name="i-lucide-circle-check"
+                  class="text-success size-4"
+                  :title="`${p.name} saved`"
+                />
+                <UIcon
+                  v-else-if="store.writeStateOf(p.name) === 'mismatched'"
+                  name="i-lucide-circle-alert"
+                  class="text-warning size-4"
+                  :title="`${p.name}: drone accepted a different value`"
+                />
+                <UIcon
+                  v-else-if="store.writeStateOf(p.name) === 'failed'"
+                  name="i-lucide-circle-x"
+                  class="text-error size-4"
+                  :title="`${p.name}: no response from drone`"
+                />
                 <UButton
-                  v-if="store.isDirty(p.name)"
+                  v-else-if="store.isDirty(p.name)"
                   icon="i-lucide-undo-2"
                   variant="ghost"
                   size="xs"

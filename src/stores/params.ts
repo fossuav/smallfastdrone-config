@@ -1,8 +1,15 @@
-import type { ParamValue } from 'mavlink-mappings/dist/lib/common'
+import type { CommandAck, ParamValue } from 'mavlink-mappings/dist/lib/common'
 import type { ParamRecord } from '../protocol/params'
+import { MavCmd, MavResult } from 'mavlink-mappings/dist/lib/common'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { buildParamRequestList, MSGID_PARAM_VALUE } from '../protocol/params'
+import {
+  buildParamRequestList,
+  buildParamSet,
+  buildPreflightStorageSave,
+  MSGID_COMMAND_ACK,
+  MSGID_PARAM_VALUE,
+} from '../protocol/params'
 import { useSessionStore } from './session'
 
 // Parameter browser store — fetch + cache; read-only today, editing +
@@ -10,6 +17,25 @@ import { useSessionStore } from './session'
 
 const COMP_ID_AUTOPILOT = 1
 const SILENCE_TIMEOUT_MS = 10_000
+// Per-PARAM_SET ack timeout. ArduPilot SITL replies within ~50 ms;
+// 1.5 s gives ample headroom for a slow USB link.
+const PARAM_ACK_TIMEOUT_MS = 1500
+// PREFLIGHT_STORAGE save → COMMAND_ACK timeout. Flash write on real FCs
+// takes longer than a param ack.
+const STORAGE_ACK_TIMEOUT_MS = 5000
+// Almost-equal threshold for float comparison: PARAM_SET sends a float
+// but integer params travel through that same float; this is enough
+// slop to handle the round-trip.
+const VALUE_EQ_EPS = 1e-6
+
+export type WriteState = 'pending' | 'writing' | 'acked' | 'mismatched' | 'failed'
+export type ApplyStage = 'writing' | 'saving' | 'done'
+
+interface WriteResult {
+  status: 'acked' | 'mismatched' | 'failed'
+  acceptedValue?: number
+  message?: string
+}
 
 export const useParamsStore = defineStore('params', () => {
   const session = useSessionStore()
@@ -37,6 +63,22 @@ export const useParamsStore = defineStore('params', () => {
       .filter((p): p is ParamRecord => p !== undefined)
       .sort((a, b) => a.name.localeCompare(b.name)),
   )
+
+  // Apply-time state.
+  const applying = ref(false)
+  const applyStage = ref<ApplyStage | null>(null)
+  const applyError = ref<string | null>(null)
+  const writeStates = ref<Map<string, WriteState>>(new Map())
+  // After an apply finishes, summary counts persist briefly so the UI can
+  // surface "N saved, M failed" without polling the writeStates map.
+  const lastApplyAt = ref<number | null>(null)
+  const lastApplyAcked = ref(0)
+  const lastApplyMismatched = ref(0)
+  const lastApplyFailed = ref(0)
+
+  function writeStateOf(name: string): WriteState | undefined {
+    return writeStates.value.get(name)
+  }
 
   function isDirty(name: string): boolean {
     return edits.value.has(name)
@@ -152,12 +194,169 @@ export const useParamsStore = defineStore('params', () => {
     })
   }
 
+  // Apply pending edits: PARAM_SET each one, wait for the FC's PARAM_VALUE
+  // echo as ack; when all done, request a PREFLIGHT_STORAGE save so changes
+  // survive reboot.
+  async function apply() {
+    if (applying.value || edits.value.size === 0)
+      return
+    if (!session.connected || session.sysid === null) {
+      applyError.value = 'Not connected'
+      return
+    }
+    applying.value = true
+    applyError.value = null
+    applyStage.value = 'writing'
+
+    const targets: Array<[string, number]> = [...edits.value.entries()]
+    writeStates.value = new Map(targets.map(([n]) => [n, 'pending']))
+
+    let acked = 0
+    let mismatched = 0
+    let failed = 0
+    let anyAccepted = false
+
+    for (const [name, newValue] of targets) {
+      const existing = params.value.get(name)
+      if (!existing) {
+        writeStates.value.set(name, 'failed')
+        failed += 1
+        continue
+      }
+
+      writeStates.value.set(name, 'writing')
+
+      const result = await writeParam(name, newValue, existing.type, session.sysid)
+
+      switch (result.status) {
+        case 'acked':
+          writeStates.value.set(name, 'acked')
+          params.value.set(name, { ...existing, value: result.acceptedValue ?? newValue })
+          edits.value.delete(name)
+          acked += 1
+          anyAccepted = true
+          break
+        case 'mismatched':
+          writeStates.value.set(name, 'mismatched')
+          // Update our cached FC value to what the FC actually accepted;
+          // leave the edit in place so the operator can see "asked X, got Y".
+          if (result.acceptedValue !== undefined) {
+            params.value.set(name, { ...existing, value: result.acceptedValue })
+          }
+          mismatched += 1
+          anyAccepted = true
+          break
+        default:
+          writeStates.value.set(name, 'failed')
+          failed += 1
+          break
+      }
+    }
+
+    if (anyAccepted) {
+      applyStage.value = 'saving'
+      // MAV_CMD_PREFLIGHT_STORAGE is best-effort. ArduPilot auto-saves
+      // param changes within ~10 s of a write, and the storage command
+      // itself is marked deprecated in modern MAVLink — SITL doesn't
+      // bother acking. We send it anyway in case a particular FC build
+      // does want the explicit nudge, but a no-ack isn't a problem.
+      await sendStorageSave(session.sysid)
+    }
+
+    applyStage.value = 'done'
+    lastApplyAt.value = Date.now()
+    lastApplyAcked.value = acked
+    lastApplyMismatched.value = mismatched
+    lastApplyFailed.value = failed
+    applying.value = false
+  }
+
+  // Send one PARAM_SET and wait for the FC's PARAM_VALUE echo for that
+  // name. The echo carries whatever the FC actually stored (may differ
+  // if it clamped the value), so we resolve with status + acceptedValue.
+  async function writeParam(name: string, value: number, type: number, targetSys: number): Promise<WriteResult> {
+    return new Promise<WriteResult>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | null = null
+      let unsubscribe: (() => void) | null = null
+      const settle = (r: WriteResult) => {
+        if (timer)
+          clearTimeout(timer)
+        unsubscribe?.()
+        resolve(r)
+      }
+
+      unsubscribe = session.subscribeMessages((msg) => {
+        if (msg.msgid !== MSGID_PARAM_VALUE)
+          return
+        const pv = msg.data as ParamValue
+        const echoedName = pv.paramId.replace(/\0.*$/, '')
+        if (echoedName !== name)
+          return
+        const matched = Math.abs(pv.paramValue - value) <= VALUE_EQ_EPS * Math.max(1, Math.abs(value))
+        settle({
+          status: matched ? 'acked' : 'mismatched',
+          acceptedValue: pv.paramValue,
+        })
+      })
+
+      timer = setTimeout(() => {
+        settle({ status: 'failed', message: 'No response from drone' })
+      }, PARAM_ACK_TIMEOUT_MS)
+
+      session
+        .sendMessage(buildParamSet(targetSys, COMP_ID_AUTOPILOT, name, value, type))
+        .catch((e) => {
+          settle({ status: 'failed', message: e instanceof Error ? e.message : String(e) })
+        })
+    })
+  }
+
+  async function sendStorageSave(targetSys: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | null = null
+      let unsubscribe: (() => void) | null = null
+      const settle = (ok: boolean) => {
+        if (timer)
+          clearTimeout(timer)
+        unsubscribe?.()
+        resolve(ok)
+      }
+
+      unsubscribe = session.subscribeMessages((msg) => {
+        if (msg.msgid !== MSGID_COMMAND_ACK)
+          return
+        const ack = msg.data as CommandAck
+        if (ack.command !== MavCmd.PREFLIGHT_STORAGE)
+          return
+        settle(ack.result === MavResult.ACCEPTED)
+      })
+
+      timer = setTimeout(settle, STORAGE_ACK_TIMEOUT_MS, false)
+
+      session
+        .sendMessage(buildPreflightStorageSave(targetSys, COMP_ID_AUTOPILOT))
+        .catch(() => settle(false))
+    })
+  }
+
+  function dismissApplyResult() {
+    applyStage.value = null
+    writeStates.value.clear()
+    lastApplyAcked.value = 0
+    lastApplyMismatched.value = 0
+    lastApplyFailed.value = 0
+    applyError.value = null
+  }
+
   function clear() {
     params.value = new Map()
     edits.value = new Map()
     progress.value = null
     error.value = null
     loadedAt.value = null
+    writeStates.value = new Map()
+    applyStage.value = null
+    applyError.value = null
   }
 
   return {
@@ -179,5 +378,16 @@ export const useParamsStore = defineStore('params', () => {
     discardAll,
     load,
     clear,
+    applying,
+    applyStage,
+    applyError,
+    writeStates,
+    writeStateOf,
+    lastApplyAt,
+    lastApplyAcked,
+    lastApplyMismatched,
+    lastApplyFailed,
+    apply,
+    dismissApplyResult,
   }
 })

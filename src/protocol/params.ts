@@ -1,5 +1,5 @@
 import type { MavParamType } from 'mavlink-mappings/dist/lib/common'
-import { ParamRequestList } from 'mavlink-mappings/dist/lib/common'
+import { CommandLong, MavCmd, ParamRequestList, ParamSet } from 'mavlink-mappings/dist/lib/common'
 import metadataRaw from './param-metadata.json'
 
 // PARAM_REQUEST_LIST / PARAM_VALUE flow.
@@ -15,6 +15,10 @@ import metadataRaw from './param-metadata.json'
 // Editing + commit (PARAM_SET + PREFLIGHT_STORAGE) lands in next slices.
 
 export const MSGID_PARAM_VALUE = 22
+export const MSGID_COMMAND_ACK = 77
+
+// MAV_CMD_PREFLIGHT_STORAGE param1 actions (from MavLink spec).
+export const PREFLIGHT_STORAGE_PARAM_SAVE = 1
 
 export interface ParamRecord {
   name: string
@@ -28,6 +32,37 @@ export function buildParamRequestList(targetSystem: number, targetComponent: num
   req.targetSystem = targetSystem
   req.targetComponent = targetComponent
   return req
+}
+
+// Pad a param name to the 16-byte MAVLink param_id slot. Strings shorter
+// than 16 chars are null-terminated; exactly-16 fill the field without a
+// terminator. Our serializer handles either case.
+export function buildParamSet(targetSystem: number, targetComponent: number, name: string, value: number, type: MavParamType): ParamSet {
+  const ps = new ParamSet()
+  ps.targetSystem = targetSystem
+  ps.targetComponent = targetComponent
+  ps.paramId = name
+  ps.paramValue = value
+  ps.paramType = type
+  return ps
+}
+
+// MAV_CMD_PREFLIGHT_STORAGE with param1=1 → save current parameters to
+// non-volatile storage (EEPROM/flash). FC ACKs via COMMAND_ACK.
+export function buildPreflightStorageSave(targetSystem: number, targetComponent: number): CommandLong {
+  const cmd = new CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  cmd.command = MavCmd.PREFLIGHT_STORAGE
+  cmd._param1 = PREFLIGHT_STORAGE_PARAM_SAVE
+  cmd._param2 = 0
+  cmd._param3 = 0
+  cmd._param4 = 0
+  cmd._param5 = 0
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
 }
 
 // Render a param value as a string for display. Integer types are floored
