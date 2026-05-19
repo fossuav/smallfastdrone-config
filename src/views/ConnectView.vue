@@ -1,4 +1,25 @@
 <script setup lang="ts">
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Connect view — the operator's landing screen. Renders a hero card with
+// the rotating drone, a Connect/Disconnect action, and (once a heartbeat
+// arrives) the parsed vehicle line, firmware string, and the system
+// status panel of subsystem readiness icons. All state comes from the
+// session store; this view contains no protocol or transport logic.
+
 import { computed } from 'vue'
 import { useSessionStore } from '../stores/session'
 import SystemStatus from '../ui/components/SystemStatus.vue'
@@ -23,6 +44,8 @@ const autopilotLine = computed(() => {
   return session.firmwareVersion ? `${base} ${session.firmwareVersion}` : base
 })
 
+// Click handler for the single Connect / Disconnect button — the
+// session store handles the connecting / connected state machine.
 function toggle() {
   if (session.connected)
     session.disconnect()

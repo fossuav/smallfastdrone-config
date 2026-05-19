@@ -1,3 +1,25 @@
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Application routes. One entry per top-level view rendered into the
+// shell's <RouterView>. Each route carries display metadata (label, icon)
+// that the nav menu in App.vue reads to render itself, plus an optional
+// `expert: true` flag that hides the route from the menu when the
+// expert-mode toggle in the UI store is off. Views are lazily imported
+// so the initial bundle stays small.
+
 import type { RouteRecordRaw } from 'vue-router'
 import { createRouter, createWebHistory } from 'vue-router'
 

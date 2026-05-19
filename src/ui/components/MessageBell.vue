@@ -1,4 +1,25 @@
 <script setup lang="ts">
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Bell icon + popover in the nav. Lists every STATUSTEXT the session
+// store has seen this session, newest first, with a severity-coloured
+// left rule + icon. Count badge on the bell trigger shows the unread
+// total. Toasts for error / warning are emitted by the session store
+// directly — this component is the audit trail, not the alert path.
+
 import { computed } from 'vue'
 import { useSessionStore } from '../../stores/session'
 
@@ -26,6 +47,9 @@ function severityStyle(sev: number): { icon: string, klass: string, border: stri
   return { icon: 'i-lucide-message-square', klass: 'text-muted', border: 'border-l-default' }
 }
 
+// Cheap human-readable timestamp ("just now" / "12s ago" / "3m ago" /
+// "1h ago"). We don't reach for date-fns because the dependency budget
+// (PLAN.md row 7 area) doesn't justify it for a four-bucket formatter.
 function timeAgo(ms: number): string {
   const diff = Date.now() - ms
   if (diff < 5_000)

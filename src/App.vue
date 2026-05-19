@@ -1,4 +1,24 @@
 <script setup lang="ts">
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Top-level application shell: brand header (logo + nav + message bell +
+// expert toggle) above a routed main area. Reads the route table to
+// render the nav; filters out routes flagged expert:true unless the
+// operator has enabled expert mode in the UI store.
+
 import { computed } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import logoUrl from './assets/sfd-logo.png'
@@ -8,6 +28,10 @@ import MessageBell from './ui/components/MessageBell.vue'
 
 const ui = useUiStore()
 
+// Project the route table into the nav menu's expected shape. Routes
+// without a `meta.label` are not navigable (none today, but the filter
+// keeps the shape robust); routes flagged expert:true only show when
+// expert mode is on.
 const navItems = computed(() =>
   routes
     .filter(r => r.meta?.label)

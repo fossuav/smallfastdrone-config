@@ -1,4 +1,28 @@
 <script setup lang="ts">
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Expert-mode parameter browser. Lists every parameter the FC reports
+// with inline editing, type-aware editors (free-text with chip
+// suggestions for Values metadata, per-bit checkboxes for Bitmask
+// metadata, range tooltips), pending-edit highlighting, and an
+// Apply/Discard pair that drives the params store's commit pipeline.
+// This view is one of the few that's *deliberately* technical — it
+// exists as a safety hatch behind the expert toggle. The recipe + wizard
+// flows are the operator-facing primary surfaces.
+
 import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
 import {
   describeParamValue,
@@ -35,6 +59,9 @@ const editingName = ref<string | null>(null)
 const editText = ref('')
 const editInput = useTemplateRef<HTMLInputElement>('editInput')
 
+// Enter edit mode for a row: stash the displayed value as the input
+// draft and focus the input on the next tick (the input only mounts
+// once `editingName` flips to this row's name).
 function startEdit(name: string, displayedValue: string) {
   editingName.value = name
   editText.value = displayedValue
@@ -44,6 +71,9 @@ function startEdit(name: string, displayedValue: string) {
   })
 }
 
+// Parse the input as a number and hand it to the store as an edit.
+// Non-numeric input is dropped silently — the field already shows the
+// invalid text, and the row stays unchanged.
 function commitEdit() {
   const name = editingName.value
   if (!name)
@@ -56,6 +86,8 @@ function commitEdit() {
   editText.value = ''
 }
 
+// Exit edit mode without recording the draft as an edit. Bound to the
+// Escape key on the input.
 function cancelEdit() {
   editingName.value = null
   editText.value = ''
@@ -98,6 +130,10 @@ interface RowMeta {
   full: string
   units: string
 }
+// Collapse the SFD metadata for one parameter into the three strings
+// the row needs: a one-line summary for the always-visible caption,
+// the full description for the tooltip / expanded view, and the units
+// string (already in operator-friendly form like "cm" or "deg").
 function meta(name: string): RowMeta {
   const m = getParamMeta(name)
   if (!m)
@@ -106,6 +142,8 @@ function meta(name: string): RowMeta {
   const full = m.description ?? m.displayName ?? ''
   return { short, full, units: m.units ?? '' }
 }
+// Return the first sentence of a description for the short-caption slot.
+// Falls back to the full string when no terminator is found.
 function firstSentence(s: string): string {
   const i = s.search(/[.!?](\s|$)/)
   return i === -1 ? s : s.slice(0, i + 1)
