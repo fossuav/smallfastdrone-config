@@ -244,8 +244,10 @@ onMounted(() => {
             <tr
               v-for="p in filtered"
               :key="p.name"
-              class="border-default border-t"
-              :class="store.isDirty(p.name) ? 'bg-secondary-50/40 dark:bg-secondary-950/30' : ''"
+              class="border-default border-t border-l-4"
+              :class="store.isDirty(p.name)
+                ? 'bg-secondary-100 dark:bg-secondary-900/40 border-l-secondary-500'
+                : 'border-l-transparent'"
               :title="meta(p.name).full || undefined"
             >
               <td class="text-highlighted px-3 py-1.5 font-mono text-xs whitespace-nowrap">
