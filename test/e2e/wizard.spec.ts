@@ -57,15 +57,18 @@ test('Wizard library shows unlocked + locked cards, and frame-select writes FRAM
   await expect(page.getByText('Done — your drone knows its motor layout.')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('Set as a Hex X.')).toBeVisible()
 
+  // Returning to the library shows the completion badge + the wizard's
+  // dynamic outcome instead of the manifest's prospective outcome.
+  await page.getByRole('button', { name: 'Back to the wizard library' }).click()
+  await expect(page.getByRole('heading', { name: 'Bringup wizards' })).toBeVisible()
+  const frameCard = page.getByRole('link', { name: /Open the Pick your frame wizard/ })
+  await expect(frameCard.getByText('Done')).toBeVisible()
+  await expect(frameCard.getByText('Set as a Hex X')).toBeVisible()
+
   // Cross-check via the param browser: FRAME_CLASS should now read 2.
-  // Flip expert mode on so the Parameters route appears.
   await page.getByRole('switch', { name: 'Expert' }).click()
   await page.getByRole('link', { name: 'Parameters' }).click()
   await expect(page.getByRole('heading', { name: 'Parameters' })).toBeVisible({ timeout: 5_000 })
-  // Wait for the param fetch (the params store is shared with the wizard,
-  // so the data may already be loaded — load() short-circuits in that case
-  // and the table appears immediately).
-  // Filter to FRAME_ via the params view's textbox (placeholder-named).
   await page.getByRole('textbox', { name: /Filter by name/ }).fill('FRAME_')
   await expect(page.getByRole('row', { name: /FRAME_CLASS/ })).toContainText('2')
   await expect(page.getByRole('row', { name: /FRAME_TYPE/ })).toContainText('1')
