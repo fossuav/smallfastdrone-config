@@ -35,7 +35,12 @@ export default defineConfig({
       command: './scripts/test-sitl-bridge.sh',
       url: 'http://localhost:5761/',
       timeout: 60_000,
-      reuseExistingServer: !isCi,
+      // Always restart SITL+bridge per test run. Re-using is dangerous:
+      // if a prior `bun run dev:sitl` left the bridge alive but SITL had
+      // since died, Playwright would reuse the dead-SITL bridge and every
+      // test would fail to connect. SITL startup is ~2 s — cheap enough
+      // to always pay.
+      reuseExistingServer: false,
       stdout: 'pipe',
       stderr: 'pipe',
     },

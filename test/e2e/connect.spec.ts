@@ -34,6 +34,15 @@ test('Connect view talks to SITL, decodes heartbeat + AUTOPILOT_VERSION', async 
   // Sysid 1 is the SITL default
   await expect(page.getByText('System ID:')).toBeVisible()
 
+  // The message bell in the nav has accrued the boot STATUSTEXTs.
+  await page.getByRole('button', { name: 'Recent messages from your drone' }).click()
+  // Boot banner — sent by ArduPilot in response to our DO_SEND_BANNER.
+  await expect(page.getByText(/ArduCopter V.*SFD/)).toBeVisible({ timeout: 5_000 })
+  // One of the routine boot lines we always see from SITL.
+  await expect(page.getByText(/ArduPilot Ready|Barometer 1 calibration/)).toBeVisible()
+  // Close the popover by clicking the bell again (or pressing Escape).
+  await page.keyboard.press('Escape')
+
   // Disconnect works without throwing
   await page.getByRole('button', { name: 'Disconnect' }).click()
   await expect(page.getByRole('button', { name: 'Connect drone' })).toBeVisible()

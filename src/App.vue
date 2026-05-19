@@ -4,6 +4,7 @@ import { RouterLink, RouterView } from 'vue-router'
 import logoUrl from './assets/sfd-logo.png'
 import { routes } from './router'
 import { useUiStore } from './stores/ui'
+import MessageBell from './ui/components/MessageBell.vue'
 
 const ui = useUiStore()
 
@@ -35,10 +36,13 @@ const navItems = computed(() =>
             <UNavigationMenu :items="navItems" />
           </div>
 
-          <label class="flex cursor-pointer items-center gap-2 text-sm">
-            <span class="text-muted select-none">Expert</span>
-            <USwitch v-model="ui.expert" color="secondary" />
-          </label>
+          <div class="flex items-center gap-3">
+            <MessageBell />
+            <label class="flex cursor-pointer items-center gap-2 text-sm">
+              <span class="text-muted select-none">Expert</span>
+              <USwitch v-model="ui.expert" color="secondary" />
+            </label>
+          </div>
         </div>
       </header>
 
