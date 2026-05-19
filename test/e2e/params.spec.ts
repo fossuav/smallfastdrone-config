@@ -96,6 +96,45 @@ test('Param editor: enum-style params show all suggestions as chips', async ({ p
   await expect(row.locator('.italic').filter({ hasText: /Terrain/ })).toBeVisible()
 })
 
+test('Param editor: bitmask params expose per-bit checkboxes', async ({ page }) => {
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText('Connected to your Quadcopter')).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('switch', { name: 'Expert' }).click()
+  await page.getByRole('link', { name: 'Parameters' }).click()
+  await expect(page.getByText(/Fetching parameters/)).not.toBeVisible({ timeout: 30_000 })
+
+  // FENCE_TYPE has Bitmask metadata: bit 0 = "Max altitude", bit 1 =
+  // "Circle Centered on Home", bit 2 = "Inclusion/Exclusion …", bit 3 =
+  // "Min altitude".
+  await page.getByPlaceholder(/Filter by name/).fill('FENCE_TYPE')
+  const row = page.locator('tbody tr').first()
+  await expect(row.locator('td').first()).toHaveText('FENCE_TYPE')
+
+  // Click to edit → input + a checkbox row per documented bit.
+  await row.locator('button[type="button"]').first().click()
+  const input = row.locator('input[type="text"]')
+  await expect(input).toBeVisible()
+
+  // All four bit-checkboxes are present.
+  await expect(row.getByRole('checkbox', { name: /bit 0: Max altitude/ })).toBeVisible()
+  await expect(row.getByRole('checkbox', { name: /bit 1: Circle/ })).toBeVisible()
+  await expect(row.getByRole('checkbox', { name: /bit 2: Inclusion/ })).toBeVisible()
+  await expect(row.getByRole('checkbox', { name: /bit 3: Min altitude/ })).toBeVisible()
+
+  // Clear the input first (FENCE_TYPE may default to a non-zero mask on
+  // SITL), then toggle bits 0 and 3 → expected value 1 + 8 = 9.
+  await input.fill('0')
+  await row.getByRole('checkbox', { name: /bit 0/ }).click()
+  await expect(input).toHaveValue('1')
+  await row.getByRole('checkbox', { name: /bit 3/ }).click()
+  await expect(input).toHaveValue('9')
+
+  // Press Enter to commit; banner appears.
+  await input.press('Enter')
+  await expect(page.getByText('1 change pending', { exact: false })).toBeVisible()
+})
+
 test('Param editor: Apply writes to SITL and saves to flash', async ({ page }) => {
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()

@@ -68,6 +68,30 @@ function pickSuggestion(value: string) {
   commitEdit()
 }
 
+// Bitmask helpers — for params with Bitmask metadata. The input still
+// holds the integer; toggling a checkbox flips the corresponding bit in
+// editText. No auto-commit so the operator can toggle several bits then
+// press Enter (or blur) to commit once.
+function isBitSet(text: string, bit: string | number): boolean {
+  const v = Number.parseInt(text, 10)
+  if (Number.isNaN(v))
+    return false
+  const b = typeof bit === 'string' ? Number.parseInt(bit, 10) : bit
+  if (!Number.isFinite(b))
+    return false
+  return (v & (1 << b)) !== 0
+}
+function toggleBit(bit: string | number) {
+  const current = Number.parseInt(editText.value, 10)
+  const base = Number.isNaN(current) ? 0 : current
+  const b = typeof bit === 'string' ? Number.parseInt(bit, 10) : bit
+  if (!Number.isFinite(b))
+    return
+  const mask = 1 << b
+  const next = (base & mask) ? (base & ~mask) : (base | mask)
+  editText.value = String(next)
+}
+
 // Per-row helpers.
 interface RowMeta {
   short: string
@@ -300,6 +324,40 @@ onMounted(() => {
                     >
                       <span class="text-muted font-mono">{{ key }}</span> · {{ label }}
                     </button>
+                  </div>
+                  <!-- Bitmask: one checkbox per documented bit. Toggling
+                       updates editText (the integer) without committing;
+                       the operator commits via Enter or blur after they
+                       finish flipping bits. Wrapping div carries the
+                       @click + @mousedown.prevent because <label> would
+                       try to focus the input on click. -->
+                  <div
+                    v-else-if="getParamMeta(p.name)?.bitmask"
+                    class="mt-1 flex flex-col items-end gap-0.5"
+                  >
+                    <div
+                      v-for="(label, bit) in getParamMeta(p.name)?.bitmask"
+                      :key="bit"
+                      role="checkbox"
+                      :aria-checked="isBitSet(editText, bit)"
+                      :aria-label="`bit ${bit}: ${label}`"
+                      tabindex="0"
+                      class="bg-elevated hover:bg-secondary-100 dark:hover:bg-secondary-900/50 flex w-full max-w-full cursor-pointer items-center justify-end gap-1.5 rounded px-1.5 py-0.5 text-right text-[10px] whitespace-normal break-words select-none"
+                      @mousedown.prevent
+                      @click="toggleBit(bit)"
+                      @keydown.space.prevent="toggleBit(bit)"
+                      @keydown.enter.prevent="toggleBit(bit)"
+                    >
+                      <span>{{ label }}</span>
+                      <span class="text-muted font-mono">bit {{ bit }}</span>
+                      <input
+                        type="checkbox"
+                        tabindex="-1"
+                        :checked="isBitSet(editText, bit)"
+                        class="border-default text-secondary pointer-events-none size-3"
+                        @click.prevent
+                      >
+                    </div>
                   </div>
                 </template>
                 <!-- Display mode: click to edit -->
