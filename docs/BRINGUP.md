@@ -1,23 +1,21 @@
 # Bringup Workflow Design
 
-> Read [PLAN.md](../PLAN.md) and [ARCHITECTURE.md](ARCHITECTURE.md) first.
+> Read [PLAN.md](../PLAN.md), [WIZARDS.md](WIZARDS.md), and [ARCHITECTURE.md](ARCHITECTURE.md) first.
 
 The bringup workflow is the **primary value of this tool**. It walks an operator from "I have a powered, unconfigured flight controller" to "this drone is tuned and safe to fly," in the shortest reasonable time, with the lowest reasonable risk.
 
-Two interaction modes share the same primitives (read params, write params, verify, prompt operator):
-
-- **Wizard** for first-time bringup of a new drone. Strict, sequential, gated.
-- **Recipes** for tuning, re-tuning, mode setup, and SFD-specific tweaks on an already-flying drone.
+Bringup is implemented as a **meta-wizard** in the wizard runtime — see [WIZARDS.md](WIZARDS.md) for the contract. Each phase below is an independently-runnable **sub-wizard** in the library. Operators can run the full meta-wizard for first bringup, or jump straight to any sub-wizard for targeted re-tuning. Recipes are wizards too (degenerate case — one step, no live state), shown alongside everything else in the same library.
 
 ## Wizard phases
 
-Each phase has:
+Each phase is a sub-wizard (see [WIZARDS.md](WIZARDS.md) for the manifest shape). The bringup meta-wizard chains them in order and gates progression. Phase contract:
 
 - **prerequisites** — what must be true before entering
 - **actions** — what the tool does or asks the operator to do
 - **verification** — automated checks against telemetry / params
 - **gate** — operator confirmation; auto-pass shortcuts when all checks pass
 - **visual** — every phase has a hero visual (3D drone, illustration, live data viz). No text-only phases. See [UX.md](UX.md) for the visual language.
+- **engines** — `desktop` for config-only phases (Frame, RC, Mode setup); `lua` or `log` for phases that need flight data (First hover, Filters, PIDs). The wizard runtime picks the engine per FC capability — see [WIZARDS.md](WIZARDS.md).
 
 | # | Phase | Owns | Gate | Hero visual |
 |---|---|---|---|---|
@@ -37,21 +35,13 @@ Phases are advisory; an experienced operator can skip ahead but the gate must be
 
 ### Phase contract
 
-```ts
-interface BringupPhase {
-  id: string
-  title: string
-  prerequisites: (state: WizardState) => PrereqResult
-  enter: (api: WizardApi) => Promise<void>
-  verify: (state: WizardState) => VerifyResult
-}
-```
-
-The wizard runtime is dumb: walk phases in order, block on verify failures, persist progress to IndexedDB.
+Phases are sub-wizards; the contract lives in [WIZARDS.md](WIZARDS.md). The bringup meta-wizard adds only sequencing + gating on top — walk sub-wizards in order, block on a sub-wizard's failed `verify`, persist progress to IndexedDB. Each sub-wizard is also independently runnable from the library.
 
 ## Recipe library
 
-Recipes are ordered param batches with optional verify steps. They live in `src/workflow/recipes/`. **Data-first** — JSON/YAML where possible. Lift a recipe to TS code only when it needs branching or computation.
+Recipes are **wizards** with one step, no live state, `engines: [desktop]`. They ship data-first as `recipe.json` at `src/wizards/recipes/<id>/`, and the wizard runtime wraps each into a generated manifest. They appear in the same library as everything else — the operator sees an "indoor cinewhoop" card next to a "frame selection" card without needing to know one is a recipe and the other is a multi-step wizard.
+
+Lift a recipe to TS code (manifest + DesktopView) only when it needs branching, computation, or a non-trivial visual.
 
 ### Initial recipes (SFD-flavoured)
 

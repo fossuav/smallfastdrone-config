@@ -41,7 +41,8 @@ When implementing UI, ask: *would a non-expert operator understand this and feel
 - [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md) — adopted Vue / TS / formatter standards. **Read before writing any code.** Lists the "AI slop" patterns to avoid.
 - [docs/TESTING.md](docs/TESTING.md) — test pyramid, SFD submodule + SITL, bridge, per-phase test acceptance. **Read before writing tests or new protocol/workflow code.**
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layered design, module layout, data model.
-- [docs/BRINGUP.md](docs/BRINGUP.md) — wizard phase contract and recipe library design.
+- [docs/WIZARDS.md](docs/WIZARDS.md) — wizard runtime contract: manifest, engines (lua/log/desktop), views, lifecycle, library, commercial gating seam. **Read before touching anything wizard-shaped, including recipes (recipes are wizards).**
+- [docs/BRINGUP.md](docs/BRINGUP.md) — bringup operator-flow detail; bringup is itself a meta-wizard built on the runtime in WIZARDS.md.
 - [docs/SECURITY.md](docs/SECURITY.md) — security seam, threat model, what contributors must not do.
 
 ## Tech stack — locked

@@ -40,7 +40,7 @@ See [docs/UX.md](docs/UX.md) for the operator-first design playbook.
 | 6c | BLHeli 4-way interface | Full read + write (settings + ESC firmware flash) | Match betaflight-configurator capability. Reference: betaflight `fourway.js` and `AP_BLHeli/blheli_4way_protocol.h`. |
 | 7 | Source of truth | Live FC | Tool is a viewer/editor. Snapshots are deliberate operator exports, not background sync. |
 | 8 | Fleet model | Single-drone session | Matches betaflight-configurator UX; cheapest. |
-| 9 | Workflow style | Wizard for new drone, recipes for tuning | Hybrid. |
+| 9 | Workflow primitive | Pluggable wizards (recipes subsumed as degenerate wizards) | Single runtime, single contract. Wizards are independent units declared via manifest, bundled at build time, surfaced in a wizard library. Engine choice (Lua-on-FC / log-replay / desktop-pure) is internal — runtime picks per FC capability, operator never picks. Log-replay engine guarantees universal coverage for FCs without scripting. Pluggability enables a commercial gating seam (`locked: true` flag) for paid Pro wizards. Recipes become wizards with `engines: [desktop]`, one step, no live state. Bringup workflow becomes a meta-wizard that chains sub-wizards. See [docs/WIZARDS.md](docs/WIZARDS.md). |
 | 10 | Crypto in v1 | Tool-side seam only | Real crypto exists elsewhere. Don't re-implement; don't preclude. Web Crypto API only when needed. |
 | 11 | Package manager + runtime | Bun | Fast install, native TS execution, single tool. Vite still does the bundling. |
 | 12 | Lint + format | `@antfu/eslint-config` (ESLint flat config + stylistic formatter) | De facto standard in modern Vue/Vite/Nuxt ecosystem. Includes Vue Style Guide rules, TS rules, and a built-in formatter (no Prettier needed). Maintained by a Vue core team member. **Revised from earlier Biome choice** — Biome's Vue SFC support is not first-class in 2026. See [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md). |
@@ -130,33 +130,37 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
 
 **Done when:** Operator can fetch full param set, edit values, see dirty diff, commit-and-save, then disconnect/reconnect and see the new values.
 
-### Phase 2 — Bringup wizard skeleton
-- Wizard state machine: hand-rolled (default) unless complexity forces XState.
-- Phases per `docs/BRINGUP.md`: Pre-flight → Frame → Sensors → RC → ESC/Motors → First-hover prep → First hover → Filters → PIDs → Mode setup → Verify.
-- Per-phase contract: prerequisites, enter, verify, gate.
-- Wizard progress persisted in IndexedDB keyed by sysid + frame fingerprint.
-- Stub each phase with operator instructions and verify hooks; only Pre-flight and Frame are functional in this phase.
+### Phase 2 — Wizard runtime + first wizards
+- Wizard runtime (`src/workflow/wizard-runtime.ts`): manifest discovery, capability detection, engine selection, lifecycle hooks, IndexedDB persistence keyed by `${fc_uuid}_${wizard_id}`.
+- Wizard library view (`src/views/WizardLibraryView.vue`): cards driven by manifests, filtered by FC capability, locked-state rendering (`locked: true` → greyed card + Pro badge + `unlock_blurb`, no real entitlement check in v1).
+- Engine implementations in scope: **desktop** only (Lua + log engines have their contracts shipped but no first implementation here — see Phase 3 and Phase 4).
+- Two real wizards end-to-end:
+  - `frame-select` — desktop engine, writes `FRAME_CLASS` + `FRAME_TYPE`, demonstrates the wizard contract.
+  - `bringup` — meta-wizard, walks operator through `frame-select` + a placeholder Pre-flight sub-wizard, demonstrates the meta pattern.
+- One locked stub wizard in the library so the commercial gating affordance is visible from day one.
+- Contract is [docs/WIZARDS.md](docs/WIZARDS.md). Bringup operator-flow detail in [docs/BRINGUP.md](docs/BRINGUP.md).
 
-**Done when:** Operator can start a wizard, advance through Pre-flight and Frame phases, see gated progression, resume after disconnect.
+**Done when:** Operator can open the wizard library, see all wizards (with correct capability + locked badges), run `frame-select` standalone to write frame params, run the `bringup` meta-wizard through its first sub-step, and resume an interrupted wizard after disconnect/reconnect.
 
-### Phase 3 — Recipe library
-- Recipe runner: ordered batches with verify steps; reuses param store's dirty/write paths.
-- Initial SFD-flavoured recipes (data-first, in `src/workflow/recipes/`):
+### Phase 3 — Recipe-style wizards + first Lua engine
+- SFD-flavoured desktop-engine wizards (formerly recipes), data-first as `recipe.json` wrapped in generated manifests:
   - `indoor-cinewhoop-tune`
   - `throw-mode-setup` (incl. `THROW_NEXTMODE=ACRO` per smallfastdrone commit `5534d1f62b`, and `THROW_SRC_INI` audit for carrier-mounted vehicles)
   - `first-flight-failsafes`
-  - `notch-from-log` (operator points at a hover .bin; tool computes peak Hz; writes `INS_HNTCH_*`)
-- Recipes appear as a library page; each shows description, prerequisites, the steps it will perform, and a dry-run preview before commit.
+- First **Lua-engine** wizard end-to-end: exercises the install / arm / run / uninstall lifecycle in [docs/WIZARDS.md](docs/WIZARDS.md). Candidate: a between-flights `throw-readiness-check` that monitors throw-detect thresholds during a test toss without taking off.
+- Lua lifecycle plumbing in the runtime: MAVLink FTP upload of `applet.lua`, `SCR_ENABLE` orchestration (with single operator confirm + reboot if currently off), `WIZ_<ID>_ACTIVE` control param, applet-file removal on completion, orphan detection at reconnect.
 
-**Done when:** Operator can browse recipes, dry-run, commit, and see results in the param browser.
+**Done when:** Operator can run any of the desktop wizards through to commit, and the Lua-engine wizard runs end-to-end against SITL with scripting enabled — applet uploaded, runs, completes, uninstalls cleanly. SITL log shows no orphan script after completion.
 
-### Phase 4 — Log handling
+### Phase 4 — Log handling + first log-engine wizard
 - Pull .bin via `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`.
 - Save to disk via File System Access API (PWA constraint).
-- Hand-off to `../analysis-private/` documented; no in-tool parsing.
+- Hand-off to `../analysis-private/` documented; no in-tool full-log parsing.
+- **Narrow in-tool .bin parser** — only the message types declared by log-engine wizards' extractors. Skip everything else for speed. The hook satisfies the `LogExtractor` contract in [docs/WIZARDS.md](docs/WIZARDS.md).
+- First **log-engine** wizard end-to-end: `notch-from-hover` (operator points at a hover .bin; extractor computes peak Hz; runtime writes `INS_HNTCH_*` via the param store).
 - Log pipeline structured to allow a future `decrypt(bytes) → bytes` step (see SECURITY.md).
 
-**Done when:** Operator can list logs on FC, download one, and find it on disk in a known location.
+**Done when:** Operator can list logs on FC, download one, find it on disk, and run `notch-from-hover` against it to commit a notch-filter config — all without leaving the tool.
 
 ### Phase 5 — DFU firmware flashing + security seam
 - `src/security/uploader.ts` — `SignedArtifactUploader` interface; v1 implementation is a passthrough that calls the protocol-layer file/upload primitive.
