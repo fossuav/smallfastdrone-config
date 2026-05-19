@@ -1,0 +1,279 @@
+<script setup lang="ts">
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Desktop view for the frame-select wizard. Renders a grid of motor-
+// layout cards, lets the operator pick one, and on confirm writes
+// FRAME_CLASS + FRAME_TYPE through the params store's dirty/apply
+// pipeline. The hero visual on each card is a tiny topdown SVG showing
+// the actual motor positions for that frame, with a forward-direction
+// arrow so operators can match it against their physical drone.
+
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useParamsStore } from '../../stores/params'
+import { useSessionStore } from '../../stores/session'
+
+const session = useSessionStore()
+const paramsStore = useParamsStore()
+const router = useRouter()
+
+// Frame option a card represents — visible to the operator under a
+// plain-language label, but the underlying FRAME_CLASS + FRAME_TYPE
+// integer pair is what gets written.
+interface FrameOption {
+  id: string
+  label: string
+  description: string
+  class_: number
+  type_: number
+}
+
+// The frames slice A supports. Covers the common multicopter layouts;
+// Y6, OctaQuad, Heli, Tri, etc. ship in later slices once the wizard
+// pattern is settled.
+const FRAMES: FrameOption[] = [
+  { id: 'quad-x', label: 'Quad X', description: 'Four motors at the corners — the most common layout.', class_: 1, type_: 1 },
+  { id: 'quad-plus', label: 'Quad Plus', description: 'Four motors at front, back, left, right.', class_: 1, type_: 0 },
+  { id: 'quad-h', label: 'Quad H', description: 'Like Quad X but with a rectangular body.', class_: 1, type_: 3 },
+  { id: 'hex-x', label: 'Hex X', description: 'Six motors with two facing forward.', class_: 2, type_: 1 },
+  { id: 'hex-plus', label: 'Hex Plus', description: 'Six motors with one facing forward.', class_: 2, type_: 0 },
+  { id: 'octo-x', label: 'Octo X', description: 'Eight motors arranged in an X.', class_: 3, type_: 1 },
+  { id: 'octo-plus', label: 'Octo Plus', description: 'Eight motors arranged in a Plus.', class_: 3, type_: 0 },
+]
+
+// Wizard state machine.
+type Phase = 'loading' | 'picking' | 'confirming' | 'applying' | 'done' | 'error'
+const phase = ref<Phase>('loading')
+const selectedId = ref<string | null>(null)
+const errorMessage = ref<string | null>(null)
+const selected = computed<FrameOption | null>(() =>
+  FRAMES.find(f => f.id === selectedId.value) ?? null,
+)
+
+// Compute motor positions for a (class, type) pair. Origin is centre,
+// forward is up (negative Y in SVG coords). Returns positions in a
+// -100..100 viewBox; consumers add a viewBox of -100 -100 200 200.
+function motorPositions(class_: number, type_: number): { x: number, y: number }[] {
+  if (class_ === 1) {
+    if (type_ === 0)
+      return polarN(4, 0) // Quad Plus
+    return polarN(4, 45) // Quad X / H — visually equivalent topdown
+  }
+  if (class_ === 2)
+    return polarN(6, type_ === 1 ? 30 : 0) // Hex X / Plus
+  if (class_ === 3)
+    return polarN(8, type_ === 1 ? 22.5 : 0) // Octo X / Plus
+  return []
+}
+
+// N motors evenly spaced around a circle, starting at startDeg measured
+// clockwise from forward (up). SVG y is positive-down so we offset the
+// angle to put 0° at top.
+function polarN(n: number, startDeg: number): { x: number, y: number }[] {
+  const radius = 70
+  const out: { x: number, y: number }[] = []
+  for (let i = 0; i < n; i++) {
+    const deg = startDeg + (360 * i / n)
+    const rad = ((deg - 90) * Math.PI) / 180
+    out.push({ x: radius * Math.cos(rad), y: radius * Math.sin(rad) })
+  }
+  return out
+}
+
+// On entry, make sure we have the FC's current parameter set. The
+// wizard needs FRAME_CLASS + FRAME_TYPE to exist in the store before
+// setEdit() can touch them — setEdit is a silent no-op for unknown
+// params, which would let the wizard report "done" with no actual write.
+onMounted(async () => {
+  if (paramsStore.count === 0 && session.connected && session.sysid !== null) {
+    await paramsStore.load()
+  }
+  // Move out of loading regardless of whether load succeeded — if it
+  // didn't, confirm() will surface the failure when we try to write.
+  phase.value = 'picking'
+})
+
+// Operator clicked a frame card. Just record the pick; the dedicated
+// confirm step keeps Next-equals-action surprises off the table.
+function pick(option: FrameOption) {
+  selectedId.value = option.id
+  phase.value = 'confirming'
+}
+
+// Operator pressed the back affordance from confirm — return to the
+// grid without losing the previous selection (it stays highlighted).
+function backToPicking() {
+  phase.value = 'picking'
+}
+
+// Operator confirmed. Stage the two param edits and hand off to the
+// params store's apply pipeline. Success / failure is reflected via
+// the store's per-write states and the lastApplyAcked / Failed counters.
+async function confirm() {
+  if (!selected.value)
+    return
+  phase.value = 'applying'
+  errorMessage.value = null
+
+  const target = selected.value
+  paramsStore.setEdit('FRAME_CLASS', target.class_)
+  paramsStore.setEdit('FRAME_TYPE', target.type_)
+
+  // Both params must exist in the FC's set, or setEdit silently dropped
+  // them. Surface that as a clear error rather than a misleading success.
+  if (!paramsStore.isDirty('FRAME_CLASS') || !paramsStore.isDirty('FRAME_TYPE')) {
+    phase.value = 'error'
+    errorMessage.value = 'Your drone\'s firmware doesn\'t expose FRAME_CLASS / FRAME_TYPE — this wizard works on multicopters with current ArduPilot.'
+    return
+  }
+
+  await paramsStore.apply()
+
+  if (paramsStore.lastApplyFailed > 0) {
+    phase.value = 'error'
+    errorMessage.value = 'One or more settings didn\'t take. Open expert mode → Parameters to see what happened.'
+    return
+  }
+  phase.value = 'done'
+}
+
+// Return to the library — bound to the Done button after a successful
+// apply, and to Cancel from the confirm step.
+function back() {
+  router.push('/wizard')
+}
+</script>
+
+<template>
+  <div class="space-y-4">
+    <div v-if="phase === 'loading'" class="py-12 text-center text-muted">
+      <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin" />
+      <p class="mt-2 text-sm">
+        Loading your drone's current settings…
+      </p>
+    </div>
+
+    <div v-else-if="phase === 'picking' || phase === 'confirming'">
+      <p class="text-muted text-sm">
+        Look at the top of your drone and pick the layout that matches. Forward
+        is the way the arrow points.
+      </p>
+
+      <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <button
+          v-for="f in FRAMES"
+          :key="f.id"
+          type="button"
+          class="flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-colors"
+          :class="selectedId === f.id
+            ? 'border-primary bg-primary/10'
+            : 'border-default hover:border-primary hover:bg-elevated'"
+          :aria-pressed="selectedId === f.id"
+          @click="pick(f)"
+        >
+          <svg viewBox="-100 -100 200 200" class="size-20 text-default">
+            <!-- arms -->
+            <line
+              v-for="(m, i) in motorPositions(f.class_, f.type_)"
+              :key="`arm-${i}`"
+              :x1="0"
+              :y1="0"
+              :x2="m.x"
+              :y2="m.y"
+              stroke="currentColor"
+              stroke-width="6"
+              stroke-linecap="round"
+            />
+            <!-- body -->
+            <rect x="-18" y="-18" width="36" height="36" rx="4" fill="currentColor" />
+            <!-- motors -->
+            <circle
+              v-for="(m, i) in motorPositions(f.class_, f.type_)"
+              :key="`motor-${i}`"
+              :cx="m.x"
+              :cy="m.y"
+              r="10"
+              fill="currentColor"
+            />
+            <!-- forward indicator -->
+            <polygon
+              points="0,-95 -7,-82 7,-82"
+              class="fill-primary"
+            />
+          </svg>
+          <span class="text-sm font-medium text-highlighted">{{ f.label }}</span>
+        </button>
+      </div>
+
+      <div
+        v-if="phase === 'confirming' && selected"
+        class="border-default mt-6 border-t pt-4"
+      >
+        <p class="text-default">
+          Set your drone up as a
+          <span class="font-semibold text-highlighted">{{ selected.label }}</span>?
+          <span class="text-muted">{{ selected.description }}</span>
+        </p>
+        <div class="mt-3 flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="backToPicking">
+            Cancel
+          </UButton>
+          <UButton color="primary" @click="confirm">
+            Apply
+          </UButton>
+        </div>
+      </div>
+    </div>
+
+    <div v-else-if="phase === 'applying'" class="py-12 text-center">
+      <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin text-primary" />
+      <p class="mt-2 text-sm text-default">
+        Writing to your drone…
+      </p>
+    </div>
+
+    <div v-else-if="phase === 'done'" class="py-8 text-center">
+      <UIcon name="i-lucide-circle-check" class="text-success size-10" />
+      <h2 class="text-highlighted mt-3 text-lg font-semibold">
+        Done — your drone knows its motor layout.
+      </h2>
+      <p v-if="selected" class="text-muted mt-1 text-sm">
+        Set as a {{ selected.label }}.
+      </p>
+      <UButton class="mt-4" color="primary" @click="back">
+        Back to the wizard library
+      </UButton>
+    </div>
+
+    <div v-else-if="phase === 'error'" class="py-6 text-center">
+      <UIcon name="i-lucide-circle-alert" class="text-error size-10" />
+      <h2 class="text-highlighted mt-3 text-lg font-semibold">
+        Couldn't finish setting your frame
+      </h2>
+      <p class="text-muted mt-1 text-sm">
+        {{ errorMessage }}
+      </p>
+      <div class="mt-4 flex justify-center gap-2">
+        <UButton color="neutral" variant="outline" @click="backToPicking">
+          Try again
+        </UButton>
+        <UButton color="primary" @click="back">
+          Back to the library
+        </UButton>
+      </div>
+    </div>
+  </div>
+</template>
