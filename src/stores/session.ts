@@ -46,6 +46,7 @@ import {
   buildRequestMessage,
   decodeFirmwareVersion,
   deriveSubsystemStatus,
+  formatFcUid,
   MAV_SEVERITY_ERROR_MAX,
   MAV_SEVERITY_WARNING,
   MavLinkSession,
@@ -85,6 +86,11 @@ export const useSessionStore = defineStore('session', () => {
 
   // Populated by AUTOPILOT_VERSION response.
   const firmwareVersion = ref<string | null>(null)
+  // Stable per-FC identifier derived from AUTOPILOT_VERSION's uid / uid2.
+  // Used to key per-drone persisted state (wizard progress, eventually
+  // wizard resume snapshots) so that switching drones doesn't bleed
+  // state from one into the other. Null until AUTOPILOT_VERSION arrives.
+  const fcUid = ref<string | null>(null)
 
   // Set true if any STATUSTEXT mentions "SFD" — the boot banner is the
   // primary place this comes through (e.g. "ArduCopter V4.7.0-beta4-SFD
@@ -187,6 +193,7 @@ export const useSessionStore = defineStore('session', () => {
     else if (msg.msgid === MSGID_AUTOPILOT_VERSION) {
       const v = msg.data as AutopilotVersion
       firmwareVersion.value = decodeFirmwareVersion(v.flightSwVersion, v.flightCustomVersion)
+      fcUid.value = formatFcUid(v.uid, v.uid2)
     }
     else if (msg.msgid === MSGID_STATUSTEXT) {
       const st = msg.data as StatusText
@@ -218,6 +225,7 @@ export const useSessionStore = defineStore('session', () => {
     systemStatus.value = null
     lastHeartbeatAt.value = null
     firmwareVersion.value = null
+    fcUid.value = null
     isSfd.value = false
     recentStatusTexts.value = []
     subsystems.value = []
@@ -294,6 +302,7 @@ export const useSessionStore = defineStore('session', () => {
     systemStatus,
     lastHeartbeatAt,
     firmwareVersion,
+    fcUid,
     isSfd,
     recentStatusTexts,
     subsystems,
