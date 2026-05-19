@@ -1,4 +1,17 @@
-import type { Transport, TransportEvent, TransportEventListener } from './types'
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
 
 // Production transport: USB CDC-ACM via the Web Serial API. Used when the
 // operator clicks "Connect drone" without the `?transport=websocket&...`
@@ -7,6 +20,8 @@ import type { Transport, TransportEvent, TransportEventListener } from './types'
 // Web Serial API requires a Chromium-family browser and a secure context
 // (HTTPS or http://localhost). `connect()` must be called inside a user
 // gesture handler — our Connect button click chain satisfies that.
+
+import type { Transport, TransportEvent, TransportEventListener } from './types'
 
 const BAUD_RATE = 115_200 // ArduPilot USB-CDC default; doesn't actually matter
 //                          for CDC-ACM but the API requires a value.
@@ -29,6 +44,11 @@ export class WebSerialTransport implements Transport {
     error: new Set<(err: Error) => void>(),
   }
 
+  // Prompt the operator to pick a serial port, open it at the FC's default
+  // settings, and start a background read loop that fans data events out
+  // to subscribers. Must be invoked from a user gesture handler (Web Serial
+  // requirement). Throws a friendly Error if the operator cancels the
+  // browser's port picker.
   async connect(): Promise<void> {
     if (!('serial' in navigator)) {
       throw new Error('Your browser doesn\'t support Web Serial. Try Chrome, Edge, or another Chromium-based browser.')
@@ -64,6 +84,9 @@ export class WebSerialTransport implements Transport {
     this.readerTask = this.readLoop()
   }
 
+  // Cleanly shut the port down. Safe to call when not connected, and safe
+  // to call after the device was physically unplugged (errors from the
+  // underlying API are swallowed because the port is going away anyway).
   async disconnect(): Promise<void> {
     // Cancelling the reader makes the readLoop's await throw, which
     // releases the lock in the finally and emits the close event.
@@ -90,6 +113,9 @@ export class WebSerialTransport implements Transport {
     }
   }
 
+  // Synchronously write a chunk of bytes to the FC. Acquires + releases the
+  // writable-stream lock per send so concurrent senders don't deadlock — the
+  // expected sender is the MavLinkSession, which serialises by construction.
   async send(bytes: Uint8Array): Promise<void> {
     const port = this.port
     if (!port?.writable) {
@@ -104,12 +130,19 @@ export class WebSerialTransport implements Transport {
     }
   }
 
+  // Subscribe to a transport event ('data' | 'close' | 'error'). Returns
+  // an unsubscribe function the caller must invoke to avoid leaking
+  // listeners when the subscriber goes away.
   on<E extends TransportEvent>(event: E, listener: TransportEventListener<E>): () => void {
     const bucket = this.listeners[event] as Set<TransportEventListener<E>>
     bucket.add(listener)
     return () => bucket.delete(listener)
   }
 
+  // Background task that pulls chunks out of the port's readable stream
+  // and dispatches them to data subscribers. Terminates when the reader is
+  // cancelled (disconnect path) or the device disappears (errors fan out
+  // to error subscribers before the close event fires).
   private async readLoop(): Promise<void> {
     const port = this.port
     if (!port?.readable)
@@ -142,6 +175,9 @@ export class WebSerialTransport implements Transport {
   }
 }
 
+// Produce an operator-friendly description of an opened serial port. Falls
+// back to a generic label if the browser hides the USB identifiers (some
+// non-USB serial adapters, virtual COM ports, etc.).
 function describePort(info: SerialPortInfoLite): string {
   if (info.usbVendorId !== undefined) {
     const vid = info.usbVendorId.toString(16).padStart(4, '0')
