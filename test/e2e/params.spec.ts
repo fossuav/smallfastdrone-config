@@ -66,6 +66,39 @@ test('Param editor: edit a value, see it pending, discard', async ({ page }) => 
   await expect(row.getByText(/was [-\d]/)).not.toBeVisible()
 })
 
+test('Param editor: enum params render as a dropdown', async ({ page }) => {
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText('Connected to your Quadcopter')).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('switch', { name: 'Expert' }).click()
+  await page.getByRole('link', { name: 'Parameters' }).click()
+  await expect(page.getByText(/Fetching parameters/)).not.toBeVisible({ timeout: 30_000 })
+
+  // RTL_ALT_TYPE has Values metadata: 0 = "Relative to Home", 1 = "Terrain"
+  await page.getByPlaceholder(/Filter by name/).fill('RTL_ALT_TYPE')
+  const row = page.locator('tbody tr').first()
+  await expect(row.locator('td').first()).toHaveText('RTL_ALT_TYPE')
+
+  // Click to edit → dropdown appears with both options.
+  await row.locator('button[type="button"]').first().click()
+  const select = row.locator('select')
+  await expect(select).toBeVisible()
+  await expect(select.locator('option')).toContainText([
+    /Relative to Home/,
+    /Terrain/,
+  ])
+
+  // Choosing an option fires @change, which commits the edit.
+  await select.selectOption('1')
+
+  // Pending banner + dirty styling appear.
+  await expect(page.getByText('1 change pending', { exact: false })).toBeVisible()
+  await expect(row.getByText(/was [-\d]/)).toBeVisible()
+
+  // The decoded enum label "Terrain" shows in the value cell (italic small text).
+  await expect(row.getByText(/Terrain/)).toBeVisible()
+})
+
 test('Param editor: Apply writes to SITL and saves to flash', async ({ page }) => {
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()

@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
-import { formatParamValue, getParamMeta } from '../protocol/params'
+import {
+  describeParamValue,
+  formatParamValue,
+  getParamMeta,
+  getRangeHint,
+} from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
 
@@ -254,13 +259,31 @@ onMounted(() => {
                 {{ p.name }}
               </td>
               <td class="px-3 py-1.5 text-right font-mono text-xs whitespace-nowrap">
-                <!-- Edit mode: text input -->
+                <!-- Edit mode: dropdown if enum-style (Values meta), else text input. -->
+                <select
+                  v-if="editingName === p.name && getParamMeta(p.name)?.values"
+                  ref="editInput"
+                  v-model="editText"
+                  class="border-secondary-500 bg-default text-highlighted max-w-[18rem] rounded border px-1 py-0.5 text-left font-mono text-xs outline-none"
+                  @change="commitEdit"
+                  @keydown.escape.prevent="cancelEdit"
+                  @blur="commitEdit"
+                >
+                  <option
+                    v-for="(label, key) in getParamMeta(p.name)?.values"
+                    :key="key"
+                    :value="key"
+                  >
+                    {{ key }} — {{ label }}
+                  </option>
+                </select>
                 <input
-                  v-if="editingName === p.name"
+                  v-else-if="editingName === p.name"
                   ref="editInput"
                   v-model="editText"
                   type="text"
                   inputmode="decimal"
+                  :title="getRangeHint(p.name) || undefined"
                   class="border-secondary-500 bg-default text-highlighted w-24 rounded border px-1 py-0.5 text-right font-mono text-xs outline-none"
                   @keydown.enter.prevent="commitEdit"
                   @keydown.escape.prevent="cancelEdit"
@@ -272,10 +295,18 @@ onMounted(() => {
                   type="button"
                   class="hover:bg-elevated -mx-1 cursor-text rounded px-1 py-0.5 text-right font-mono"
                   :class="store.isDirty(p.name) ? 'text-secondary font-semibold' : 'text-default'"
+                  :title="getRangeHint(p.name) || undefined"
                   @click="startEdit(p.name, formatParamValue(store.effectiveValue(p.name) ?? p.value, p.type))"
                 >
                   {{ formatParamValue(store.effectiveValue(p.name) ?? p.value, p.type) }}<span v-if="meta(p.name).units" class="text-muted ml-1 font-normal">{{ meta(p.name).units }}</span>
                 </button>
+                <!-- Decoded label for enums/bitmasks. -->
+                <div
+                  v-if="describeParamValue(p.name, store.effectiveValue(p.name) ?? p.value)"
+                  class="text-muted mt-0.5 text-[10px] font-normal italic"
+                >
+                  {{ describeParamValue(p.name, store.effectiveValue(p.name) ?? p.value) }}
+                </div>
                 <div
                   v-if="store.isDirty(p.name)"
                   class="text-muted mt-0.5 text-[10px] font-normal"

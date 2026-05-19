@@ -116,3 +116,55 @@ const metadata = metadataRaw as Record<string, ParamMeta>
 export function getParamMeta(name: string): ParamMeta | undefined {
   return metadata[name]
 }
+
+// If the param has `Values` metadata (enum-style) and the value matches a
+// declared key, return the human label. Otherwise undefined.
+export function getValueLabel(name: string, value: number): string | undefined {
+  const m = metadata[name]
+  if (!m?.values)
+    return undefined
+  // Param values are floats on the wire; for Values lookup we expect ints.
+  const key = String(Math.trunc(value))
+  return m.values[key]
+}
+
+// If the param has `Bitmask` metadata, decode the value's set bits into a
+// readable label like "UseRTLOnAbort | DualAircraftSynchronised". Zero
+// returns undefined.
+export function getBitmaskLabel(name: string, value: number): string | undefined {
+  const m = metadata[name]
+  if (!m?.bitmask)
+    return undefined
+  const v = Math.trunc(value)
+  if (v === 0)
+    return undefined
+  const set: string[] = []
+  for (const [bit, label] of Object.entries(m.bitmask)) {
+    const bitNum = Number.parseInt(bit, 10)
+    if (Number.isFinite(bitNum) && (v & (1 << bitNum)) !== 0) {
+      set.push(label)
+    }
+  }
+  return set.length > 0 ? set.join(' | ') : undefined
+}
+
+// Combined human label: Values takes priority, then Bitmask.
+export function describeParamValue(name: string, value: number): string | undefined {
+  return getValueLabel(name, value) ?? getBitmaskLabel(name, value)
+}
+
+// Tooltip hint about valid range, e.g. "Range: 0.1 to 100".
+export function getRangeHint(name: string): string | undefined {
+  const m = metadata[name]
+  if (!m?.range)
+    return undefined
+  const low = m.range.low
+  const high = m.range.high
+  if (low === undefined && high === undefined)
+    return undefined
+  if (low !== undefined && high !== undefined)
+    return `Range: ${low} to ${high}`
+  if (low !== undefined)
+    return `Minimum: ${low}`
+  return `Maximum: ${high}`
+}
