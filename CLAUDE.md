@@ -90,6 +90,7 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 - **Modern only.** No legacy support, no polyfills, no Babel, no CommonJS. Pure ESM. Target evergreen Chromium (WebSerial is Chromium-only anyway). Top-level await, native fetch, Web Crypto, `crypto.randomUUID()`, structured clone — all assumed available.
 - **TypeScript everywhere in `src/`.** No `.js` files. Strict mode on.
 - **Follow [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md) literally.** Vue.js official Style Guide (Priority A+B) + `@antfu/eslint-config` is authoritative. The "AI slop" section enumerates patterns that look idiomatic-in-general but conflict with our standards — don't produce them.
+- **GPL header + file purpose on every new `.ts`/`.vue`.** See the "Comments and file headers" section in [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md). This codebase ships alongside SmallFastDrone (GPLv3) and follows the same header + function-comment discipline as the firmware. "Default to no comments" is **not** our policy — every exported function and every non-trivial internal function carries a lead-in `//` purpose comment.
 - **Surgical changes.** Limit diffs to the scope of the task. No drive-by refactors.
 - **Defer to PLAN.md.** When in doubt about scope or stack, check the decisions log before improvising.
 - **Tight dependency budget.** New runtime deps require a PLAN.md row. Reach for the standard library first (`Array`, `Map`, `Set`, `structuredClone`, `Intl`, `crypto.subtle`) before adding `lodash`/`date-fns`/etc.
