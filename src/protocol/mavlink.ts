@@ -1,14 +1,33 @@
-// MAVLink session wrapper around node-mavlink.
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// MAVLink session wrapper around node-mavlink, plus helpers for the
+// specific messages the rest of the app needs to build or interpret.
 //
 // node-mavlink + mavlink-mappings give us typed classes for every message
-// in every dialect we care about (common + ardupilotmega), plus a
-// streaming v2 packet splitter and a CRC-validating parser. We polyfill
-// Node's Buffer / stream APIs in vite.config.ts so the lib runs in the
-// browser unchanged.
+// in every dialect we care about (minimal + standard + common +
+// ardupilotmega), plus a streaming v2 packet splitter and a
+// CRC-validating parser. We polyfill Node's Buffer / stream APIs in
+// vite.config.ts so the lib runs in the browser unchanged.
 //
-// Today: receive HEARTBEAT, expose typed messages via a subscriber. Sending
-// (COMMAND_LONG to request AUTOPILOT_VERSION, PARAM_SET to write params,
-// etc.) lands in a later slice — the serialize() path is here, ready.
+// What lives in this file: the MavLinkSession class (feed bytes in,
+// subscribe to decoded messages out, serialize messages for sending),
+// re-exported message ids the stores reference, builder functions for
+// the COMMAND_LONG / REQUEST_DATA_STREAM messages we send to bootstrap
+// telemetry, and small operator-friendly label functions (vehicle type,
+// autopilot, system status) that strip MAVLink jargon out of UI strings.
 
 import type { MavLinkData, MavLinkDataConstructor } from 'mavlink-mappings'
 import { Buffer } from 'node:buffer'
@@ -58,6 +77,10 @@ export class MavLinkSession {
   private readonly listeners = new Set<MessageHandler>()
   private seq = 0
 
+  // Build a session bound to the given GCS source identity. The splitter
+  // is piped into the parser at construction; from then on, every chunk
+  // fed via feed() is reassembled, CRC-checked, decoded against the merged
+  // dialect registry, and fanned out to subscribers.
   constructor(opts: MavLinkSessionOptions = {}) {
     this.protocol = new MavLinkProtocolV2(opts.sysid ?? 255, opts.compid ?? 190)
     this.splitter.pipe(this.parser)
@@ -89,11 +112,16 @@ export class MavLinkSession {
     return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
   }
 
+  // Subscribe to every decoded message the session emits. Returns an
+  // unsubscribe function; callers must invoke it to avoid leaking
+  // listeners when their owning store / component goes away.
   on(cb: MessageHandler): () => void {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)
   }
 
+  // Clear per-session state. Called when the operator disconnects so a
+  // fresh connect starts with a clean send-sequence counter.
   reset(): void {
     this.seq = 0
     // The splitter/parser are stateful only in their internal byte buffer;
@@ -288,6 +316,9 @@ export function vehicleTypeLabel(type: minimal.MavType): string {
   }
 }
 
+// Operator-friendly label for the autopilot family. Note that "ArduPilot"
+// is the wire-level label; the session store may override this with
+// "SmallFastDrone" when STATUSTEXT banner detection fires.
 export function autopilotLabel(autopilot: minimal.MavAutopilot): string {
   switch (autopilot) {
     case minimal.MavAutopilot.ARDUPILOTMEGA: return 'ArduPilot'
@@ -298,6 +329,8 @@ export function autopilotLabel(autopilot: minimal.MavAutopilot): string {
   }
 }
 
+// Operator-friendly label for the autopilot's lifecycle state, the value
+// the FC reports in the HEARTBEAT system_status field.
 export function systemStatusLabel(status: minimal.MavState): string {
   switch (status) {
     case minimal.MavState.UNINIT: return 'Booting'

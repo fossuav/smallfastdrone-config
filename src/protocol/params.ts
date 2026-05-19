@@ -1,18 +1,36 @@
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Protocol-layer helpers for the parameter system: builders for
+// PARAM_REQUEST_LIST / PARAM_SET / PREFLIGHT_STORAGE, formatters for the
+// wire value (int vs float), and the per-parameter metadata accessor
+// backed by the SFD-derived param-metadata.json blob.
+//
+// Operator triggers a fetch; the FC streams one PARAM_VALUE per parameter
+// (typically a few hundred to a few thousand). Each PARAM_VALUE carries
+// its index + the total count so the fetch loop in stores/params.ts can
+// show progress and detect completion.
+//
+// The metadata blob is built from SFD's apm.pdef.xml by
+// scripts/build-param-metadata.py and regenerated on submodule bumps via
+// `bun run params:rebuild`. Stays bundled with the app so the operator
+// gets parameter documentation offline.
+
 import type { MavParamType } from 'mavlink-mappings/dist/lib/common'
 import { CommandLong, MavCmd, ParamRequestList, ParamSet } from 'mavlink-mappings/dist/lib/common'
 import metadataRaw from './param-metadata.json'
-
-// PARAM_REQUEST_LIST / PARAM_VALUE flow.
-//
-// Operator triggers a fetch; FC streams one PARAM_VALUE per parameter
-// (typically a few hundred to a few thousand). Each carries its index +
-// the total count so we can show progress and detect completion.
-//
-// Today: protocol-layer helpers only. The fetch loop itself lives in
-// stores/params.ts so it can use the session store's send/subscribe
-// helpers without us having to expose the raw MavLinkSession instance.
-//
-// Editing + commit (PARAM_SET + PREFLIGHT_STORAGE) lands in next slices.
 
 export const MSGID_PARAM_VALUE = 22
 export const MSGID_COMMAND_ACK = 77
@@ -27,6 +45,9 @@ export interface ParamRecord {
   index: number
 }
 
+// Build a PARAM_REQUEST_LIST that asks the FC to stream every parameter
+// it knows about. The FC responds with one PARAM_VALUE per parameter; the
+// fetch loop in stores/params.ts assembles them into the params map.
 export function buildParamRequestList(targetSystem: number, targetComponent: number): ParamRequestList {
   const req = new ParamRequestList()
   req.targetSystem = targetSystem
@@ -34,9 +55,12 @@ export function buildParamRequestList(targetSystem: number, targetComponent: num
   return req
 }
 
-// Pad a param name to the 16-byte MAVLink param_id slot. Strings shorter
-// than 16 chars are null-terminated; exactly-16 fill the field without a
-// terminator. Our serializer handles either case.
+// Build a PARAM_SET to write a single parameter. The FC echoes the new
+// value back as a PARAM_VALUE on success (the apply path in
+// stores/params.ts uses that echo to confirm the write landed).
+// The param_id field is the 16-byte MAVLink slot; strings shorter than
+// 16 chars are null-terminated, exactly-16 fill the field without a
+// terminator, and the serializer handles either case.
 export function buildParamSet(targetSystem: number, targetComponent: number, name: string, value: number, type: MavParamType): ParamSet {
   const ps = new ParamSet()
   ps.targetSystem = targetSystem
@@ -79,6 +103,8 @@ export function formatParamValue(value: number, type: MavParamType): string {
   return Number.parseFloat(value.toPrecision(7)).toString()
 }
 
+// Short human label for a MAV_PARAM_TYPE value, used by the param browser
+// in expert mode to surface the underlying wire type alongside the value.
 export function paramTypeLabel(type: MavParamType): string {
   switch (type) {
     case 1: return 'uint8'
@@ -113,6 +139,10 @@ export interface ParamMeta {
 
 const metadata = metadataRaw as Record<string, ParamMeta>
 
+// Look up the static SFD-derived metadata for a parameter. Returns
+// undefined for parameters the FC reports that aren't in the bundled
+// blob (e.g. a custom Lua-defined param, or a vehicle-specific param the
+// metadata generator didn't cover).
 export function getParamMeta(name: string): ParamMeta | undefined {
   return metadata[name]
 }
