@@ -259,39 +259,42 @@ onMounted(() => {
                 {{ p.name }}
               </td>
               <td class="px-3 py-1.5 text-right text-xs align-top">
-                <!-- Edit mode: dropdown if enum-style (Values meta), else text input. -->
-                <select
-                  v-if="editingName === p.name && getParamMeta(p.name)?.values"
-                  ref="editInput"
-                  v-model="editText"
-                  class="border-secondary-500 bg-default text-highlighted w-full rounded border px-1 py-0.5 text-left font-mono text-xs outline-none"
-                  @change="commitEdit"
-                  @keydown.escape.prevent="cancelEdit"
-                  @blur="commitEdit"
-                >
-                  <option
-                    v-for="(label, key) in getParamMeta(p.name)?.values"
-                    :key="key"
-                    :value="key"
+                <!-- Edit mode: a free-text input with a datalist of documented
+                     Values as suggestions when metadata has them. The Values
+                     are hints, not constraints — many float params (filter
+                     frequencies, PID gains) have documented examples even
+                     though any value is valid. The FC will clamp / reject
+                     if it doesn't like the operator's value, and we surface
+                     that via the mismatched / failed states. -->
+                <template v-if="editingName === p.name">
+                  <input
+                    ref="editInput"
+                    v-model="editText"
+                    type="text"
+                    inputmode="decimal"
+                    :list="getParamMeta(p.name)?.values ? `dl-${p.name}` : undefined"
+                    :title="getRangeHint(p.name) || undefined"
+                    class="border-secondary-500 bg-default text-highlighted w-full rounded border px-1 py-0.5 text-right font-mono text-xs outline-none"
+                    @keydown.enter.prevent="commitEdit"
+                    @keydown.escape.prevent="cancelEdit"
+                    @blur="commitEdit"
                   >
-                    {{ key }} — {{ label }}
-                  </option>
-                </select>
-                <input
-                  v-else-if="editingName === p.name"
-                  ref="editInput"
-                  v-model="editText"
-                  type="text"
-                  inputmode="decimal"
-                  :title="getRangeHint(p.name) || undefined"
-                  class="border-secondary-500 bg-default text-highlighted w-24 rounded border px-1 py-0.5 text-right font-mono text-xs outline-none"
-                  @keydown.enter.prevent="commitEdit"
-                  @keydown.escape.prevent="cancelEdit"
-                  @blur="commitEdit"
-                >
+                  <datalist
+                    v-if="getParamMeta(p.name)?.values"
+                    :id="`dl-${p.name}`"
+                  >
+                    <option
+                      v-for="(label, key) in getParamMeta(p.name)?.values"
+                      :key="key"
+                      :value="key"
+                    >
+                      {{ label }}
+                    </option>
+                  </datalist>
+                </template>
                 <!-- Display mode: click to edit -->
                 <button
-                  v-else
+                  v-if="editingName !== p.name"
                   type="button"
                   class="hover:bg-elevated -mx-1 cursor-text rounded px-1 py-0.5 text-right font-mono whitespace-nowrap"
                   :class="store.isDirty(p.name) ? 'text-secondary font-semibold' : 'text-default'"
