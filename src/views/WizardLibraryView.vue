@@ -23,6 +23,7 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useSessionStore } from '../stores/session'
+import { useWizardProgressStore } from '../stores/wizardProgress'
 import {
   categoryLabel,
   checkPrereqs,
@@ -30,6 +31,7 @@ import {
 } from '../workflow/wizard-runtime'
 
 const session = useSessionStore()
+const wizardProgress = useWizardProgressStore()
 
 // Snapshot of FC capabilities for prereq evaluation. Slice A only
 // needs the session-level checks; later slices grow this snapshot
@@ -51,6 +53,30 @@ const locked = computed(() => wizards.value.filter(w => w.manifest.locked))
 // but shows the missing reasons inline.
 function prereqResult(prereqs: Parameters<typeof checkPrereqs>[0]) {
   return checkPrereqs(prereqs, caps.value)
+}
+
+// Completion record (if any) for a wizard against the currently-
+// connected FC. Returns undefined when the wizard hasn't been completed
+// on this drone or when fcUid is null (no AUTOPILOT_VERSION yet).
+function completion(wizardId: string) {
+  return wizardProgress.getCompletion(session.fcUid, wizardId)
+}
+
+// Short relative-time string for a completion timestamp ("just now" /
+// "12m ago" / "3h ago" / "yesterday" / "5 days ago"). Calibrated for
+// the typical bench-tuning cadence — operators care about "today vs
+// last week," not minute-precision.
+function timeAgo(ms: number): string {
+  const diff = Date.now() - ms
+  if (diff < 60_000)
+    return 'just now'
+  if (diff < 3_600_000)
+    return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000)
+    return `${Math.floor(diff / 3_600_000)}h ago`
+  if (diff < 172_800_000)
+    return 'yesterday'
+  return `${Math.floor(diff / 86_400_000)} days ago`
 }
 </script>
 
@@ -83,9 +109,20 @@ function prereqResult(prereqs: Parameters<typeof checkPrereqs>[0]) {
             <div class="bg-primary/10 text-primary flex size-12 shrink-0 items-center justify-center rounded-md">
               <UIcon :name="w.manifest.hero" class="size-7" />
             </div>
-            <UBadge color="secondary" variant="subtle" size="sm">
-              {{ categoryLabel(w.manifest.category) }}
-            </UBadge>
+            <div class="flex flex-col items-end gap-1">
+              <UBadge color="secondary" variant="subtle" size="sm">
+                {{ categoryLabel(w.manifest.category) }}
+              </UBadge>
+              <UBadge
+                v-if="completion(w.manifest.id)"
+                color="success"
+                variant="subtle"
+                size="sm"
+                icon="i-lucide-check"
+              >
+                Done
+              </UBadge>
+            </div>
           </div>
           <div>
             <h2 class="text-highlighted text-base font-semibold">
@@ -96,7 +133,14 @@ function prereqResult(prereqs: Parameters<typeof checkPrereqs>[0]) {
             </p>
           </div>
           <div class="border-default text-muted mt-auto border-t pt-3 text-xs">
-            <p>
+            <p v-if="completion(w.manifest.id)" class="text-success flex items-start gap-1.5">
+              <UIcon name="i-lucide-circle-check" class="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                {{ completion(w.manifest.id)!.outcome }}
+                <span class="text-muted">— {{ timeAgo(completion(w.manifest.id)!.completedAt) }}</span>
+              </span>
+            </p>
+            <p v-else>
               <span class="font-medium">Outcome:</span> {{ w.manifest.outcome }}
             </p>
             <p
