@@ -8,9 +8,12 @@ const session = useSessionStore()
 const messages = computed(() => [...session.recentStatusTexts].reverse())
 const count = computed(() => session.recentStatusTexts.length)
 
-// Severity → (icon, icon color, row left-border color). Mirrors the
-// thresholds in recordStatusText (session store) so toasts, bell icons,
-// and row tints agree on what "important" looks like.
+// Severity → (icon, icon color, row left-border color). MAVLink severities:
+// 0=EMERGENCY 1=ALERT 2=CRITICAL 3=ERROR 4=WARNING 5=NOTICE 6=INFO 7=DEBUG.
+// ArduPilot sends most routine boot lines as INFO, so INFO must read as
+// informational, not as "muted, ignore me" — only DEBUG falls through.
+// The error/warning thresholds mirror the toast cutoff in recordStatusText
+// so bell colours and toast colours agree on what "important" looks like.
 function severityStyle(sev: number): { icon: string, klass: string, border: string } {
   if (sev <= 2)
     return { icon: 'i-lucide-octagon-alert', klass: 'text-error', border: 'border-l-error' }
@@ -18,9 +21,9 @@ function severityStyle(sev: number): { icon: string, klass: string, border: stri
     return { icon: 'i-lucide-circle-x', klass: 'text-error', border: 'border-l-error' }
   if (sev === 4)
     return { icon: 'i-lucide-triangle-alert', klass: 'text-warning', border: 'border-l-warning' }
-  if (sev === 5)
-    return { icon: 'i-lucide-info', klass: 'text-primary', border: 'border-l-primary' }
-  return { icon: 'i-lucide-message-square', klass: 'text-muted', border: 'border-l-transparent' }
+  if (sev === 5 || sev === 6)
+    return { icon: 'i-lucide-info', klass: 'text-info', border: 'border-l-info' }
+  return { icon: 'i-lucide-message-square', klass: 'text-muted', border: 'border-l-default' }
 }
 
 function timeAgo(ms: number): string {
