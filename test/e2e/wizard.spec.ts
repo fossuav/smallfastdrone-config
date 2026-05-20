@@ -88,3 +88,63 @@ test('Locked Pro wizard accessed by URL renders the gating page, not the runner'
   await expect(page.getByRole('heading', { name: 'Pro PID tune' })).toBeVisible()
   await expect(page.getByText('Coming soon — a paid Pro wizard')).toBeVisible()
 })
+
+test('Bringup meta-wizard chains preflight + frame-select and marks itself complete', async ({ page }) => {
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  // Loose vehicle-type match — the earlier frame-select happy-path test
+  // persists FRAME_CLASS=2 to SITL, so subsequent specs see SITL report
+  // as a Hexacopter rather than the default Quadcopter. Either is fine
+  // for this test; we just need a heartbeat-driven connection.
+  await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
+
+  // Open bringup from the library.
+  await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: /Open the Full bringup wizard/ }).click()
+  await expect(page.getByRole('heading', { name: 'Full bringup' })).toBeVisible()
+
+  // Both steps render as not-yet-started, "0 of 2 complete".
+  await expect(page.getByText('0 of 2 complete')).toBeVisible()
+
+  // Start preflight from bringup. The Start button is a router link to
+  // /wizard/preflight?returnTo=/wizard/bringup; we click and end up at
+  // the preflight runner.
+  const preflightRow = page.locator('li').filter({ hasText: 'Pre-flight check' })
+  await preflightRow.getByRole('link', { name: 'Start' }).click()
+  await expect(page.getByRole('heading', { name: 'Pre-flight check' })).toBeVisible()
+
+  // Confirm — preflight has no FC writes, just an operator confirmation.
+  await page.getByRole('button', { name: /Looks good/ }).click()
+
+  // Back at bringup, preflight is done and progress reads 1 of 2.
+  await expect(page.getByRole('heading', { name: 'Full bringup' })).toBeVisible()
+  await expect(page.getByText('1 of 2 complete')).toBeVisible()
+  await expect(preflightRow.getByText(/Pre-flight check passed/)).toBeVisible()
+
+  // Start frame-select from bringup; ends at /wizard/frame-select.
+  const frameRow = page.locator('li').filter({ hasText: 'Pick your frame' })
+  await frameRow.getByRole('link', { name: 'Start' }).click()
+  await expect(page.getByRole('heading', { name: 'Pick your frame' })).toBeVisible()
+
+  // Wait for params, pick a frame, apply. (Quad X may already be set —
+  // the wizard handles that case with the "no change needed" path.)
+  await expect(page.getByRole('button', { name: /Hex Plus/, pressed: false })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Hex Plus/, pressed: false }).click()
+  await page.getByRole('button', { name: 'Apply' }).click()
+  await expect(page.getByText('Done — your drone knows its motor layout.')).toBeVisible({ timeout: 15_000 })
+
+  // Back to bringup via the Done button — should return us to the
+  // bringup runner, not the library, because of the returnTo query.
+  await page.getByRole('button', { name: 'Back to the wizard library' }).click()
+  await expect(page.getByRole('heading', { name: 'Full bringup' })).toBeVisible()
+
+  // Both steps complete; the celebratory done banner appears.
+  await expect(page.getByText('2 of 2 complete')).toBeVisible()
+  await expect(page.getByText('Bringup complete!')).toBeVisible()
+
+  // Library card for bringup itself now shows the completion badge.
+  await page.getByRole('link', { name: 'Bringup', exact: true }).click()
+  const bringupCard = page.getByRole('link', { name: /Open the Full bringup wizard/ })
+  await expect(bringupCard.getByText('Done')).toBeVisible()
+  await expect(bringupCard.getByText(/All 2 bringup steps complete/)).toBeVisible()
+})
