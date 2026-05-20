@@ -22,7 +22,7 @@
 // arrow so operators can match it against their physical drone.
 
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
@@ -31,6 +31,12 @@ const session = useSessionStore()
 const paramsStore = useParamsStore()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
+const route = useRoute()
+
+// Where to navigate back to on Done / Cancel. Defaults to the library;
+// bringup passes returnTo=/wizard/bringup so the operator continues the
+// meta-wizard sequence rather than getting dumped at the library.
+const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
 
 // Frame option a card represents — visible to the operator under a
 // plain-language label, but the underlying FRAME_CLASS + FRAME_TYPE
@@ -253,10 +259,10 @@ async function confirm() {
   wizardProgress.markComplete(session.fcUid, 'frame-select', `Set as a ${target.label}`)
 }
 
-// Return to the library — bound to the Done button after a successful
-// apply, and to Cancel from the confirm step.
+// Return to wherever the wizard was launched from — library by
+// default, or the bringup meta-wizard when bringup sent us here.
 function back() {
-  router.push('/wizard')
+  router.push(returnTo.value)
 }
 </script>
 
