@@ -9,6 +9,7 @@
     "sitl:start": "./scripts/sitl-start.sh",
     "sitl:stop": "./scripts/sitl-stop.sh",
     "bridge:start": "bun run test/sitl/bridge.ts",
+    "ftp:smoke": "bun run test/sitl/ftp-smoke.ts",
     "params:rebuild": "python3 ./scripts/build-param-metadata.py",
     "dev": "vite",
     "dev:sitl": "./scripts/dev-with-sitl.sh",
