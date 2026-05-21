@@ -77,6 +77,18 @@ The fix (copied verbatim from `vendor/smallfastdrone/Tools/autotest/run_in_termi
 
 The leading `:` (true) is load-bearing — without it bash optimises away the subshell and we're back to orphan. `scripts/sitl-start.sh` uses this; any new SITL launcher (CI script, alternate harness) must too.
 
+## Lua wizards in SITL
+
+ArduPilot Lua scripting in SITL is **not currently testable end-to-end** in our setup. The `SCR_ENABLE` parameter carries `AP_PARAM_FLAG_ENABLE`, which means `AP_Scripting::init()` decides whether to start the scripting subsystem based on the in-EEPROM value of `SCR_ENABLE` at boot, *not* the value applied by the `--defaults` overlay (which lands too late). Bootstrapping scripting in SITL therefore needs either:
+
+1. A two-phase boot — start SITL, `PARAM_SET SCR_ENABLE=1` (which writes through to EEPROM via the scripting param's save path), reboot, restart SITL. Reboot orchestration is fragile because SITL exits on `PREFLIGHT_REBOOT_SHUTDOWN` and our `sitl-start.sh` doesn't auto-restart. An earlier attempt to do this via a Bun-based primer found that PARAM_SETs didn't reliably persist to EEPROM in the short window before the prime SITL was killed (likely a StorageManager flush timing issue).
+2. A pre-baked `eeprom.bin` fixture with `SCR_ENABLE=1` already saved. Fragile — the binary format is version-specific and changes when the SFD submodule bumps.
+3. Switching the SITL launcher from raw `arducopter` to `sim_vehicle.py`, which handles reboot. Adds MAVProxy as a transitive dep.
+
+For now: Lua-engine wizards' E2E tests exercise the **"scripting isn't enabled"** path against stock SITL (which IS testable — the wizard's capability check correctly reports `SCR_ENABLE=0` and the operator-actionable alert renders). The live path — applet upload, control param round-trip, NAMED_VALUE_FLOAT progress, cleanup — is exercised against real hardware until one of the options above lands.
+
+The pre-place mechanism in `scripts/sitl-start.sh` (drop applets into the SITL work dir's `scripts/` folder) is kept ready for the day this works.
+
 ## SITL bridge
 
 SITL exposes MAVLink over TCP. The browser PWA speaks WebSerial in production. For E2E, we use a small bridge:
