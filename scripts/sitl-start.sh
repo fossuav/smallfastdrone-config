@@ -14,12 +14,10 @@ PIDFILE="/tmp/sfd-sitl.pid"
 
 # Lua wizard applets pre-placed into SITL's scripts/ dir at boot.
 # AP_Filesystem strips the "APM/" prefix used in MAVLink FTP paths, so
-# the on-disk path is just <workdir>/scripts/. Keeps E2E ready for the
-# day SITL Lua testing works end-to-end — for now scripting init runs
-# with SCR_ENABLE=0 (the SITL default), so the applets sit on disk
-# without ever loading and the Lua wizards' E2E exercises the
-# "scripting isn't enabled" path. See docs/TESTING.md "Lua wizards in
-# SITL" for the full story.
+# the on-disk path is just <workdir>/scripts/. Currently a no-op at
+# runtime — SITL boots with SCR_ENABLE=0 and our attempts to flip it
+# on for testing haven't panned out (see docs/TESTING.md "Lua wizards
+# in SITL"). Kept here so the mechanism is ready for the day this works.
 PRELOAD_WIZARDS=(
   imu-noise
 )

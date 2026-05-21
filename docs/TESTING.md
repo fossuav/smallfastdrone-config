@@ -79,13 +79,16 @@ The leading `:` (true) is load-bearing — without it bash optimises away the su
 
 ## Lua wizards in SITL
 
-ArduPilot Lua scripting in SITL is **not currently testable end-to-end** in our setup. The `SCR_ENABLE` parameter carries `AP_PARAM_FLAG_ENABLE`, which means `AP_Scripting::init()` decides whether to start the scripting subsystem based on the in-EEPROM value of `SCR_ENABLE` at boot, *not* the value applied by the `--defaults` overlay (which lands too late). Bootstrapping scripting in SITL therefore needs either:
+ArduPilot Lua scripting in SITL is **not currently testable end-to-end** in our setup. The `SCR_ENABLE` parameter carries `AP_PARAM_FLAG_ENABLE`, which means `AP_Scripting::init()` decides whether to start the scripting subsystem based on the in-EEPROM value of `SCR_ENABLE` at boot, *not* the value applied by the `--defaults` overlay (which lands too late).
 
-1. A two-phase boot — start SITL, `PARAM_SET SCR_ENABLE=1` (which writes through to EEPROM via the scripting param's save path), reboot, restart SITL. Reboot orchestration is fragile because SITL exits on `PREFLIGHT_REBOOT_SHUTDOWN` and our `sitl-start.sh` doesn't auto-restart. An earlier attempt to do this via a Bun-based primer found that PARAM_SETs didn't reliably persist to EEPROM in the short window before the prime SITL was killed (likely a StorageManager flush timing issue).
-2. A pre-baked `eeprom.bin` fixture with `SCR_ENABLE=1` already saved. Fragile — the binary format is version-specific and changes when the SFD submodule bumps.
-3. Switching the SITL launcher from raw `arducopter` to `sim_vehicle.py`, which handles reboot. Adds MAVProxy as a transitive dep.
+What we've tried:
 
-For now: Lua-engine wizards' E2E tests exercise the **"scripting isn't enabled"** path against stock SITL (which IS testable — the wizard's capability check correctly reports `SCR_ENABLE=0` and the operator-actionable alert renders). The live path — applet upload, control param round-trip, NAMED_VALUE_FLOAT progress, cleanup — is exercised against real hardware until one of the options above lands.
+1. **`--defaults` overlay with `SCR_ENABLE=1`.** Value appears in the FC's in-memory param set after boot, but scripting subsystem is silent — confirms the timing-vs-init-order issue.
+2. **Two-phase boot via a restart-on-exit wrapper + primer.** The wrapper around `arducopter` does restart cleanly when `PREFLIGHT_REBOOT_SHUTDOWN` exits the process. A Bun primer sends `PARAM_SET SCR_ENABLE=1` (which echoes back as 1) and then issues the reboot. Verified: after the wrapper restarts arducopter, SITL reports `SCR_ENABLE=1` even when the defaults overlay is removed — so EEPROM *does* persist the value. **But scripting still doesn't initialise on the second boot**, with no `Lua:` or `Scripting:` STATUSTEXTs anywhere, and the wizard's declared params (e.g. `WIZ_NOISE_ACTIVE`) never appear in the param set. The cause hasn't been bottomed out in any session so far — `_enable` should be 1 in memory by the time `AP_Scripting::init()` runs, but something else is gating script subsystem activation that this codebase's debugging didn't surface.
+3. **Pre-baked `eeprom.bin` fixture.** Not yet attempted. Fragile — the binary format is version-specific and changes when the SFD submodule bumps.
+4. **Switching the SITL launcher from raw `arducopter` to `sim_vehicle.py`.** Not yet attempted. Adds MAVProxy as a transitive dep but mirrors what the autotest suite does, so should work.
+
+For now: Lua-engine wizards' E2E tests exercise the **"scripting isn't enabled"** path against stock SITL (which IS testable — the wizard's capability check correctly reports `SCR_ENABLE=0` and the operator-actionable alert renders). The live path — applet upload, control param round-trip, NAMED_VALUE_FLOAT progress, cleanup — is exercised against real hardware until one of options 3 or 4 above lands.
 
 The pre-place mechanism in `scripts/sitl-start.sh` (drop applets into the SITL work dir's `scripts/` folder) is kept ready for the day this works.
 
