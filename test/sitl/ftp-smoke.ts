@@ -54,6 +54,9 @@ async function main(): Promise<void> {
   let socket: Socket | null = null
 
   // Bun TCP connect — small handler that pipes bytes into the session.
+  // Connection failure here usually means SITL isn't running; the user-
+  // facing message says so explicitly rather than letting the raw
+  // "Failed to connect" bubble up.
   const connectPromise = new Promise<Socket>((resolve, reject) => {
     Bun.connect({
       hostname: SITL_HOST,
@@ -68,7 +71,14 @@ async function main(): Promise<void> {
       },
     }).catch(reject)
   })
-  socket = await connectPromise
+  const socketOrError = await connectPromise.catch(e => e)
+  if (!(socketOrError && typeof socketOrError === 'object' && 'write' in socketOrError)) {
+    throw new Error(
+      `couldn't connect to SITL at ${SITL_HOST}:${SITL_PORT} — is it running? `
+      + `Start it with \`bun run sitl:start\`, then re-run \`bun run ftp:smoke\`.`,
+    )
+  }
+  socket = socketOrError as Socket
 
   // Wait for the first heartbeat so we know which sysid to target.
   // SITL replies almost immediately; 10s is generous insurance against
