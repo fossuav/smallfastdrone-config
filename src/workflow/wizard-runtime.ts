@@ -35,13 +35,17 @@ import type { Component } from 'vue'
 // Top-level category — used by the library to group / filter cards.
 export type WizardCategory = 'bringup' | 'tune' | 'recipe' | 'diagnostic' | 'safety'
 
-// Engine descriptor — the wizard's back-end implementation. v1 ships
-// only `desktop`; `lua` and `log` are reserved for Phase 3 and Phase 4.
-// Modelled as a (single-variant for now) discriminated union so adding
-// engine kinds later only requires extending the union, not refactoring
-// every consumer.
-export interface DesktopEngine { kind: 'desktop' }
-export type EngineDescriptor = DesktopEngine
+// Engine descriptor — the wizard's back-end implementation. `lua`
+// shipped in Phase 2 slice C alongside the first Lua-engine wizard;
+// `log` lands when Phase 4's narrow .bin parser does. The runtime
+// doesn't yet pick engines by capability (every shipped wizard
+// declares exactly one) — it's the wizard's DesktopView that
+// orchestrates the engine's specifics. The shape is still a
+// discriminated union so future engine-selection logic slots in
+// without churn.
+export type EngineDescriptor
+  = | { kind: 'desktop' }
+    | { kind: 'lua', applet: string, requires?: { scripting?: true, minHeapKb?: number } }
 
 // Plain-language prerequisite the operator must satisfy before the
 // wizard can start. The kind drives the programmatic check; the message
