@@ -15,15 +15,15 @@
  */
 
 // Hero visual for the motor-check wizard — the Betaflight quad-X airframe
-// model (vendored, see src/assets/models/CREDITS.md) shown in a standard
-// orientation: nose pointing AWAY from the operator, as if they're stood
-// behind the drone. The model is a single mesh, so we can't recolour an
-// individual motor; instead we overlay a glowing ring on each motor
-// position and light up the one the wizard is talking about.
+// model (vendored, see src/assets/models/CREDITS.md) seen from near-above
+// with the nose pointing AWAY from the operator. Each motor gets a faint
+// ring; the motor under test glows and a prop spins above it in its
+// expected direction, mirroring what the operator sees on the bench.
 //
-// Purely presentational — owns no flow state, emits nothing. Motor
-// selection is done with labelled buttons in the wizard view (clearer +
-// accessible + testable than clicking a WebGL mesh).
+// Near-top-down on purpose: motor screen positions then follow
+// motorTopdownXY, so the wizard view can lay text labels precisely over
+// each motor (see MOTOR_OVERLAY_RADIUS there). The model is a single mesh,
+// so highlighting is overlaid rather than recolouring it.
 
 import type { Object3D } from 'three'
 import type { Spin } from '../../workflow/motor-geometry'
@@ -40,26 +40,23 @@ export interface MotorVisual {
   key: number
   // Airframe angle, firmware convention (0 = forward, +cw from above).
   angleDeg: number
-  // Expected prop spin (kept for parity with the procedural version; not
-  // animated on the static GLTF body).
+  // Expected prop spin — drives the active motor's spin animation.
   spin: Spin
-  // Drives the ring colour + glow.
+  // Drives the ring colour + glow + whether the prop spins.
   state: 'idle' | 'active' | 'done' | 'mismatch'
 }
 
 const props = defineProps<{
   motors: MotorVisual[]
   // Extra yaw (deg) applied to the body only — the vendored model is an
-  // X-frame; a Plus frame rotates it 45° so its arms line up with the
-  // cardinal motor rings.
+  // X-frame; a Plus frame rotates it 45° so its arms line up with the rings.
   bodyYawDeg?: number
 }>()
 
-// Ring placement radius + height, tuned to the recentred/scaled model.
 const RING_R = 1.05
 const RING_Y = 0.12
-// Native yaw correction to point the model's nose at -Z (away). Tuned
-// against the vendored model's export orientation.
+const PROP_Y = 0.45
+// Native yaw to point the model's nose at -Z (away from the camera).
 const MODEL_BASE_YAW = 0
 
 const COLOR = {
@@ -73,7 +70,6 @@ function ringColor(state: MotorVisual['state']): string {
   return COLOR[state]
 }
 
-// Loaded + normalised model (recentred to origin, scaled to a known size).
 const body = shallowRef<Object3D | null>(null)
 onMounted(() => {
   const loader = new GLTFLoader()
@@ -83,7 +79,7 @@ onMounted(() => {
     const center = box.getCenter(new Vector3())
     const size = box.getSize(new Vector3())
     const maxXZ = Math.max(size.x, size.z) || 1
-    const s = 2.4 / maxXZ // fit the footprint into ~2.4 units across
+    const s = 2.4 / maxXZ
     scene.scale.setScalar(s)
     scene.position.set(-center.x * s, -center.y * s, -center.z * s)
     body.value = scene
@@ -92,37 +88,49 @@ onMounted(() => {
 
 const bodyYaw = computed(() => MODEL_BASE_YAW + ((props.bodyYawDeg ?? 0) * Math.PI) / 180)
 
-// Glow pulse for the active ring.
 const pulse = ref(0)
+const spin = ref(0)
 useRafFn(({ delta }) => {
-  pulse.value = (pulse.value + (delta / 1000) * 1.8) % (Math.PI * 2)
+  const dt = delta / 1000
+  pulse.value = (pulse.value + dt * 1.8) % (Math.PI * 2)
+  spin.value += dt * 12
 })
 
 function emissive(state: MotorVisual['state']): number {
   if (state === 'active')
     return 0.4 + 0.4 * (0.5 + 0.5 * Math.sin(pulse.value))
-  return state === 'idle' ? 0.05 : 0.35
+  return state === 'idle' ? 0 : 0.3
 }
 
-// Per-ring render data (world position from airframe angle).
-const rings = computed(() => props.motors.map((m) => {
-  const { x, y } = motorTopdownXY(m.angleDeg)
-  return {
-    key: m.key,
-    state: m.state,
-    color: ringColor(m.state),
-    // motorTopdownXY: y is screen-down; map to world +Z (toward camera) so
-    // angle 0 (front) lands at -Z (away). x → world X.
-    pos: [x * RING_R, RING_Y, y * RING_R] as [number, number, number],
-  }
-}))
+// Idle rings are faint so the active one stands out.
+function ringOpacity(state: MotorVisual['state']): number {
+  return state === 'idle' ? 0.16 : 0.95
+}
+
+function motorPos(angleDeg: number, y: number): [number, number, number] {
+  const { x, y: sy } = motorTopdownXY(angleDeg)
+  return [x * RING_R, y, sy * RING_R]
+}
+
+const rings = computed(() => props.motors.map(m => ({
+  key: m.key,
+  state: m.state,
+  color: ringColor(m.state),
+  active: m.state === 'active',
+  ringPos: motorPos(m.angleDeg, RING_Y),
+  propPos: motorPos(m.angleDeg, PROP_Y),
+  // cw spins negative about Y viewed from above.
+  propSpin: m.spin === 'cw' ? -spin.value : spin.value,
+})))
 </script>
 
 <template>
   <TresCanvas clear-color="#00000000" :alpha="true">
-    <TresPerspectiveCamera :position="[0, 2.1, 2.5]" :look-at="[0, 0, 0]" />
-    <TresAmbientLight :intensity="0.85" />
-    <TresDirectionalLight :position="[2, 5, 3]" :intensity="1.1" />
+    <!-- fov/position kept in sync with the label projection in
+         motor-check/DesktopView.vue (MOTOR_CAM_*). -->
+    <TresPerspectiveCamera :fov="50" :position="[0, 3.25, 1.05]" :look-at="[0, 0, 0]" />
+    <TresAmbientLight :intensity="0.9" />
+    <TresDirectionalLight :position="[2, 6, 3]" :intensity="1.1" />
     <TresDirectionalLight :position="[-2, 3, -2]" :intensity="0.4" />
 
     <!-- Vendored airframe body, oriented nose-away -->
@@ -130,23 +138,32 @@ const rings = computed(() => props.motors.map((m) => {
       <primitive v-if="body" :object="body" />
     </TresGroup>
 
-    <!-- Highlight rings, one per motor position -->
-    <TresMesh
-      v-for="r in rings"
-      :key="r.key"
-      :position="r.pos"
-      :rotation="[-Math.PI / 2, 0, 0]"
-    >
-      <TresTorusGeometry :args="[0.26, 0.05, 16, 40]" />
-      <TresMeshStandardMaterial
-        :color="r.color"
-        :emissive="r.color"
-        :emissive-intensity="emissive(r.state)"
-        :metalness="0.2"
-        :roughness="0.5"
-        :transparent="true"
-        :opacity="r.state === 'idle' ? 0.5 : 0.95"
-      />
-    </TresMesh>
+    <template v-for="r in rings" :key="r.key">
+      <!-- Highlight ring -->
+      <TresMesh :position="r.ringPos" :rotation="[-Math.PI / 2, 0, 0]">
+        <TresTorusGeometry :args="[0.26, 0.045, 16, 40]" />
+        <TresMeshStandardMaterial
+          :color="r.color"
+          :emissive="r.color"
+          :emissive-intensity="emissive(r.state)"
+          :metalness="0.2"
+          :roughness="0.5"
+          :transparent="true"
+          :opacity="ringOpacity(r.state)"
+        />
+      </TresMesh>
+
+      <!-- Spinning prop above the motor under test -->
+      <TresGroup v-if="r.active" :position="r.propPos" :rotation-y="r.propSpin">
+        <TresMesh>
+          <TresBoxGeometry :args="[0.52, 0.012, 0.08]" />
+          <TresMeshStandardMaterial :color="r.color" :emissive="r.color" :emissive-intensity="0.5" />
+        </TresMesh>
+        <TresMesh :rotation-y="Math.PI / 2">
+          <TresBoxGeometry :args="[0.52, 0.012, 0.08]" />
+          <TresMeshStandardMaterial :color="r.color" :emissive="r.color" :emissive-intensity="0.5" />
+        </TresMesh>
+      </TresGroup>
+    </template>
   </TresCanvas>
 </template>

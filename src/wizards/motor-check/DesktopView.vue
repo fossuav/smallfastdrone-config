@@ -34,6 +34,7 @@
 import type { CommandAck } from 'mavlink-mappings/dist/lib/common'
 import type { MotorVisual } from '../../ui/visuals/MotorCheck3D.vue'
 import type { FrameMotor, MotorPosition, Spin } from '../../workflow/motor-geometry'
+import { PerspectiveCamera, Vector3 } from 'three'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { buildMotorTest, buildMotorTestStop, MOTOR_TEST_PWM_SPIN } from '../../protocol/motors'
@@ -41,7 +42,7 @@ import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import MotorCheck3D from '../../ui/visuals/MotorCheck3D.vue'
-import { frameGeometry, spinLabel } from '../../workflow/motor-geometry'
+import { frameGeometry, motorTopdownXY, spinLabel } from '../../workflow/motor-geometry'
 
 const WIZARD_ID = 'motor-check'
 const COMP_ID_AUTOPILOT = 1
@@ -66,8 +67,9 @@ type Phase = 'loading' | 'unsupported' | 'safety' | 'testing' | 'review' | 'erro
 const phase = ref<Phase>('loading')
 const errorMessage = ref<string | null>(null)
 
-// The connected frame's motors, sorted into motor-number order (Motor 1,
-// 2, 3 …) so the operator walks them by the numbers printed on diagrams.
+// The connected frame's motors, in the firmware's test order — a
+// clockwise sweep from the front-right, which is the order operators
+// expect to watch motors spin in. Each step still shows its motor number.
 const motors = ref<FrameMotor[]>([])
 const frameLabel = ref('')
 // X-frame model rotated 45° for a Plus frame so its arms meet the rings.
@@ -113,8 +115,8 @@ onMounted(async () => {
       errorMessage.value = 'This frame isn\'t supported by the motor check yet — only quad layouts for now.'
       return
     }
-    // Sort into motor-number order for stepping.
-    motors.value = [...geo.motors].sort((a, b) => a.motorIndex - b.motorIndex)
+    // geo.motors is already in test order (clockwise from front-right).
+    motors.value = geo.motors
     frameLabel.value = geo.label
     bodyYawDeg.value = frameType === FRAME_TYPE_PLUS ? 45 : 0
     phase.value = 'safety'
@@ -301,6 +303,23 @@ const motorVisuals = computed<MotorVisual[]>(() =>
     return { key: m.testOrder, angleDeg: m.angleDeg, spin: m.spin, state }
   }),
 )
+
+// Project each motor's world position onto the (square) canvas so a text
+// label can sit precisely over it. Camera params MUST match the
+// TresPerspectiveCamera in MotorCheck3D.vue. RING_R/RING_Y mirror its
+// motor placement; the +0.4 lifts the label just above the motor.
+const projCam = new PerspectiveCamera(50, 1, 0.1, 1000)
+projCam.position.set(0, 3.25, 1.05)
+projCam.lookAt(0, 0, 0)
+projCam.updateMatrixWorld()
+function labelStyle(angleDeg: number): Record<string, string> {
+  const { x, y: sy } = motorTopdownXY(angleDeg)
+  const ndc = new Vector3(x * 1.05, 0.12 + 0.65, sy * 1.05).project(projCam)
+  return {
+    left: `${(ndc.x * 0.5 + 0.5) * 100}%`,
+    top: `${(-ndc.y * 0.5 + 0.5) * 100}%`,
+  }
+}
 </script>
 
 <template>
@@ -360,12 +379,11 @@ const motorVisuals = computed<MotorVisual[]>(() =>
     <div v-else-if="phase === 'testing'" class="space-y-4">
       <div class="flex items-center justify-between gap-2">
         <div>
-          <p class="text-highlighted text-lg font-semibold">
-            Motor {{ motorNumber }}
-            <span class="text-muted text-sm font-normal">of {{ motors.length }}</span>
+          <p class="text-highlighted text-lg font-semibold capitalize">
+            {{ currentMotor?.position }} motor
           </p>
           <p class="text-muted text-xs">
-            Should be the <span class="capitalize">{{ currentMotor?.position }}</span> motor
+            Motor {{ motorNumber }} · {{ stepIndex + 1 }} of {{ motors.length }}
           </p>
         </div>
         <UButton
@@ -378,8 +396,19 @@ const motorVisuals = computed<MotorVisual[]>(() =>
         </UButton>
       </div>
 
-      <div class="mx-auto aspect-square w-full max-w-sm">
+      <div class="relative mx-auto aspect-square w-full max-w-sm">
         <MotorCheck3D :motors="motorVisuals" :body-yaw-deg="bodyYawDeg" />
+        <div
+          v-for="m in motors"
+          :key="m.testOrder"
+          class="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium capitalize"
+          :class="currentMotor?.testOrder === m.testOrder
+            ? 'bg-amber-500 text-white shadow'
+            : 'bg-black/55 text-white/90'"
+          :style="labelStyle(m.angleDeg)"
+        >
+          {{ m.position }}
+        </div>
       </div>
 
       <UAlert v-if="errorMessage" color="warning" :description="errorMessage" />
@@ -397,7 +426,8 @@ const motorVisuals = computed<MotorVisual[]>(() =>
               :color="selPosition === m.position ? 'primary' : 'neutral'"
               :variant="selPosition === m.position ? 'solid' : 'outline'"
               size="sm"
-              class="capitalize"
+              :ui="{ base: 'justify-center' }"
+              class="w-32 capitalize"
               @click="pickPosition(m.position)"
             >
               {{ m.position }}
@@ -415,6 +445,8 @@ const motorVisuals = computed<MotorVisual[]>(() =>
               :color="selSpin === 'ccw' ? 'primary' : 'neutral'"
               :variant="selSpin === 'ccw' ? 'solid' : 'outline'"
               icon="i-lucide-rotate-ccw"
+              :ui="{ base: 'justify-center' }"
+              class="w-48"
               @click="pickSpin('ccw')"
             >
               Counter-clockwise
@@ -423,6 +455,8 @@ const motorVisuals = computed<MotorVisual[]>(() =>
               :color="selSpin === 'cw' ? 'primary' : 'neutral'"
               :variant="selSpin === 'cw' ? 'solid' : 'outline'"
               icon="i-lucide-rotate-cw"
+              :ui="{ base: 'justify-center' }"
+              class="w-48"
               @click="pickSpin('cw')"
             >
               Clockwise

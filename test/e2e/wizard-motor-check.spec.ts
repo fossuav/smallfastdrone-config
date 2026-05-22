@@ -20,9 +20,9 @@
 // exercises the full flow: props-off gate → walk each motor by number
 // (auto-spun) → confirm position + direction → review pass → Done badge.
 //
-// The wizard steps motors in motor-NUMBER order. For SITL's quad Plus the
-// firmware numbering is Motor1=right, Motor2=left, Motor3=front,
-// Motor4=rear, each with its expected spin.
+// The wizard steps motors in the firmware's test order — a clockwise
+// sweep. For SITL's quad Plus that's front → right → rear → left, each
+// with its expected spin.
 
 import { expect, test } from '@playwright/test'
 
@@ -30,10 +30,10 @@ const SITL_QUERY = '?transport=websocket&host=localhost:5761'
 const SITL_URL = `/${SITL_QUERY}`
 
 const PLUS_SEQUENCE = [
-  { position: 'right', direction: 'Counter-clockwise' },
-  { position: 'left', direction: 'Counter-clockwise' },
   { position: 'front', direction: 'Clockwise' },
+  { position: 'right', direction: 'Counter-clockwise' },
   { position: 'rear', direction: 'Clockwise' },
+  { position: 'left', direction: 'Counter-clockwise' },
 ]
 
 test('Motor check passes when every motor is confirmed correct (SITL quad +)', async ({ page }) => {
@@ -55,8 +55,9 @@ test('Motor check passes when every motor is confirmed correct (SITL quad +)', a
   // (pre-selected to the expected one) and pick the direction.
   for (let i = 0; i < PLUS_SEQUENCE.length; i++) {
     const step = PLUS_SEQUENCE[i]!
-    await expect(page.getByText(`Should be the ${step.position} motor`)).toBeVisible({ timeout: 10_000 })
-    await page.getByRole('button', { name: step.position, exact: true }).click()
+    const posButton = page.getByRole('button', { name: step.position, exact: true })
+    await expect(posButton).toBeVisible({ timeout: 10_000 })
+    await posButton.click()
     await page.getByRole('button', { name: step.direction, exact: true }).click()
     const advance = i === PLUS_SEQUENCE.length - 1 ? 'Finish' : 'Next motor'
     await page.getByRole('button', { name: advance }).click()
