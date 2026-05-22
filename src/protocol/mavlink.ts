@@ -252,6 +252,30 @@ export function buildPreflightReboot(targetSystem: number, targetComponent: numb
   return cmd
 }
 
+// Build a COMMAND_LONG that restarts the FC's Lua scripting engine
+// (MAV_CMD_SCRIPTING, command id 42701; param1 = SCRIPTING_CMD_STOP_AND_RESTART
+// = 3). The scripting thread tears down its Lua state and rescans the
+// scripts directory — so a freshly-uploaded applet is loaded WITHOUT a
+// full FC reboot. Requires scripting to already be enabled (SCR_ENABLE > 0);
+// it's a no-op restart of a subsystem that isn't running otherwise. The FC
+// replies with COMMAND_ACK. Used by the Lua engine's install path so wizard
+// applets load on demand. See docs/WIZARDS.md "Lua engine".
+export function buildScriptingRestart(targetSystem: number, targetComponent: number): common.CommandLong {
+  const cmd = new common.CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  cmd.command = 42701 as common.MavCmd // MAV_CMD_SCRIPTING
+  cmd._param1 = 3 // SCRIPTING_CMD_STOP_AND_RESTART
+  cmd._param2 = 0
+  cmd._param3 = 0
+  cmd._param4 = 0
+  cmd._param5 = 0
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
+}
+
 // MAV_SEVERITY thresholds we care about for operator-facing toasting.
 //   0..3  EMERGENCY / ALERT / CRITICAL / ERROR — surface as error toast
 //   4     WARNING — surface as warning toast

@@ -44,13 +44,14 @@ test('IMU noise wizard shows the scripting-off prompt against a stock SITL', asy
   await expect(page.getByRole('heading', { name: 'Check sensor noise' })).toBeVisible()
 
   // checkScripting() loads params, sees SCR_ENABLE=0, shows the
-  // "scripting isn't enabled" alert. Allow time for the full param
+  // "scripting isn't turned on" alert. Allow time for the full param
   // fetch.
-  await expect(page.getByText(/Scripting isn't enabled/)).toBeVisible({ timeout: 30_000 })
-  // Operator-actionable instructions are split across <em>/<code>/text
-  // nodes; check distinctive fragments rather than one full sentence.
-  await expect(page.getByText(/needs ArduPilot scripting enabled/)).toBeVisible()
-  await expect(page.getByText('Expert mode → Parameters')).toBeVisible()
+  await expect(page.getByText(/Scripting isn't turned on/)).toBeVisible({ timeout: 30_000 })
+  // Operator-actionable instructions point at Drone settings (no
+  // parameter names / expert-mode jargon). Text is split across
+  // <strong>/text nodes; check distinctive fragments.
+  await expect(page.getByText(/needs Lua scripting turned on/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open Drone settings' })).toBeVisible()
 
   // Back-to-library returns to the wizard library; no completion
   // recorded for this aborted run.

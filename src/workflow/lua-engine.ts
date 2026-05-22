@@ -24,19 +24,26 @@
 // state machine, abort handling, progress UI) is the wizard view's
 // concern — this module only owns the protocol primitives.
 //
-// Scope notes for slice C2:
-//   - No auto SCR_ENABLE-and-reboot path yet. Wizards check the flag
-//     in their own DesktopView and ask the operator to enable scripting
-//     via expert mode + reboot if it's off. Reboot orchestration lands
-//     when there's a real wizard motivated to consume it (and a way
-//     to test the reboot end-to-end against SITL, which currently
-//     dies on PREFLIGHT_REBOOT_SHUTDOWN).
+// Applet load model (important): ArduPilot loads scripts from the
+// scripting directory once, when the scripting engine starts. A file
+// FTP'd in at runtime is NOT picked up until the engine rescans. So the
+// install path is: uploadApplet (FTP) → restartScripting
+// (MAV_CMD_SCRIPTING STOP_AND_RESTART, which tears down + recreates the
+// Lua state and rescans) → waitForControlParam (the applet's
+// WIZ_<ID>_ACTIVE param appears once it has run its add_table). This
+// loads a freshly-uploaded applet WITHOUT a full FC reboot. The one
+// thing that DOES need a reboot — enabling SCR_ENABLE when it's off — is
+// owned by the drone-settings page, not here; wizards treat scripting-on
+// as a precondition.
+//
+// Scope notes:
 //   - No orphan-cleanup helper yet. Until we have a real Lua wizard
 //     to leave orphans behind, premature.
 
-import type { NamedValueFloat, ParamValue } from 'mavlink-mappings/dist/lib/common'
+import type { CommandAck, NamedValueFloat, ParamValue } from 'mavlink-mappings/dist/lib/common'
 import { MavFtp, MavFtpError } from '../protocol/ftp'
-import { buildParamSet } from '../protocol/params'
+import { buildScriptingRestart } from '../protocol/mavlink'
+import { buildParamRequestRead, buildParamSet } from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
 
@@ -48,6 +55,22 @@ const COMP_ID_AUTOPILOT = 1
 // reached for via class.MSG_ID at every use site for clarity.
 const MSGID_PARAM_VALUE = 22
 const MSGID_NAMED_VALUE_FLOAT = 251
+const MSGID_COMMAND_ACK = 77
+
+// MAV_CMD_SCRIPTING — the command buildScriptingRestart() sends. We match
+// its COMMAND_ACK by this id. MAV_RESULT_ACCEPTED (0) means the FC took
+// the restart request.
+const MAV_CMD_SCRIPTING = 42701
+const MAV_RESULT_ACCEPTED = 0
+
+// Scripting restart ack window. The FC acks the COMMAND_LONG quickly; the
+// actual state teardown + rescan happens asynchronously after.
+const SCRIPTING_RESTART_ACK_TIMEOUT_MS = 3000
+
+// After a restart, the applet runs its add_table and its control param
+// appears a beat later. Poll for it rather than guessing a fixed delay.
+const CONTROL_PARAM_TIMEOUT_MS = 8000
+const CONTROL_PARAM_POLL_MS = 500
 
 // MAV_PARAM_TYPE_REAL32 — Lua-declared WIZ_<ID>_ACTIVE params are
 // typically floats since AP_Param's Lua bridge uses REAL32 by default
@@ -156,6 +179,88 @@ export function useLuaEngine() {
     })
   }
 
+  // Restart the FC's Lua scripting engine so a freshly-uploaded applet
+  // gets rescanned and loaded (see the load-model note at the top of
+  // this file). Requires scripting already enabled — it's a no-op
+  // otherwise. Returns true if the FC accepted the restart command.
+  // Doesn't wait for the applet to finish loading; pair with
+  // waitForControlParam to confirm it's live.
+  async function restartScripting(): Promise<boolean> {
+    if (!session.connected || session.sysid === null)
+      throw new Error('LuaEngine: not connected to a drone')
+    const targetSys = session.sysid
+    return new Promise<boolean>((resolve) => {
+      let unsubscribe: (() => void) | null = null
+      const timer = setTimeout(() => {
+        unsubscribe?.()
+        resolve(false)
+      }, SCRIPTING_RESTART_ACK_TIMEOUT_MS)
+      unsubscribe = session.subscribeMessages((msg) => {
+        if (msg.msgid !== MSGID_COMMAND_ACK)
+          return
+        const ack = msg.data as CommandAck
+        if ((ack.command as number) !== MAV_CMD_SCRIPTING)
+          return
+        clearTimeout(timer)
+        unsubscribe?.()
+        resolve(ack.result === MAV_RESULT_ACCEPTED)
+      })
+      session.sendMessage(buildScriptingRestart(targetSys, COMP_ID_AUTOPILOT)).catch(() => {
+        clearTimeout(timer)
+        unsubscribe?.()
+        resolve(false)
+      })
+    })
+  }
+
+  // Read a single parameter by name. Resolves with its value, or null if
+  // the FC doesn't reply within timeoutMs (param absent, or link hiccup).
+  // A plain read — distinct from setParam's write+echo — used to probe
+  // for a Lua-declared param that may not exist yet.
+  async function readParam(name: string, timeoutMs = 1500): Promise<number | null> {
+    if (!session.connected || session.sysid === null)
+      throw new Error('LuaEngine: not connected to a drone')
+    const targetSys = session.sysid
+    return new Promise<number | null>((resolve) => {
+      let unsubscribe: (() => void) | null = null
+      const timer = setTimeout(() => {
+        unsubscribe?.()
+        resolve(null)
+      }, timeoutMs)
+      unsubscribe = session.subscribeMessages((msg) => {
+        if (msg.msgid !== MSGID_PARAM_VALUE)
+          return
+        const pv = msg.data as ParamValue
+        if (pv.paramId.replace(/\0.*$/, '') !== name)
+          return
+        clearTimeout(timer)
+        unsubscribe?.()
+        resolve(pv.paramValue)
+      })
+      session.sendMessage(buildParamRequestRead(targetSys, COMP_ID_AUTOPILOT, name)).catch(() => {
+        clearTimeout(timer)
+        unsubscribe?.()
+        resolve(null)
+      })
+    })
+  }
+
+  // Poll for an applet's control param to appear after a scripting
+  // restart. Resolves true once the FC reports it, false if it hasn't
+  // shown up within CONTROL_PARAM_TIMEOUT_MS — which means the applet
+  // failed to load (bad upload, Lua error, or a param-table key
+  // collision). The install path uses this to confirm the applet is
+  // actually live before arming it.
+  async function waitForControlParam(name: string): Promise<boolean> {
+    const deadline = Date.now() + CONTROL_PARAM_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      const value = await readParam(name, CONTROL_PARAM_POLL_MS)
+      if (value !== null)
+        return true
+    }
+    return false
+  }
+
   // Set a single parameter on the FC and wait for the PARAM_VALUE
   // echo. Returns the value the FC accepted, or acked=false on
   // timeout. Bypasses the params store deliberately:
@@ -227,6 +332,9 @@ export function useLuaEngine() {
     checkScripting,
     uploadApplet,
     removeApplet,
+    restartScripting,
+    readParam,
+    waitForControlParam,
     setParam,
     subscribeNamedValue,
   }

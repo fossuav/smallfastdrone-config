@@ -29,7 +29,7 @@
 // gets parameter documentation offline.
 
 import type { MavParamType } from 'mavlink-mappings/dist/lib/common'
-import { CommandLong, MavCmd, ParamRequestList, ParamSet } from 'mavlink-mappings/dist/lib/common'
+import { CommandLong, MavCmd, ParamRequestList, ParamRequestRead, ParamSet } from 'mavlink-mappings/dist/lib/common'
 import metadataRaw from './param-metadata.json'
 
 export const MSGID_PARAM_VALUE = 22
@@ -69,6 +69,20 @@ export function buildParamSet(targetSystem: number, targetComponent: number, nam
   ps.paramValue = value
   ps.paramType = type
   return ps
+}
+
+// Build a PARAM_REQUEST_READ for a single parameter by name. The FC
+// replies with one PARAM_VALUE (or nothing if the param doesn't exist).
+// Used to probe for a parameter that may have just come into existence —
+// e.g. a Lua applet's control param after a scripting restart — without
+// re-streaming the whole param set. param_index=-1 selects by name.
+export function buildParamRequestRead(targetSystem: number, targetComponent: number, name: string): ParamRequestRead {
+  const req = new ParamRequestRead()
+  req.targetSystem = targetSystem
+  req.targetComponent = targetComponent
+  req.paramId = name
+  req.paramIndex = -1
+  return req
 }
 
 // MAV_CMD_PREFLIGHT_STORAGE with param1=1 → save current parameters to

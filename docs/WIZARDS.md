@@ -90,19 +90,33 @@ The wizard ships a Lua applet at `src/wizards/<id>/applet.lua`. **Write applets 
 
 ```
 operator clicks Start
-  → runtime checks SCR_ENABLE; if zero, asks operator "enable scripting?"
-    once, sets it, reboots FC
-  → runtime uploads applet.lua to APM/scripts/ via MAVLink FTP
-  → runtime sets WIZ_<ID>_ACTIVE = 1 (the applet self-arms on this param)
+  → wizard checks SCR_ENABLE; if zero, sends operator to Drone settings to
+    turn scripting on (a one-time, restart-required change that the
+    settings page owns: write + reboot + auto-reconnect). Scripting-on is a
+    precondition; the wizard itself never reboots the FC.
+  → wizard uploads applet.lua to APM/scripts/ via MAVLink FTP
+  → wizard restarts scripting (MAV_CMD_SCRIPTING STOP_AND_RESTART) so the FC
+    rescans the directory and loads the just-uploaded applet — NO reboot
+  → wizard waits for WIZ_<ID>_ACTIVE to appear (the applet's add_table runs
+    on load) — proof the applet is live
+  → wizard sets WIZ_<ID>_ACTIVE = 1 (the applet self-arms on this param)
   → applet runs, reads/writes its owned params, emits progress via
     NAMED_VALUE_FLOAT or a status param
-  → desktop view polls progress + renders
+  → desktop view subscribes to progress + renders
   → wizard completes (success / abort)
-  → runtime sets WIZ_<ID>_ACTIVE = 0 (applet returns to a long sleep interval)
-  → runtime deletes applet.lua from APM/scripts/
-  → runtime reboots FC only if necessary (e.g. SCR_ENABLE was flipped this
-    session, or the applet's exit contract requires it)
+  → wizard sets WIZ_<ID>_ACTIVE = 0 (applet returns to a long sleep interval)
+  → wizard deletes applet.lua from APM/scripts/ via FTP
 ```
+
+**Why the scripting restart.** ArduPilot loads scripts once, when the
+scripting engine starts (`lua_scripts.cpp`: `load_all_scripts_in_dir` runs
+before the run loop). A file FTP'd in at runtime is not auto-detected.
+`MAV_CMD_SCRIPTING` STOP_AND_RESTART tears down and recreates the Lua state,
+re-reading the directory — so a freshly-uploaded applet loads without a full
+FC reboot. The protocol primitives live in `src/workflow/lua-engine.ts`
+(`uploadApplet` / `restartScripting` / `waitForControlParam`). The only
+reboot anywhere in the Lua flow is the one-time `SCR_ENABLE` enable, owned by
+the drone-settings page.
 
 **Resource discipline.** A Lua wizard MUST tolerate being killed mid-run (operator Abort, USB unplugged, FC reboots) without leaving the FC in a bad param state. The applet's exit path always sets owned params to a sane resting value before returning nil. The runtime tracks `WIZ_<ID>_ACTIVE` at reconnect — if non-zero with no active session, the runtime offers a one-click "clean up previous wizard run."
 

@@ -124,7 +124,23 @@ async function start() {
   progress.value = 0
   result.value = null
   try {
+    // Upload the applet, then restart the scripting engine so the FC
+    // loads it. A freshly-uploaded script isn't picked up until the
+    // engine rescans (see src/workflow/lua-engine.ts) — restart does
+    // that without a full reboot.
     await lua.uploadApplet(WIZARD_ID, APPLET_SOURCE)
+    const restarted = await lua.restartScripting()
+    if (!restarted) {
+      throw new Error('Your drone didn\'t restart its scripting engine. Make sure scripting is turned on in Drone settings, then try again.')
+    }
+
+    // Wait for the applet to register its control — proof it loaded and
+    // ran. If it never shows, the applet didn't load (bad upload, Lua
+    // error, or scripting turned off again).
+    const loaded = await lua.waitForControlParam(CONTROL_PARAM)
+    if (!loaded) {
+      throw new Error('The wizard couldn\'t load onto your drone. Check that scripting is turned on in Drone settings, then try again.')
+    }
 
     // Subscribe before flipping ACTIVE so we don't miss the first
     // progress emit.
@@ -138,7 +154,7 @@ async function start() {
 
     const ack = await lua.setParam(CONTROL_PARAM, 1)
     if (!ack.acked) {
-      throw new Error('Drone didn\'t acknowledge the control parameter — the wizard applet probably isn\'t loaded. Try rebooting your drone and starting again.')
+      throw new Error('Your drone didn\'t acknowledge the start signal. Try again.')
     }
     phase.value = 'sampling'
   }
@@ -187,6 +203,13 @@ function back() {
   router.push(returnTo.value)
 }
 
+// Jump to the drone-settings page, where the operator turns Lua scripting
+// on (a one-time, restart-required change the settings page owns). On
+// return the wizard re-checks scripting on mount.
+function goToSettings() {
+  router.push('/settings')
+}
+
 async function retry() {
   await checkAndPrepare()
 }
@@ -202,21 +225,30 @@ async function retry() {
     </div>
 
     <div v-else-if="phase === 'scripting-off'" class="space-y-3">
-      <UAlert color="warning" :title="errorMessage ? 'Scripting unavailable' : 'Scripting isn\'t enabled'">
+      <UAlert color="warning" :title="errorMessage ? 'Scripting unavailable' : 'Scripting isn\'t turned on'">
         <template #description>
           <template v-if="errorMessage">
             {{ errorMessage }}
           </template>
           <template v-else>
-            This wizard needs ArduPilot scripting enabled on your drone.
-            Open <em>Expert mode → Parameters</em>, set <code>SCR_ENABLE</code>
-            to 1, reboot your drone, then come back.
+            This wizard needs Lua scripting turned on. Open
+            <strong>Drone settings</strong>, switch on
+            <strong>Lua scripting</strong> (your drone restarts briefly),
+            then come back and start the wizard.
           </template>
         </template>
       </UAlert>
-      <div class="flex justify-end">
-        <UButton color="neutral" variant="outline" @click="back">
+      <div class="flex justify-end gap-2">
+        <UButton color="neutral" variant="ghost" @click="back">
           Back to library
+        </UButton>
+        <UButton
+          v-if="!errorMessage"
+          color="primary"
+          icon="i-lucide-sliders-horizontal"
+          @click="goToSettings"
+        >
+          Open Drone settings
         </UButton>
       </div>
     </div>
@@ -244,6 +276,9 @@ async function retry() {
       <UIcon name="i-lucide-loader-circle" class="text-primary size-6 animate-spin" />
       <p class="text-default mt-2 text-sm">
         Setting your drone up to sample…
+      </p>
+      <p class="text-muted mt-1 text-xs">
+        This takes a few seconds.
       </p>
     </div>
 
