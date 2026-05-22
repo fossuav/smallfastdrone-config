@@ -59,9 +59,11 @@ bun dev               # terminal 3
 
 ## Test
 
-Playwright E2E lands first; Vitest unit + integration come in later Phase 0 slices. See [docs/TESTING.md](docs/TESTING.md) for the design.
+Vitest covers pure logic; Playwright E2E drives the UI against SITL. See [docs/TESTING.md](docs/TESTING.md) for the design.
 
 ```bash
+bun run test:unit          # Vitest: pure-logic unit tests (no I/O), fast
+bun run test:unit:watch    # Vitest in watch mode
 bun run test:e2e           # Playwright: starts SITL + bridge + Vite, runs the suite, tears down
 bun run test:e2e:headed    # Same with a visible browser, useful for debugging
 bun run test:e2e:debug     # Pause / step through tests interactively
