@@ -30,10 +30,10 @@ const SITL_QUERY = '?transport=websocket&host=localhost:5761'
 const SITL_URL = `/${SITL_QUERY}`
 
 const PLUS_SEQUENCE = [
-  { position: 'front', direction: 'Clockwise' },
-  { position: 'right', direction: 'Counter-clockwise' },
-  { position: 'rear', direction: 'Clockwise' },
-  { position: 'left', direction: 'Counter-clockwise' },
+  { position: 'Front', direction: 'Clockwise' },
+  { position: 'Right', direction: 'Counter-clockwise' },
+  { position: 'Rear', direction: 'Clockwise' },
+  { position: 'Left', direction: 'Counter-clockwise' },
 ]
 
 test('Motor check passes when every motor is confirmed correct (SITL quad +)', async ({ page }) => {

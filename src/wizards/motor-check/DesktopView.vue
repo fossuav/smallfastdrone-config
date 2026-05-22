@@ -42,7 +42,7 @@ import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import MotorCheck3D from '../../ui/visuals/MotorCheck3D.vue'
-import { frameGeometry, motorTopdownXY, spinLabel } from '../../workflow/motor-geometry'
+import { frameGeometry, motorTopdownXY, positionLabel, spinLabel } from '../../workflow/motor-geometry'
 
 const WIZARD_ID = 'motor-check'
 const COMP_ID_AUTOPILOT = 1
@@ -287,20 +287,35 @@ function leave() {
   router.push(returnTo.value)
 }
 
-// 3D states. While testing, highlight the motor under test (where it
-// SHOULD be) so the operator knows which one the wizard is driving. In
-// review, motors go green/red by result.
+// The spin direction the graphic should animate: the operator's choice
+// once they've made one, otherwise the expected spin of the motor they
+// currently have selected (a sensible default preview).
+const displaySpin = computed<Spin>(() => {
+  if (selSpin.value)
+    return selSpin.value
+  const sel = motors.value.find(m => m.position === selPosition.value)
+  return sel?.spin ?? currentMotor.value?.spin ?? 'cw'
+})
+
+// 3D states. While testing, the graphic mirrors the operator's answer:
+// the motor they've selected as "the one that moved" is highlighted and
+// its prop spins the way they say (defaulting to the expected direction
+// until they pick). In review, motors go green/red by result.
 const motorVisuals = computed<MotorVisual[]>(() =>
   motors.value.map((m) => {
     let state: MotorVisual['state'] = 'idle'
-    if (phase.value === 'testing' && currentMotor.value?.testOrder === m.testOrder) {
-      state = 'active'
+    let spin = m.spin
+    if (phase.value === 'testing') {
+      if (m.position === selPosition.value) {
+        state = 'active'
+        spin = displaySpin.value
+      }
     }
     else if (phase.value === 'review') {
       const r = results.value.find(x => x.motor.testOrder === m.testOrder)
       state = r && r.positionOk && r.spinOk ? 'done' : 'mismatch'
     }
-    return { key: m.testOrder, angleDeg: m.angleDeg, spin: m.spin, state }
+    return { key: m.testOrder, angleDeg: m.angleDeg, spin, state }
   }),
 )
 
@@ -379,8 +394,8 @@ function labelStyle(angleDeg: number): Record<string, string> {
     <div v-else-if="phase === 'testing'" class="space-y-4">
       <div class="flex items-center justify-between gap-2">
         <div>
-          <p class="text-highlighted text-lg font-semibold capitalize">
-            {{ currentMotor?.position }} motor
+          <p class="text-highlighted text-lg font-semibold">
+            {{ currentMotor ? positionLabel(currentMotor.position) : '' }} motor
           </p>
           <p class="text-muted text-xs">
             Motor {{ motorNumber }} · {{ stepIndex + 1 }} of {{ motors.length }}
@@ -401,13 +416,13 @@ function labelStyle(angleDeg: number): Record<string, string> {
         <div
           v-for="m in motors"
           :key="m.testOrder"
-          class="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium capitalize"
-          :class="currentMotor?.testOrder === m.testOrder
+          class="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium"
+          :class="selPosition === m.position
             ? 'bg-amber-500 text-white shadow'
             : 'bg-black/55 text-white/90'"
           :style="labelStyle(m.angleDeg)"
         >
-          {{ m.position }}
+          {{ positionLabel(m.position) }}
         </div>
       </div>
 
@@ -427,10 +442,10 @@ function labelStyle(angleDeg: number): Record<string, string> {
               :variant="selPosition === m.position ? 'solid' : 'outline'"
               size="sm"
               :ui="{ base: 'justify-center' }"
-              class="w-32 capitalize"
+              class="w-32"
               @click="pickPosition(m.position)"
             >
-              {{ m.position }}
+              {{ positionLabel(m.position) }}
             </UButton>
           </div>
         </div>
@@ -506,7 +521,7 @@ function labelStyle(angleDeg: number): Record<string, string> {
         />
         <ul class="space-y-2">
           <li
-            v-for="(r, i) in results"
+            v-for="r in results"
             :key="r.motor.testOrder"
             class="border-default flex items-start gap-2 rounded-lg border p-2 text-sm"
           >
@@ -516,12 +531,12 @@ function labelStyle(angleDeg: number): Record<string, string> {
               class="mt-0.5 size-4 shrink-0"
             />
             <div>
-              <span class="text-highlighted font-medium">Motor {{ i + 1 }}</span>
-              <span class="text-muted capitalize"> ({{ r.motor.position }})</span>
+              <span class="text-highlighted font-medium">Motor {{ r.motor.motorIndex + 1 }}</span>
+              <span class="text-muted"> ({{ positionLabel(r.motor.position) }})</span>
               <span v-if="r.positionOk && r.spinOk" class="text-muted"> — correct</span>
               <template v-else>
                 <span v-if="!r.positionOk" class="text-error">
-                  — you saw it move at <span class="capitalize">{{ r.observed?.position ?? 'nowhere' }}</span>
+                  — you saw it move at {{ r.observed ? positionLabel(r.observed.position) : 'nowhere' }}
                 </span>
                 <span v-else-if="!r.spinOk" class="text-error">
                   — turning {{ r.observed ? spinLabel(r.observed.spin) : '?' }},

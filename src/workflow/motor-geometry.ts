@@ -96,6 +96,13 @@ function positionForAngle(angleDeg: number): MotorPosition {
   }
 }
 
+// Operator-facing label for a position — "front-left" → "Front left".
+// Hyphen becomes a space and the first letter is capitalised.
+export function positionLabel(p: MotorPosition): string {
+  const spaced = p.replace('-', ' ')
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
 // Human label for a spin direction.
 export function spinLabel(s: Spin): string {
   return s === 'cw' ? 'clockwise' : 'counter-clockwise'
