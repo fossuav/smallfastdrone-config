@@ -106,6 +106,16 @@ Not a v1 polish target, but baseline:
 | `LogsView` | Log catalog with date / duration / size; download button per row. |
 | `FirmwareView` | Animated DFU flow with visual stage indicators; firmware metadata card. |
 | `EscToolsView` | Per-ESC card with live data; "ESC profile" picker visible by default; raw 4-way settings only in expert mode. |
+| `SettingsView` | One card per feature toggle (switch + plain-language description + current-state line). Reboot-required toggles surface an Apply confirm; the restart + reconnect is handled for the operator. |
+
+## Feature toggles & reboot-required changes
+
+`SettingsView` is the operator-facing home for FC feature toggles that map to parameters (scripting on/off, and later DDS, telemetry types, etc.). The pattern, established by the Lua-scripting toggle and codified here so every future toggle follows it:
+
+- **Confirm only when a reboot is involved.** A change that takes effect immediately should *just happen* on toggle — flip the switch, the parameter is written, done. Don't make the operator hit Apply for a change with no consequence to weigh. An explicit **Apply** step exists **only** for changes that require a restart (or are otherwise destructive/expensive), where the operator genuinely needs to opt in. A `rebootRequired`-style flag on the toggle drives which path it takes.
+- **One action does the whole job.** When a reboot *is* required, the single confirm (Apply) does everything: write the parameter, restart the drone, and reconnect — with no further clicks. Don't decompose a reboot into separate "Apply", "Restart", and "Reconnect" buttons the operator has to chase in sequence. The operator expressed intent once; honour it end-to-end.
+- **Reconnect is automatic, not the operator's chore.** After a restart, the tool reconnects on its own, retrying through the FC's boot window. A manual "Reconnect" affordance appears only as a *fallback* if auto-reconnect exhausts its budget — never as the default path. The operator should be able to walk away during the restart and come back to a settled, applied state.
+- **Name the consequence before it happens.** The confirm copy says what will occur in operator terms — "Applying this restarts your drone (a few seconds) — we'll reconnect automatically when it's back" — not "Set SCR_ENABLE=1 and reboot".
 
 ## Anti-patterns we won't ship
 
@@ -115,6 +125,7 @@ Not a v1 polish target, but baseline:
 - Recipes presented as a list of `param=value` rows. Operators choose outcomes, not parameter assignments.
 - Spinners without labels.
 - Numeric values in units the operator doesn't intuit (centidegrees, raw stick units, MAVLink enums).
+- Making the operator babysit a reboot — separate Restart/Reconnect buttons, or a manual reconnect as the default after a restart. One confirm, then the tool handles restart + reconnect.
 - "Are you sure?" prompts that don't say what will actually happen.
 
 ## Future tuning sophistication
