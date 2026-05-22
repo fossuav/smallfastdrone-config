@@ -122,6 +122,16 @@ interface DroneSession {
 }
 ```
 
+#### Session lifecycle — connect, heartbeat, reboot
+
+Contracts that aren't obvious from the interface and have bitten us:
+
+- **`connect()` resolves on transport-open, not on the first heartbeat.** The WebSerial/WebSocket transport is up before the FC has said anything. `sysid` is `null` until the first HEARTBEAT arrives. **Any operation that needs the FC identified — `params.load()`, PARAM_SET, anything targeting a sysid — must wait for the heartbeat (`sysid !== null`), not just for `connected`.** `params.load()` bails out when `sysid` is null; calling it straight after `connect()` silently loads nothing. (This caused the settings-page "value looks reverted after reboot" bug.)
+
+- **Reboot is an explicit, intent-flagged flow.** `session.reboot()` sends `PREFLIGHT_REBOOT_SHUTDOWN` and sets a `rebooting` ref so consumers render an expected-drop UI instead of treating the imminent transport close as an error. The heartbeat handler clears `rebooting` on the first post-reboot heartbeat. The full restart→auto-reconnect orchestration (wait for transport drop, then retry connect+heartbeat through the FC's boot window, with a manual fallback) currently lives in `SettingsView`. **When a second consumer needs it (firmware DFU flashing will), extract it to a `useReboot()` composable rather than copy-pasting** — until then, one consumer doesn't justify the abstraction.
+
+- **Param writes normally go through the params store**, which owns the dirty-set and the batched write-and-save (see invariants below). **Two cases bypass it with a direct PARAM_SET + echo wait:** (a) Lua-declared control params (`WIZ_<ID>_ACTIVE`) that don't appear in the store's fetched set until the applet loads (`useLuaEngine().setParam`), and (b) one-off feature toggles that shouldn't entangle with the operator's pending edits in the param browser (`SettingsView`). Bypass is the exception, not the default — reach for the store first.
+
 ### Params
 
 ```ts
