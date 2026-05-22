@@ -20,23 +20,22 @@
 // hardcoded scripting card promotes into a registry-driven loop when a
 // second toggle motivates the refactor.
 //
-// State machine per toggle:
+// Two flows, chosen by the toggle's `rebootRequired` flag:
 //
-//   checking      — params loading, can't show anything yet
-//   unavailable   — not connected OR param missing on this firmware
-//   idle          — connected, no pending change, switch reflects FC
-//   pending       — operator flipped the switch; not yet written
-//   applying      — PARAM_SET in flight, waiting for echo
-//   needs-reboot  — wrote OK; for reboot-required params the operator
-//                   sees a Restart button instead of a "done" badge
-//   rebooting     — Restart clicked; reboot command sent. Subdivides
-//                   on session.connected (still up vs dropped) so the
-//                   UI tells the operator to wait vs click Reconnect.
-//   reconnecting  — operator clicked Reconnect; waiting for first
-//                   post-reboot heartbeat
+//   reboot-required (scripting): flip the switch → `pending` (operator
+//     confirms with Apply) → `applying` (PARAM_SET + echo) →
+//     `restarting` (reboot + automatic reconnect with retries through
+//     the FC's restart window) → `idle` with the new value. Apply does
+//     the whole thing — write, reboot, reconnect — with no further
+//     operator action.
 //
-// Settles back to idle once the new value is confirmed by the
-// post-reboot param re-fetch.
+//   no-reboot (future toggles): flipping the switch writes the param
+//     immediately (`applying` → `idle`). No Apply step — the change
+//     just takes effect.
+//
+// Other phases: `checking` (params loading), `unavailable` (not
+// connected / param absent), `reconnect-failed` (auto-reconnect gave
+// up; manual Reconnect offered as a fallback).
 
 import type { ParamValue } from 'mavlink-mappings/dist/lib/common'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -45,12 +44,24 @@ import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
 
 // Hardcoded scripting toggle. When a second toggle lands this lifts
-// into a FeatureToggle interface + a manifest registry; for one entry
-// the inline shape is clearer.
-const SCRIPTING_PARAM = 'SCR_ENABLE'
-const MAV_PARAM_TYPE_INT8 = 2
+// into a FeatureToggle interface + a registry; for one entry the inline
+// shape is clearer. `rebootRequired` drives which flow the toggle uses.
+const TOGGLE = {
+  param: 'SCR_ENABLE',
+  type: 2, // MAV_PARAM_TYPE_INT8
+  rebootRequired: true,
+} as const
 const COMP_ID_AUTOPILOT = 1
 const PARAM_ACK_TIMEOUT_MS = 1500
+// After PARAM_SET, wait before rebooting. ArduPilot auto-saves on
+// PARAM_SET but SITL's storage backend batches the write; rebooting
+// immediately races the flush. Imperceptible on real hardware.
+const STORAGE_SETTLE_MS = 1500
+// Auto-reconnect budget after a reboot. The FC needs a few seconds to
+// come back; we retry connect+heartbeat until this elapses.
+const RECONNECT_BUDGET_MS = 60_000
+const RECONNECT_RETRY_MS = 1500
+const HEARTBEAT_WAIT_MS = 5000
 
 const session = useSessionStore()
 const params = useParamsStore()
@@ -61,36 +72,35 @@ type Phase
     | 'idle'
     | 'pending'
     | 'applying'
-    | 'needs-reboot'
-    | 'rebooting'
-    | 'reconnecting'
+    | 'restarting'
+    | 'reconnect-failed'
 const phase = ref<Phase>('checking')
 const errorMessage = ref<string | null>(null)
 const pendingValue = ref<number | null>(null)
 
-// Latest FC-reported value of SCR_ENABLE — undefined until params load,
-// null when the param doesn't exist on this firmware at all. Read fresh
-// from the store on every access so a post-reboot re-load reflects.
+// Latest FC-reported value — null when the param isn't in the store
+// (not loaded, or absent on this firmware). Read fresh each access so a
+// post-reboot reload reflects.
 const fcValue = computed<number | null>(() => {
-  const p = params.params.get(SCRIPTING_PARAM)
+  const p = params.params.get(TOGGLE.param)
   return p ? Math.trunc(p.value) : null
 })
 const isOn = computed(() => fcValue.value === 1)
 
-// What the switch shows. While pending, displays the operator's
-// chosen value; otherwise mirrors the FC.
+// What the switch shows. While pending, the operator's chosen value;
+// otherwise the FC's.
 const switchValue = computed({
   get: () => pendingValue.value !== null ? pendingValue.value === 1 : isOn.value,
-  set: v => setPending(v),
+  set: v => onToggle(v),
 })
 
+// The switch + idle states are interactive; the rest are mid-operation.
 const isBusy = computed(() =>
-  phase.value === 'applying' || phase.value === 'rebooting' || phase.value === 'reconnecting',
+  phase.value === 'applying' || phase.value === 'restarting',
 )
 
-// Mount logic: bail to unavailable if disconnected, otherwise load
-// params and decide between idle (param present) and unavailable
-// (vehicle doesn't expose SCR_ENABLE).
+// Mount: bail to unavailable if disconnected, else load params and
+// decide idle (param present) vs unavailable (firmware lacks it).
 onMounted(async () => {
   if (!session.connected || session.sysid === null) {
     phase.value = 'unavailable'
@@ -107,16 +117,16 @@ onMounted(async () => {
     errorMessage.value = `Couldn't load your drone's settings: ${params.error}`
     return
   }
-  if (!params.params.has(SCRIPTING_PARAM)) {
+  if (!params.params.has(TOGGLE.param)) {
     phase.value = 'unavailable'
-    errorMessage.value = `This drone's firmware doesn't expose ${SCRIPTING_PARAM} — Lua scripting may not be compiled in for this build.`
+    errorMessage.value = 'This drone\'s firmware doesn\'t expose Lua scripting — it may not be compiled into this build.'
     return
   }
   phase.value = 'idle'
 })
 
 // Wait until paramsStore.loading flips false — for the rare case the
-// SettingsView mounts while another store consumer is mid-fetch.
+// view mounts while another store consumer is mid-fetch.
 function waitForLoadComplete(): Promise<void> {
   return new Promise((resolve) => {
     const stop = watch(() => params.loading, (loading) => {
@@ -128,51 +138,62 @@ function waitForLoadComplete(): Promise<void> {
   })
 }
 
-// Operator flipped the switch (or programmatic equivalent). Drop the
-// pending state if the new choice matches the FC's current value —
-// no point queuing a no-op write.
-function setPending(on: boolean) {
+// Operator flipped the switch. Reboot-required toggles stage a pending
+// change for the operator to confirm with Apply; no-reboot toggles
+// write immediately. Flipping back to the current FC value is a no-op.
+function onToggle(on: boolean) {
   const wanted = on ? 1 : 0
   if (wanted === fcValue.value) {
     pendingValue.value = null
-    phase.value = 'idle'
+    if (phase.value === 'pending')
+      phase.value = 'idle'
+    return
   }
-  else {
+  if (TOGGLE.rebootRequired) {
     pendingValue.value = wanted
     phase.value = 'pending'
   }
+  else {
+    void applyImmediate(wanted)
+  }
 }
 
-// Operator clicked Apply. Send PARAM_SET, wait for the FC's
-// PARAM_VALUE echo, transition based on success.
+// No-reboot path: write the param and settle straight back to idle.
+async function applyImmediate(wanted: number) {
+  phase.value = 'applying'
+  errorMessage.value = null
+  const ok = await writeParamWithEcho(TOGGLE.param, wanted, TOGGLE.type)
+  pendingValue.value = null
+  if (!ok) {
+    phase.value = 'idle'
+    errorMessage.value = 'The drone didn\'t acknowledge the change. Try again.'
+    return
+  }
+  phase.value = 'idle'
+}
+
+// Reboot path: write the param, settle, reboot, then auto-reconnect
+// and reload. One operator click (Apply) drives the whole sequence.
 async function apply() {
   if (pendingValue.value === null || session.sysid === null)
     return
   phase.value = 'applying'
   errorMessage.value = null
-  const target = pendingValue.value
-  const ok = await writeParamWithEcho(SCRIPTING_PARAM, target, MAV_PARAM_TYPE_INT8)
+  const ok = await writeParamWithEcho(TOGGLE.param, pendingValue.value, TOGGLE.type)
   if (!ok) {
     phase.value = 'pending'
     errorMessage.value = 'The drone didn\'t acknowledge the change. Try again.'
     return
   }
-  // ArduPilot's PARAM_SET handler auto-saves to EEPROM via a
-  // batched timer tick; on SITL the write completes in milliseconds
-  // but the OS file buffer doesn't sync until the FD closes. A reboot
-  // immediately after PARAM_SET races the flush. Wait ~1.5s before
-  // letting the operator hit Restart — empirically enough for SITL,
-  // imperceptible on real hardware where the save is already done by
-  // the time the operator reads the prompt.
-  await new Promise(resolve => setTimeout(resolve, 1500))
-  // Scripting changes require a reboot. Stay in needs-reboot until
-  // the operator clicks Restart (or Cancel reverts).
-  phase.value = 'needs-reboot'
+  await sleep(STORAGE_SETTLE_MS)
+  phase.value = 'restarting'
+  await session.reboot()
+  await reconnectAndFinish()
 }
 
-// Send PARAM_SET + wait for the FC's PARAM_VALUE echo for that name.
-// Returns true if the echoed value matches the requested value within
-// float epsilon.
+// Send PARAM_SET, wait for the FC's PARAM_VALUE echo. Returns true if
+// the echoed value matches within float epsilon. Updates the cached
+// store value so the param browser reflects the change without a reload.
 async function writeParamWithEcho(name: string, value: number, type: number): Promise<boolean> {
   if (session.sysid === null)
     return false
@@ -191,8 +212,6 @@ async function writeParamWithEcho(name: string, value: number, type: number): Pr
         return
       clearTimeout(timer)
       unsubscribe?.()
-      // Update the cached store value so other consumers (e.g. the
-      // param browser) see the new value without a full reload.
       const existing = params.params.get(name)
       if (existing)
         params.params.set(name, { ...existing, value: pv.paramValue })
@@ -206,22 +225,81 @@ async function writeParamWithEcho(name: string, value: number, type: number): Pr
   })
 }
 
-// Operator clicked Restart. Fire the reboot via the session store;
-// transition to rebooting. The transport drop happens asynchronously
-// when the FC actually exits — we watch session.connected to render
-// the right copy (still up vs dropped).
-async function restart() {
-  phase.value = 'rebooting'
+// Drive the post-reboot reconnect to completion: wait for the
+// transport to drop, retry connect+heartbeat until the FC is back,
+// reload params, settle to idle. Falls to reconnect-failed if the
+// drone doesn't return within the budget (manual Reconnect offered).
+async function reconnectAndFinish() {
+  phase.value = 'restarting'
   errorMessage.value = null
-  await session.reboot()
+  const back = await autoReconnect()
+  if (!back) {
+    phase.value = 'reconnect-failed'
+    errorMessage.value = 'Couldn\'t reconnect to your drone automatically. Make sure it\'s powered, then try again.'
+    return
+  }
+  // Fresh fetch — the pre-reboot cache is stale.
+  params.clear()
+  await params.load()
+  pendingValue.value = null
+  phase.value = 'idle'
+}
+
+// Wait for the reboot-induced transport drop, then retry connect +
+// heartbeat on a fixed cadence until a heartbeat lands or the budget
+// runs out. Each attempt disconnects first so we never reconnect onto
+// a half-open transport from a failed prior attempt.
+async function autoReconnect(): Promise<boolean> {
+  await waitForDisconnect(10_000)
+  const deadline = Date.now() + RECONNECT_BUDGET_MS
+  while (Date.now() < deadline) {
+    await session.disconnect().catch(() => {})
+    await session.connect().catch(() => {})
+    if (session.connected) {
+      const gotHeartbeat = await waitForHeartbeat(HEARTBEAT_WAIT_MS)
+      if (gotHeartbeat && session.sysid !== null)
+        return true
+    }
+    await sleep(RECONNECT_RETRY_MS)
+  }
+  return false
+}
+
+// Manual fallback from the reconnect-failed state — re-run the
+// reconnect loop on operator demand.
+function retryReconnect() {
+  void reconnectAndFinish()
+}
+
+// Resolve once the transport drops (session.connected false), or after
+// a timeout. After session.reboot() the FC takes a moment to actually
+// exit; we wait for the drop before attempting reconnect so we don't
+// race the still-alive pre-reboot connection.
+function waitForDisconnect(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (!session.connected) {
+      resolve()
+      return
+    }
+    let stop: (() => void) | null = null
+    const timer = setTimeout(() => {
+      stop?.()
+      resolve()
+    }, timeoutMs)
+    stop = watch(() => session.connected, (connected) => {
+      if (!connected) {
+        clearTimeout(timer)
+        stop?.()
+        resolve()
+      }
+    })
+  })
 }
 
 // Resolve once a fresh heartbeat sets session.sysid, or after a
-// timeout. session.connect() resolves on transport-open, which is
-// before the FC's first heartbeat — and params.load() bails when
-// sysid is still null, so we must wait for the heartbeat before
-// loading. resetParsed() in connect() nulls sysid, so an immediate
-// non-null check would only pass for a pre-existing connection.
+// timeout. session.connect() resolves on transport-open (before the
+// first heartbeat), and params.load() bails when sysid is null — so we
+// gate the reload on the heartbeat.
 function waitForHeartbeat(timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     if (session.sysid !== null) {
@@ -243,40 +321,12 @@ function waitForHeartbeat(timeoutMs: number): Promise<boolean> {
   })
 }
 
-// Operator clicked Reconnect after the drone came back. Re-open the
-// transport, wait for the post-reboot heartbeat (which also clears
-// session.rebooting), then reload params so the new SCR_ENABLE shows.
-// If the drone isn't fully back yet — transport opens but no heartbeat,
-// or the bridge can't reach a still-rebooting SITL — drop back to the
-// rebooting state so the operator can try again.
-async function reconnect() {
-  phase.value = 'reconnecting'
-  errorMessage.value = null
-  await session.connect()
-  if (!session.connected) {
-    phase.value = 'rebooting'
-    errorMessage.value = 'Couldn\'t reconnect yet. Give it a moment and try again.'
-    return
-  }
-  const gotHeartbeat = await waitForHeartbeat(8000)
-  if (!gotHeartbeat || session.sysid === null) {
-    phase.value = 'rebooting'
-    errorMessage.value = 'Connected, but your drone hasn\'t said hello yet. Give it a moment and try again.'
-    return
-  }
-  // Force a fresh fetch so the post-reboot SCR_ENABLE value reaches
-  // the store (the cache from before reboot is stale).
-  params.clear()
-  await params.load()
-  pendingValue.value = null
-  phase.value = 'idle'
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-// Cancel a pending or needs-reboot change before committing the reboot.
-// The pending PARAM_SET (if already sent) has technically landed but
-// since we haven't rebooted, the FC's in-memory value will revert on
-// next reboot anyway — and most operators expect Cancel = "forget I
-// touched anything", so we just clear the pending state.
+// Cancel a pending change before it's applied — forget the operator
+// touched the switch.
 function cancel() {
   pendingValue.value = null
   errorMessage.value = null
@@ -293,7 +343,7 @@ function cancel() {
           Drone settings
         </h1>
         <p class="text-muted text-sm">
-          Toggle features on your drone. Some changes need a restart to take effect — we'll walk you through it.
+          Toggle features on your drone. Some changes need a restart — we handle that for you.
         </p>
       </div>
     </header>
@@ -342,12 +392,12 @@ function cancel() {
         Currently {{ isOn ? 'on' : 'off' }}.
       </p>
 
-      <!-- pending: operator flipped, not yet applied -->
+      <!-- pending: reboot-required change staged, awaiting Apply -->
       <div v-else-if="phase === 'pending'" class="mt-4 space-y-3">
         <UAlert
           color="warning"
           :title="`Will turn ${pendingValue === 1 ? 'on' : 'off'}`"
-          description="Your drone needs to restart for this to take effect."
+          description="Applying this restarts your drone (a few seconds) — we'll reconnect automatically when it's back."
         />
         <div class="flex justify-end gap-2">
           <UButton color="neutral" variant="ghost" @click="cancel">
@@ -359,57 +409,34 @@ function cancel() {
         </div>
       </div>
 
-      <!-- applying: waiting for PARAM_SET echo -->
+      <!-- applying: PARAM_SET in flight -->
       <div v-else-if="phase === 'applying'" class="text-muted mt-4 flex items-center gap-2 text-sm">
         <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
         Saving the change to your drone…
       </div>
 
-      <!-- needs-reboot: write landed, awaiting Restart -->
-      <div v-else-if="phase === 'needs-reboot'" class="mt-4 space-y-3">
-        <UAlert
-          color="warning"
-          title="Restart needed"
-          description="Your drone has the new setting saved, but won't actually use it until it restarts. Restarting takes a few seconds; we'll prompt you to reconnect when it's back."
-        />
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="cancel">
-            Cancel
-          </UButton>
-          <UButton color="primary" @click="restart">
-            Restart drone now
-          </UButton>
-        </div>
-      </div>
-
-      <!-- rebooting: reboot sent, waiting for transport drop or reconnect -->
-      <div v-else-if="phase === 'rebooting'" class="mt-4 space-y-3">
+      <!-- restarting: reboot + automatic reconnect -->
+      <div v-else-if="phase === 'restarting'" class="mt-4">
         <UAlert
           color="info"
           icon="i-lucide-loader-circle"
-          :title="session.connected ? 'Restarting your drone…' : 'Your drone is restarting'"
-          :description="session.connected
-            ? 'Hold tight — the connection will drop for a few seconds.'
-            : 'When it\'s back up, click Reconnect.'"
+          title="Restarting your drone…"
+          description="The connection will drop for a few seconds while it restarts. We'll reconnect automatically — no need to do anything."
         />
-        <div class="flex justify-end gap-2">
-          <UButton
-            color="primary"
-            :disabled="session.connected"
-            @click="reconnect"
-          >
+      </div>
+
+      <!-- reconnect-failed: auto-reconnect gave up, manual fallback -->
+      <div v-else-if="phase === 'reconnect-failed'" class="mt-4 space-y-3">
+        <UAlert color="warning" title="Couldn't reconnect automatically">
+          <template #description>
+            {{ errorMessage }}
+          </template>
+        </UAlert>
+        <div class="flex justify-end">
+          <UButton color="primary" @click="retryReconnect">
             Reconnect
           </UButton>
         </div>
-        <p v-if="errorMessage" class="text-warning text-sm">
-          {{ errorMessage }}
-        </p>
-      </div>
-
-      <!-- reconnecting: connect() in flight after restart -->
-      <div v-else-if="phase === 'reconnecting'" class="text-muted mt-4 flex items-center gap-2 text-sm">
-        <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
-        Reconnecting to your drone…
       </div>
     </UCard>
   </div>
