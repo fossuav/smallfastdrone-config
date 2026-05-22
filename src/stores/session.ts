@@ -42,6 +42,7 @@ import { computed, ref } from 'vue'
 import {
   autopilotLabel,
   buildDoSendBanner,
+  buildPreflightReboot,
   buildRequestDataStream,
   buildRequestMessage,
   decodeFirmwareVersion,
@@ -105,6 +106,13 @@ export const useSessionStore = defineStore('session', () => {
   // Per-subsystem present/enabled/healthy status from SYS_STATUS. Drives
   // the operator-facing status panel on the Connect view.
   const subsystems = ref<SubsystemStatus[]>([])
+  // Intent flag the drone-settings page sets when it sends
+  // PREFLIGHT_REBOOT_SHUTDOWN, so the UI knows to expect a connection
+  // drop and render the reboot/reconnect flow rather than treating
+  // the drop as an error. Cleared by the heartbeat handler once a
+  // fresh heartbeat arrives post-reconnect.
+  const rebooting = ref(false)
+
   // True when the FC's PREARM_CHECK bit is enabled and healthy — i.e. it
   // has run all its prearm checks and is willing to arm.
   const readyToArm = computed(() => {
@@ -167,6 +175,10 @@ export const useSessionStore = defineStore('session', () => {
       autopilot.value = hb.autopilot
       systemStatus.value = hb.systemStatus
       lastHeartbeatAt.value = Date.now()
+      // Fresh heartbeat post-reboot → clear the rebooting intent so
+      // the settings UI exits the "drone is restarting" state.
+      if (rebooting.value)
+        rebooting.value = false
 
       // First heartbeat after connect: ask for AUTOPILOT_VERSION (for the
       // structured firmware fields), DO_SEND_BANNER (for the human-readable
@@ -227,6 +239,7 @@ export const useSessionStore = defineStore('session', () => {
     firmwareVersion.value = null
     fcUid.value = null
     isSfd.value = false
+    rebooting.value = false
     recentStatusTexts.value = []
     subsystems.value = []
     bytesReceived.value = 0
@@ -279,6 +292,27 @@ export const useSessionStore = defineStore('session', () => {
     return session.on(cb)
   }
 
+  // Ask the FC to reboot. Sets `rebooting` so consumers can render
+  // the expected-drop UI rather than treating the upcoming transport
+  // close as an error. The reboot command itself is fire-and-forget;
+  // ArduPilot may not send a COMMAND_ACK before shutting down, and we
+  // can't reliably wait for one. The transport drops on its own when
+  // the FC actually exits/disconnects.
+  async function reboot() {
+    if (!connected.value || sysid.value === null) {
+      lastError.value = 'Not connected to a drone'
+      return
+    }
+    try {
+      const cmd = buildPreflightReboot(sysid.value, COMP_ID_AUTOPILOT)
+      await sendMessage(cmd)
+      rebooting.value = true
+    }
+    catch (e) {
+      lastError.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
   // Tear the transport down. Subscriber unsubscribe runs first so we
   // don't get a final close-event echo bouncing around mid-teardown.
   async function disconnect() {
@@ -307,12 +341,14 @@ export const useSessionStore = defineStore('session', () => {
     recentStatusTexts,
     subsystems,
     readyToArm,
+    rebooting,
     vehicleLabel,
     autopilotLabelText,
     systemStatusText,
     hasHeartbeat,
     connect,
     disconnect,
+    reboot,
     sendMessage,
     subscribeMessages,
   }
