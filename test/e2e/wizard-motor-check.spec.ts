@@ -14,31 +14,29 @@
  */
 
 // End-to-end test for the motor-check wizard's happy path against SITL.
-// SITL boots as a quad Plus (FRAME_CLASS=1, FRAME_TYPE=0) and is, by
-// definition, correctly "wired" — so an operator who reports each motor
-// exactly where/how the firmware expects gets an all-clear. This drives
-// real MAV_CMD_DO_MOTOR_TEST spins against SITL and exercises the full
-// flow: props-off gate → spin each motor → identify position + direction
-// → review pass → Done badge.
+// SITL boots as a quad Plus (FRAME_CLASS=1, FRAME_TYPE=0), correctly
+// "wired", so an operator who confirms each motor where/how the firmware
+// expects gets an all-clear. Drives real MAV_CMD_DO_MOTOR_TEST spins and
+// exercises the full flow: props-off gate → walk each motor by number
+// (auto-spun) → confirm position + direction → review pass → Done badge.
 //
-// The mismatch / correction path (deliberately reporting a swap) lands
-// with the auto-correction slice.
+// The wizard steps motors in motor-NUMBER order. For SITL's quad Plus the
+// firmware numbering is Motor1=right, Motor2=left, Motor3=front,
+// Motor4=rear, each with its expected spin.
 
 import { expect, test } from '@playwright/test'
 
 const SITL_QUERY = '?transport=websocket&host=localhost:5761'
 const SITL_URL = `/${SITL_QUERY}`
 
-// Quad Plus, in test order, with each motor's correct position + spin
-// (from the firmware mixer — see src/workflow/motor-geometry.ts).
 const PLUS_SEQUENCE = [
-  { position: 'front', direction: 'Clockwise' },
   { position: 'right', direction: 'Counter-clockwise' },
-  { position: 'rear', direction: 'Clockwise' },
   { position: 'left', direction: 'Counter-clockwise' },
+  { position: 'front', direction: 'Clockwise' },
+  { position: 'rear', direction: 'Clockwise' },
 ]
 
-test('Motor check passes when every motor is reported correctly (SITL quad +)', async ({ page }) => {
+test('Motor check passes when every motor is confirmed correct (SITL quad +)', async ({ page }) => {
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
@@ -47,30 +45,25 @@ test('Motor check passes when every motor is reported correctly (SITL quad +)', 
   await page.getByRole('link', { name: /Open the Check motor spin wizard/ }).click()
   await expect(page.getByRole('heading', { name: 'Check motor spin' })).toBeVisible()
 
-  // Safety gate. Frame layout loads from params first (give it room), then
-  // the props-off confirmation gates Start.
+  // Safety gate (frame loads from params first).
   await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText(/Quad \+/)).toBeVisible()
   await page.getByRole('switch', { name: 'Propellers are removed' }).click()
   await page.getByRole('button', { name: 'Start motor check' }).click()
 
-  // Walk all four motors. Each: spin (real DO_MOTOR_TEST), tap the
-  // position that "moved", pick the direction, advance.
+  // Walk all four motors. Each auto-spins; we confirm the position
+  // (pre-selected to the expected one) and pick the direction.
   for (let i = 0; i < PLUS_SEQUENCE.length; i++) {
     const step = PLUS_SEQUENCE[i]!
-    await expect(page.getByText(`Motor ${i + 1} of ${PLUS_SEQUENCE.length}`)).toBeVisible()
-    await page.getByRole('button', { name: 'Spin this motor' }).click()
-    // Hotspot becomes clickable once the FC accepts the spin.
+    await expect(page.getByText(`Should be the ${step.position} motor`)).toBeVisible({ timeout: 10_000 })
     await page.getByRole('button', { name: step.position, exact: true }).click()
     await page.getByRole('button', { name: step.direction, exact: true }).click()
     const advance = i === PLUS_SEQUENCE.length - 1 ? 'Finish' : 'Next motor'
     await page.getByRole('button', { name: advance }).click()
   }
 
-  // Review: all correct.
+  // Review: all correct → Done badge on the library card.
   await expect(page.getByRole('heading', { name: 'Motors all check out' })).toBeVisible({ timeout: 10_000 })
-
-  // Completion recorded — library card shows Done.
   await page.getByRole('button', { name: 'Back to library' }).click()
   await expect(page.getByRole('heading', { name: 'Bringup wizards' })).toBeVisible()
   const card = page.getByRole('link', { name: /Open the Check motor spin wizard/ })

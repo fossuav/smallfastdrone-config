@@ -15,21 +15,21 @@
  */
 
 // Desktop view for the motor-check wizard (docs/BRINGUP.md phase 04).
-// Walks the operator, props OFF, through spinning each motor in turn and
-// confirming it (a) sits where the firmware thinks it does and (b) turns
-// the right way. We deliberately DON'T pre-highlight the motor under
-// test — the operator identifies which one physically moved (that's what
-// catches a mis-wire), then says which way it turned. We compare against
-// the firmware's frame geometry and report any mismatches.
+// Walks the operator, props OFF, through every motor in motor-number
+// order. For each one the wizard spins it, shows which motor number it's
+// driving and where that motor SHOULD be (highlighted on the drone), and
+// asks the operator to confirm the motor that actually moved + which way
+// it turned. Observations are compared against the firmware frame
+// geometry and reported per motor.
 //
 // This slice detects + reports. Auto-correction (output remap via
 // SERVOn_FUNCTION + direction reverse via SERVO_BLH_RVMASK, with a
 // reboot) lands in a follow-up; see docs/WIZARDS.md.
 //
-// All motor spinning goes through MAV_CMD_DO_MOTOR_TEST (props off,
-// landed, safety off — see src/protocol/motors.ts). An emergency Stop is
-// always one tap away while a motor is live, and we stop the motor on
-// unmount so navigating away never leaves one spinning.
+// Spinning goes through MAV_CMD_DO_MOTOR_TEST (props off, landed, safety
+// off). An emergency Stop is always one tap away while a motor is live,
+// and we stop the motor on unmount + when stepping, so a motor is never
+// left spinning.
 
 import type { CommandAck } from 'mavlink-mappings/dist/lib/common'
 import type { MotorVisual } from '../../ui/visuals/MotorCheck3D.vue'
@@ -41,16 +41,16 @@ import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import MotorCheck3D from '../../ui/visuals/MotorCheck3D.vue'
-import { frameGeometry, motorTopdownXY, spinLabel } from '../../workflow/motor-geometry'
+import { frameGeometry, spinLabel } from '../../workflow/motor-geometry'
 
 const WIZARD_ID = 'motor-check'
 const COMP_ID_AUTOPILOT = 1
 const MSGID_COMMAND_ACK = 77
 const MAV_CMD_DO_MOTOR_TEST = 209
 const MAV_RESULT_ACCEPTED = 0
-// Generous spin so the operator has time to look, identify, and pick a
-// direction without the motor cutting out mid-thought. Stopped explicitly
-// when they confirm or leave.
+const FRAME_TYPE_PLUS = 0
+// Generous spin so the operator has time to look + answer without the
+// motor cutting out mid-thought. Stopped explicitly when stepping/leaving.
 const SPIN_TIMEOUT_SEC = 20
 const ACK_TIMEOUT_MS = 2000
 
@@ -66,28 +66,30 @@ type Phase = 'loading' | 'unsupported' | 'safety' | 'testing' | 'review' | 'erro
 const phase = ref<Phase>('loading')
 const errorMessage = ref<string | null>(null)
 
-// The connected frame's motor layout (null until loaded / if unsupported).
+// The connected frame's motors, sorted into motor-number order (Motor 1,
+// 2, 3 …) so the operator walks them by the numbers printed on diagrams.
 const motors = ref<FrameMotor[]>([])
 const frameLabel = ref('')
+// X-frame model rotated 45° for a Plus frame so its arms meet the rings.
+const bodyYawDeg = ref(0)
 
-// Safety gate — Start stays disabled until the operator confirms props off.
 const propsOff = ref(false)
 
-// What the operator reported for each motor, keyed by test order.
+// What the operator reported, keyed by test order.
 interface Observation { position: MotorPosition, spin: Spin }
 const observations = ref<Map<number, Observation>>(new Map())
 
-// Per-step state while testing.
+// Per-step state.
 const stepIndex = ref(0)
 const spinning = ref(false)
 const selPosition = ref<MotorPosition | null>(null)
 const selSpin = ref<Spin | null>(null)
 
 const currentMotor = computed<FrameMotor | undefined>(() => motors.value[stepIndex.value])
+// Motor NUMBER the operator sees — the firmware Motor{n}, 1-based.
+const motorNumber = computed(() => (currentMotor.value?.motorIndex ?? 0) + 1)
+const isLastStep = computed(() => stepIndex.value >= motors.value.length - 1)
 
-// Load the frame layout. FRAME_CLASS / FRAME_TYPE come from the param
-// store; if the frame isn't one we have a transcribed geometry for, bail
-// to 'unsupported' rather than guess a motor map.
 onMounted(async () => {
   if (!session.connected || session.sysid === null) {
     phase.value = 'error'
@@ -104,14 +106,17 @@ onMounted(async () => {
       errorMessage.value = 'We couldn\'t read your drone\'s frame layout. Run "Pick your frame" first, then come back.'
       return
     }
-    const geo = frameGeometry(Math.trunc(cls.value), Math.trunc(typ.value))
+    const frameType = Math.trunc(typ.value)
+    const geo = frameGeometry(Math.trunc(cls.value), frameType)
     if (!geo) {
       phase.value = 'unsupported'
       errorMessage.value = 'This frame isn\'t supported by the motor check yet — only quad layouts for now.'
       return
     }
-    motors.value = geo.motors
+    // Sort into motor-number order for stepping.
+    motors.value = [...geo.motors].sort((a, b) => a.motorIndex - b.motorIndex)
     frameLabel.value = geo.label
+    bodyYawDeg.value = frameType === FRAME_TYPE_PLUS ? 45 : 0
     phase.value = 'safety'
   }
   catch (e) {
@@ -120,14 +125,12 @@ onMounted(async () => {
   }
 })
 
-// Always stop any live motor when leaving the wizard.
 onUnmounted(() => {
   void stopActiveMotor()
 })
 
-// Send a DO_MOTOR_TEST and wait for the FC's COMMAND_ACK. Resolves with
-// true if the FC accepted (motor will spin), false otherwise (e.g. the
-// drone isn't sitting still, or the safety switch is on).
+// Send a DO_MOTOR_TEST and wait for the FC's COMMAND_ACK. true = the FC
+// accepted (motor will spin); false = rejected (not landed / safety on).
 async function spinMotor(testOrder: number): Promise<boolean> {
   if (session.sysid === null)
     return false
@@ -158,7 +161,6 @@ async function spinMotor(testOrder: number): Promise<boolean> {
   })
 }
 
-// Best-effort stop of whatever motor is currently under test.
 async function stopActiveMotor() {
   const m = currentMotor.value
   if (!m || session.sysid === null)
@@ -168,22 +170,28 @@ async function stopActiveMotor() {
   ).catch(() => {})
 }
 
-// Begin the test sequence (props-off confirmed).
+// Begin the sequence (props-off confirmed). Enters the first step, which
+// auto-spins motor 1.
 function start() {
   observations.value = new Map()
   stepIndex.value = 0
-  resetStep()
   phase.value = 'testing'
+  void enterStep()
 }
 
-function resetStep() {
-  spinning.value = false
-  selPosition.value = null
-  selSpin.value = null
+// Set up the current step: restore any prior answer (default the position
+// to where the motor SHOULD be), then spin it.
+async function enterStep() {
+  const m = currentMotor.value
+  if (!m)
+    return
+  const prior = observations.value.get(m.testOrder)
+  selPosition.value = prior?.position ?? m.position
+  selSpin.value = prior?.spin ?? null
+  await spinCurrent()
 }
 
-// Spin the current motor. On a rejected command, surface a friendly
-// reason and stay on the step so the operator can fix it and retry.
+// Spin the current motor; surface a friendly reason if the FC refuses.
 async function spinCurrent() {
   const m = currentMotor.value
   if (!m)
@@ -191,49 +199,55 @@ async function spinCurrent() {
   errorMessage.value = null
   const ok = await spinMotor(m.testOrder)
   if (!ok) {
-    errorMessage.value = 'Your drone wouldn\'t spin that motor. Make sure it\'s sitting still on the bench with the safety switch off, then try again.'
     spinning.value = false
+    errorMessage.value = 'Your drone wouldn\'t spin that motor. Make sure it\'s sitting still on the bench with the safety switch off, then try again.'
     return
   }
   spinning.value = true
 }
 
-// Operator taps the motor position that physically moved.
 function pickPosition(position: MotorPosition) {
-  if (!spinning.value)
-    return
   selPosition.value = position
 }
-
-// Operator picks the direction it turned.
 function pickSpin(spin: Spin) {
-  if (!spinning.value)
-    return
   selSpin.value = spin
 }
 
-// Record the observation, stop the motor, advance (or finish).
-async function confirmStep() {
+// Record the current answer (no-op if incomplete).
+function record() {
   const m = currentMotor.value
   if (!m || selPosition.value === null || selSpin.value === null)
     return
   observations.value.set(m.testOrder, { position: selPosition.value, spin: selSpin.value })
+}
+
+async function next() {
+  record()
   await stopActiveMotor()
-  if (stepIndex.value >= motors.value.length - 1) {
+  if (isLastStep.value) {
     finish()
     return
   }
   stepIndex.value += 1
-  resetStep()
+  await enterStep()
 }
 
-// Emergency stop — cut the live motor and clear the spinning state.
+async function back() {
+  if (stepIndex.value === 0) {
+    leave()
+    return
+  }
+  record()
+  await stopActiveMotor()
+  stepIndex.value -= 1
+  await enterStep()
+}
+
 async function emergencyStop() {
   await stopActiveMotor()
   spinning.value = false
 }
 
-// Per-motor result, computed from the recorded observations.
 interface Result { motor: FrameMotor, observed: Observation | undefined, positionOk: boolean, spinOk: boolean }
 const results = computed<Result[]>(() =>
   motors.value.map((motor) => {
@@ -248,9 +262,8 @@ const results = computed<Result[]>(() =>
 )
 const allOk = computed(() => results.value.every(r => r.positionOk && r.spinOk))
 
-// Compute results, record completion if everything checks out, show review.
 function finish() {
-  resetStep()
+  spinning.value = false
   phase.value = 'review'
   if (allOk.value) {
     wizardProgress.markComplete(
@@ -261,25 +274,24 @@ function finish() {
   }
 }
 
-// Run the whole check again from the safety gate.
 function runAgain() {
   observations.value = new Map()
   stepIndex.value = 0
-  resetStep()
+  spinning.value = false
   phase.value = 'safety'
 }
 
-function back() {
+function leave() {
   router.push(returnTo.value)
 }
 
-// Visual states for the 3D drone. During testing we highlight only the
-// operator's current selection (never the motor actually under test — no
-// hints). In review, motors go green/red by result.
+// 3D states. While testing, highlight the motor under test (where it
+// SHOULD be) so the operator knows which one the wizard is driving. In
+// review, motors go green/red by result.
 const motorVisuals = computed<MotorVisual[]>(() =>
   motors.value.map((m) => {
     let state: MotorVisual['state'] = 'idle'
-    if (phase.value === 'testing' && selPosition.value === m.position) {
+    if (phase.value === 'testing' && currentMotor.value?.testOrder === m.testOrder) {
       state = 'active'
     }
     else if (phase.value === 'review') {
@@ -289,20 +301,6 @@ const motorVisuals = computed<MotorVisual[]>(() =>
     return { key: m.testOrder, angleDeg: m.angleDeg, spin: m.spin, state }
   }),
 )
-
-// CSS placement for the clickable hotspot over each motor. Radii are
-// tuned to the (slightly tilted) top-down camera in MotorCheck3D — the
-// vertical axis is squashed to match the foreshortening.
-function hotspotStyle(angleDeg: number): Record<string, string> {
-  const { x, y } = motorTopdownXY(angleDeg)
-  return {
-    left: `${50 + x * 40}%`,
-    top: `${50 + y * 33}%`,
-  }
-}
-
-// Hotspots are live only while a motor is spinning and not yet confirmed.
-const hotspotsActive = computed(() => phase.value === 'testing' && spinning.value)
 </script>
 
 <template>
@@ -315,7 +313,7 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
       </p>
     </div>
 
-    <!-- unsupported / can't read frame -->
+    <!-- unsupported -->
     <div v-else-if="phase === 'unsupported'" class="space-y-3">
       <UAlert color="warning" title="Can't check motors yet">
         <template #description>
@@ -323,7 +321,7 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
         </template>
       </UAlert>
       <div class="flex justify-end">
-        <UButton color="neutral" variant="outline" @click="back">
+        <UButton color="neutral" variant="outline" @click="leave">
           Back to library
         </UButton>
       </div>
@@ -339,9 +337,8 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
       />
       <p class="text-muted text-sm">
         We'll spin each of your <strong>{{ frameLabel }}</strong>'s
-        {{ motors.length }} motors in turn. Watch your drone and tell us which
-        one moved and which way it turned — we'll check it against how it
-        should be wired.
+        {{ motors.length }} motors in turn. Watch your drone and confirm each
+        one is where it should be and turning the right way.
       </p>
       <div class="border-default flex items-center gap-3 rounded-lg border p-3">
         <USwitch v-model="propsOff" color="error" aria-label="Propellers are removed" />
@@ -350,7 +347,7 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
         </span>
       </div>
       <div class="flex justify-end gap-2">
-        <UButton color="neutral" variant="ghost" @click="back">
+        <UButton color="neutral" variant="ghost" @click="leave">
           Cancel
         </UButton>
         <UButton color="primary" :disabled="!propsOff" @click="start">
@@ -361,14 +358,19 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
 
     <!-- testing -->
     <div v-else-if="phase === 'testing'" class="space-y-4">
-      <div class="flex items-center justify-between">
-        <p class="text-highlighted font-medium">
-          Motor {{ stepIndex + 1 }} of {{ motors.length }}
-        </p>
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <p class="text-highlighted text-lg font-semibold">
+            Motor {{ motorNumber }}
+            <span class="text-muted text-sm font-normal">of {{ motors.length }}</span>
+          </p>
+          <p class="text-muted text-xs">
+            Should be the <span class="capitalize">{{ currentMotor?.position }}</span> motor
+          </p>
+        </div>
         <UButton
           v-if="spinning"
           color="error"
-          variant="solid"
           icon="i-lucide-octagon-x"
           @click="emergencyStop"
         >
@@ -376,42 +378,37 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
         </UButton>
       </div>
 
-      <!-- 3D drone + clickable hotspots -->
-      <div class="relative mx-auto aspect-square w-full max-w-sm">
-        <MotorCheck3D :motors="motorVisuals" />
-        <button
-          v-for="m in motors"
-          :key="m.testOrder"
-          type="button"
-          class="absolute size-12 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 transition"
-          :class="[
-            hotspotsActive ? 'cursor-pointer border-primary/70 hover:bg-primary/20' : 'pointer-events-none border-transparent',
-            selPosition === m.position ? 'border-warning bg-warning/30' : '',
-          ]"
-          :style="hotspotStyle(m.angleDeg)"
-          :aria-label="m.position"
-          :disabled="!hotspotsActive"
-          @click="pickPosition(m.position)"
-        />
+      <div class="mx-auto aspect-square w-full max-w-sm">
+        <MotorCheck3D :motors="motorVisuals" :body-yaw-deg="bodyYawDeg" />
       </div>
 
       <UAlert v-if="errorMessage" color="warning" :description="errorMessage" />
 
-      <!-- before spin -->
-      <div v-if="!spinning" class="flex justify-center">
-        <UButton color="primary" icon="i-lucide-play" @click="spinCurrent">
-          Spin this motor
-        </UButton>
-      </div>
+      <template v-else>
+        <!-- which motor moved -->
+        <div class="space-y-2">
+          <p class="text-default text-center text-sm">
+            Which motor on your drone moved?
+          </p>
+          <div class="flex flex-wrap justify-center gap-2">
+            <UButton
+              v-for="m in motors"
+              :key="m.testOrder"
+              :color="selPosition === m.position ? 'primary' : 'neutral'"
+              :variant="selPosition === m.position ? 'solid' : 'outline'"
+              size="sm"
+              class="capitalize"
+              @click="pickPosition(m.position)"
+            >
+              {{ m.position }}
+            </UButton>
+          </div>
+        </div>
 
-      <!-- during spin: identify + direction + confirm -->
-      <div v-else class="space-y-3">
-        <p v-if="!selPosition" class="text-default text-center">
-          A motor is spinning. On your drone, tap the one that's moving.
-        </p>
-        <template v-else>
-          <p class="text-default text-center">
-            Which way is the <strong>{{ selPosition }}</strong> motor turning?
+        <!-- which direction -->
+        <div class="space-y-2">
+          <p class="text-default text-center text-sm">
+            Which way did it turn?
           </p>
           <div class="flex justify-center gap-2">
             <UButton
@@ -431,18 +428,20 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
               Clockwise
             </UButton>
           </div>
-        </template>
+        </div>
+      </template>
 
-        <div class="flex justify-center gap-2 pt-1">
+      <!-- navigation -->
+      <div class="flex items-center justify-between gap-2 pt-1">
+        <UButton color="neutral" variant="ghost" icon="i-lucide-arrow-left" @click="back">
+          {{ stepIndex === 0 ? 'Cancel' : 'Back' }}
+        </UButton>
+        <div class="flex gap-2">
           <UButton color="neutral" variant="ghost" size="sm" icon="i-lucide-rotate-cw" @click="spinCurrent">
             Spin again
           </UButton>
-          <UButton
-            color="primary"
-            :disabled="!selPosition || !selSpin"
-            @click="confirmStep"
-          >
-            {{ stepIndex >= motors.length - 1 ? 'Finish' : 'Next motor' }}
+          <UButton color="primary" :disabled="!selPosition || !selSpin" icon="i-lucide-arrow-right" @click="next">
+            {{ isLastStep ? 'Finish' : 'Next motor' }}
           </UButton>
         </div>
       </div>
@@ -451,7 +450,7 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
     <!-- review -->
     <div v-else-if="phase === 'review'" class="space-y-4">
       <div class="mx-auto aspect-square w-full max-w-xs">
-        <MotorCheck3D :motors="motorVisuals" />
+        <MotorCheck3D :motors="motorVisuals" :body-yaw-deg="bodyYawDeg" />
       </div>
 
       <div v-if="allOk" class="space-y-2 py-2 text-center">
@@ -473,7 +472,7 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
         />
         <ul class="space-y-2">
           <li
-            v-for="r in results"
+            v-for="(r, i) in results"
             :key="r.motor.testOrder"
             class="border-default flex items-start gap-2 rounded-lg border p-2 text-sm"
           >
@@ -483,12 +482,12 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
               class="mt-0.5 size-4 shrink-0"
             />
             <div>
-              <span class="text-highlighted font-medium capitalize">{{ r.motor.position }}</span>
+              <span class="text-highlighted font-medium">Motor {{ i + 1 }}</span>
+              <span class="text-muted capitalize"> ({{ r.motor.position }})</span>
               <span v-if="r.positionOk && r.spinOk" class="text-muted"> — correct</span>
               <template v-else>
                 <span v-if="!r.positionOk" class="text-error">
                   — you saw it move at <span class="capitalize">{{ r.observed?.position ?? 'nowhere' }}</span>
-                  (should be <span class="capitalize">{{ r.motor.position }}</span>)
                 </span>
                 <span v-else-if="!r.spinOk" class="text-error">
                   — turning {{ r.observed ? spinLabel(r.observed.spin) : '?' }},
@@ -504,7 +503,7 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
         <UButton color="neutral" variant="ghost" @click="runAgain">
           Run again
         </UButton>
-        <UButton color="primary" @click="back">
+        <UButton color="primary" @click="leave">
           Back to library
         </UButton>
       </div>
@@ -519,7 +518,7 @@ const hotspotsActive = computed(() => phase.value === 'testing' && spinning.valu
       <p class="text-muted text-sm">
         {{ errorMessage }}
       </p>
-      <UButton color="neutral" @click="back">
+      <UButton color="neutral" @click="leave">
         Back to library
       </UButton>
     </div>
