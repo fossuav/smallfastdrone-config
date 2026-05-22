@@ -21,6 +21,12 @@ export default defineConfig({
       'vite-plugin-node-polyfills/shims/buffer',
       'vite-plugin-node-polyfills/shims/global',
       'vite-plugin-node-polyfills/shims/process',
+      // The motor-check wizard loads a GLTF via three's GLTFLoader — a
+      // subpath import Vite hasn't pre-bundled, which otherwise triggers a
+      // "new dependencies optimized" reload mid-test (Playwright sees a
+      // navigation race). Pre-bundle three + the loader.
+      'three',
+      'three/examples/jsm/loaders/GLTFLoader.js',
     ],
   },
   plugins: [
