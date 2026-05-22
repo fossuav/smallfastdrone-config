@@ -52,36 +52,44 @@ if [ ${#PRELOAD_WIZARDS[@]} -gt 0 ]; then
 fi
 
 echo "Starting SITL in $WORK"
+# Wrapper subshell: loops arducopter on exit so PREFLIGHT_REBOOT_SHUTDOWN
+# triggers a clean restart rather than ending the SITL session. The trap
+# pkills the child arducopter before exiting so sitl-stop.sh's TERM on
+# the wrapper cascades into a clean SITL shutdown.
+#
+# The leading ":" inside ( : ; ... ) is the orphan-protection trick the
+# wrapper preserves — see vendor/smallfastdrone/Tools/autotest/
+# run_in_terminal_window.sh. Without it bash elides the subshell and
+# SITL's _fdm_input_step self-terminates on first FDM input.
+#
 # --model + is a plus-config quad (the canonical SITL multirotor model).
 # --speedup 1 forces real-time.
-#
-# The intermediate "( : ; ... ) &" subshell is load-bearing: ArduPilot's
-# SITL _fdm_input_step self-terminates if it sees its parent is init (orphan).
-# The subshell stays alive waiting for arducopter, keeping it parented.
-# The leading ":" (true) is needed so bash doesn't optimise away the subshell.
-# This trick is borrowed verbatim from
-# vendor/smallfastdrone/Tools/autotest/run_in_terminal_window.sh.
-#
-( : ; "$BIN" --model + --speedup 1 --defaults "$DEFAULTS" </dev/null >sitl.log 2>&1 ) &
-sleep 0.8
-PID=$(pgrep -f "$BIN" -n || true)
-if [ -z "$PID" ]; then
-  echo "SITL did not appear to start. Log:" >&2
-  cat sitl.log >&2
-  exit 1
-fi
-echo "$PID" >"$PIDFILE"
+(
+  : ;
+  trap 'pkill -P $$ 2>/dev/null; exit 0' INT TERM
+  while true; do
+    "$BIN" --model + --speedup 1 --defaults "$DEFAULTS" </dev/null >>sitl.log 2>&1 || true
+    # Brief pause so a crash-loop doesn't peg the CPU.
+    sleep 0.5
+  done
+) &
+WRAPPER_PID=$!
+echo "$WRAPPER_PID" >"$PIDFILE"
 echo "$WORK" >"${PIDFILE}.workdir"
 
-# Give SITL a moment, then check it survived
-sleep 1
-if ! kill -0 "$PID" 2>/dev/null; then
-  echo "SITL failed to start. Last log lines:" >&2
+# Wait for arducopter to bind the MAVLink port.
+for _ in $(seq 1 50); do
+  if ss -ltn 2>/dev/null | grep -q ':5760'; then break; fi
+  sleep 0.1
+done
+if ! ss -ltn 2>/dev/null | grep -q ':5760'; then
+  echo "SITL did not bind port 5760. Last log lines:" >&2
   tail -20 "$WORK/sitl.log" >&2
+  kill -TERM "$WRAPPER_PID" 2>/dev/null || true
   rm -f "$PIDFILE" "${PIDFILE}.workdir"
   exit 1
 fi
 
-echo "SITL listening on TCP 127.0.0.1:5760 (pid $PID)"
+echo "SITL listening on TCP 127.0.0.1:5760 (wrapper pid $WRAPPER_PID)"
 echo "Log: $WORK/sitl.log"
 echo "Stop with: bun run sitl:stop"
