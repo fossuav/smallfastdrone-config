@@ -39,38 +39,17 @@ test('Drone settings: toggle scripting on, reboot, reconnect, see it applied', a
   // checkScripting loads the full param set; give it room.
   await expect(page.getByText('Currently off')).toBeVisible({ timeout: 30_000 })
 
-  // Flip the switch on. Should land in the pending state.
+  // Flip the switch on → pending (reboot-required toggle).
   await page.getByRole('switch', { name: /Lua scripting/ }).click()
   await expect(page.getByText('Will turn on')).toBeVisible()
 
-  // Apply — PARAM_SET goes out, echoes back, lands in needs-reboot.
+  // Apply does the whole sequence with no further clicks: PARAM_SET +
+  // echo → settle → reboot → automatic reconnect (retrying through the
+  // FC's restart window) → params reload → applied. We see the
+  // restarting state in passing, then "Currently on" once it lands.
   await page.getByRole('button', { name: 'Apply' }).click()
-  await expect(page.getByText('Restart needed')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('Restarting your drone…')).toBeVisible({ timeout: 15_000 })
 
-  // Send the reboot. SITL exits + the wrapper restarts it; the bridge
-  // drops the WS connection, session.connected goes false, and the
-  // UI flips from "Restarting your drone…" to "Your drone is
-  // restarting" (with the Reconnect button enabled).
-  await page.getByRole('button', { name: 'Restart drone now' }).click()
-  await expect(page.getByText('Your drone is restarting')).toBeVisible({ timeout: 15_000 })
-
-  await expect(page.getByRole('button', { name: 'Reconnect' })).toBeEnabled({ timeout: 15_000 })
-
-  // SITL takes a moment to relaunch after the reboot; the bridge's TCP
-  // connect fails until 5760 is rebound, and an early reconnect (no
-  // heartbeat yet) bounces the wizard back to the rebooting state with
-  // the Reconnect button offered again. Poll: whenever Reconnect is
-  // available, click it; succeed once the card reads "Currently on".
-  await expect(async () => {
-    if (await page.getByText('Currently on').isVisible())
-      return
-    const btn = page.getByRole('button', { name: 'Reconnect' })
-    if (await btn.isVisible().catch(() => false) && await btn.isEnabled().catch(() => false))
-      await btn.click()
-    // Give the reconnect + heartbeat + param fetch a beat to land
-    // before the next poll re-evaluates.
-    expect(await page.getByText('Currently on').isVisible({ timeout: 4_000 }).catch(() => false)).toBe(true)
-  }).toPass({ timeout: 90_000 })
-
-  await expect(page.getByText('Currently on')).toBeVisible()
+  // Auto-reconnect budget is 60s; give it headroom.
+  await expect(page.getByText('Currently on')).toBeVisible({ timeout: 75_000 })
 })
