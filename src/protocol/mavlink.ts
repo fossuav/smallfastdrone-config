@@ -231,6 +231,27 @@ export function buildDoSendBanner(targetSystem: number, targetComponent: number)
   return cmd
 }
 
+// Build a soft-reboot COMMAND_LONG (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
+// command id 246). param1=1 means "reboot the autopilot." ArduPilot
+// acks via COMMAND_ACK and then exits — useful to inspect the ack but
+// not required, since the connection drops either way as the FC
+// restarts. Used by the drone-settings page's reboot orchestration.
+export function buildPreflightReboot(targetSystem: number, targetComponent: number): common.CommandLong {
+  const cmd = new common.CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  cmd.command = 246 as common.MavCmd // MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN
+  cmd._param1 = 1
+  cmd._param2 = 0
+  cmd._param3 = 0
+  cmd._param4 = 0
+  cmd._param5 = 0
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
+}
+
 // MAV_SEVERITY thresholds we care about for operator-facing toasting.
 //   0..3  EMERGENCY / ALERT / CRITICAL / ERROR — surface as error toast
 //   4     WARNING — surface as warning toast
