@@ -86,7 +86,7 @@ interface LuaRequires {
 
 ### Lua engine
 
-The wizard ships a Lua applet at `src/wizards/<id>/applet.lua`. The runtime owns its lifecycle — operator never sees "script installed" or "scripting enabled" messaging.
+The wizard ships a Lua applet at `src/wizards/<id>/applet.lua`. **Write applets per the vendored ArduPilot Lua playbooks in [lua/](lua/)** — `lua/CLAUDE.md` for structure + safety rules, `lua/CLAUDE_VEHICLE_CONTROL.md` and `lua/CLAUDE_CRSF_MENU.md` for those surfaces, and `lua/docs.lua` as the API source of truth. The runtime owns the applet's lifecycle — operator never sees "script installed" or "scripting enabled" messaging.
 
 ```
 operator clicks Start

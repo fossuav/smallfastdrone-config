@@ -43,6 +43,7 @@ When implementing UI, ask: *would a non-expert operator understand this and feel
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layered design, module layout, data model.
 - [docs/WIZARDS.md](docs/WIZARDS.md) — wizard runtime contract: manifest, engines (lua/log/desktop), views, lifecycle, library, commercial gating seam. **Read before touching anything wizard-shaped, including recipes (recipes are wizards).**
 - [docs/BRINGUP.md](docs/BRINGUP.md) — bringup operator-flow detail; bringup is itself a meta-wizard built on the runtime in WIZARDS.md.
+- [docs/lua/](docs/lua/) — ArduPilot Lua playbooks (vendored from `../aap`) — the authority for writing wizard applets (`src/wizards/<id>/applet.lua`). `docs/lua/docs.lua` is the API source of truth. **Read before writing or editing any applet.** See [docs/lua/README.md](docs/lua/README.md).
 - [docs/SECURITY.md](docs/SECURITY.md) — security seam, threat model, what contributors must not do.
 
 ## Tech stack — locked
