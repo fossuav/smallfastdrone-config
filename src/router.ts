@@ -62,6 +62,12 @@ export const routes: RouteRecordRaw[] = [
     meta: { label: 'Firmware', icon: 'i-lucide-cpu' },
   },
   {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('./views/SettingsView.vue'),
+    meta: { label: 'Settings', icon: 'i-lucide-sliders-horizontal' },
+  },
+  {
     path: '/esc',
     name: 'esc',
     component: () => import('./views/EscToolsView.vue'),
