@@ -12,16 +12,6 @@ BIN="$SFD/build/sitl/bin/arducopter"
 DEFAULTS="$SFD/Tools/autotest/default_params/copter.parm"
 PIDFILE="/tmp/sfd-sitl.pid"
 
-# Lua wizard applets pre-placed into SITL's scripts/ dir at boot.
-# AP_Filesystem strips the "APM/" prefix used in MAVLink FTP paths, so
-# the on-disk path is just <workdir>/scripts/. Currently a no-op at
-# runtime — SITL boots with SCR_ENABLE=0 and our attempts to flip it
-# on for testing haven't panned out (see docs/TESTING.md "Lua wizards
-# in SITL"). Kept here so the mechanism is ready for the day this works.
-PRELOAD_WIZARDS=(
-  imu-noise
-)
-
 if [ ! -x "$BIN" ]; then
   echo "SITL binary not built at $BIN" >&2
   echo "Run: bun run sitl:build" >&2
@@ -36,20 +26,22 @@ fi
 WORK=$(mktemp -d /tmp/sfd-sitl-XXXXXX)
 cd "$WORK"
 
-# Pre-place wizard applets into the SITL work dir. Currently a no-op
-# at runtime because SITL boots with SCR_ENABLE=0 (the default), but
-# the mechanism is in place for the day Lua loading works in SITL.
-if [ ${#PRELOAD_WIZARDS[@]} -gt 0 ]; then
-  mkdir -p "$WORK/scripts"
-  for wid in "${PRELOAD_WIZARDS[@]}"; do
-    src="$REPO_ROOT/src/wizards/$wid/applet.lua"
-    if [ -f "$src" ]; then
-      dst_name="wiz_${wid//-/_}.lua"
-      cp "$src" "$WORK/scripts/$dst_name"
-      echo "Preloaded wizard applet: $wid -> scripts/$dst_name"
-    fi
-  done
-fi
+# Make MAVLink-FTP Lua uploads testable on SITL.
+#
+# Lua wizards upload their applet via MAVLink FTP to "APM/scripts/" — the
+# correct path on real hardware, where the scripting directory IS
+# /APM/scripts. But on SITL (posix) the scripting directory is "./scripts"
+# (see vendor/.../AP_Scripting/lua_common_defs.h: SCRIPTING_DIRECTORY) and
+# FTP writes land at "<workdir>/APM/scripts" — a different directory. The
+# applet would never be seen by the scripting engine.
+#
+# Symlinking ./scripts -> APM/scripts makes both paths resolve to the same
+# dir, so an FTP upload to APM/scripts/ lands exactly where SITL scripting
+# scans. The wizard's upload path stays hardware-correct and unchanged.
+# Created before boot so "./scripts" exists; persists across the wrapper's
+# reboot loop because the workdir is reused.
+mkdir -p "$WORK/APM/scripts"
+ln -s APM/scripts "$WORK/scripts"
 
 echo "Starting SITL in $WORK"
 # Wrapper subshell: loops arducopter on exit so PREFLIGHT_REBOOT_SHUTDOWN

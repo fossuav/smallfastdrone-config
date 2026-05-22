@@ -79,18 +79,23 @@ The leading `:` (true) is load-bearing — without it bash optimises away the su
 
 ## Lua wizards in SITL
 
-ArduPilot Lua scripting in SITL is **not currently testable end-to-end** in our setup. The `SCR_ENABLE` parameter carries `AP_PARAM_FLAG_ENABLE`, which means `AP_Scripting::init()` decides whether to start the scripting subsystem based on the in-EEPROM value of `SCR_ENABLE` at boot, *not* the value applied by the `--defaults` overlay (which lands too late).
+Lua-engine wizards **are** testable end-to-end against SITL. `test/e2e/wizard-imu-noise-live.spec.ts` drives the full live path — enable scripting, upload the applet, load it, arm it, read the result — against a real SITL. (An earlier note here claimed this was impossible due to `SCR_ENABLE`'s `AP_PARAM_FLAG_ENABLE` "landing too late"; that was a misdiagnosis. Scripting initialises fine after `SCR_ENABLE=1`, whether set via the boot defaults *or* via `PARAM_SET` + reboot.)
 
-What we've tried:
+The thing that actually blocked it was a **path mismatch unique to SITL**:
 
-1. **`--defaults` overlay with `SCR_ENABLE=1`.** Value appears in the FC's in-memory param set after boot, but scripting subsystem is silent — confirms the timing-vs-init-order issue.
-2. **Two-phase boot via a restart-on-exit wrapper + primer.** The wrapper around `arducopter` does restart cleanly when `PREFLIGHT_REBOOT_SHUTDOWN` exits the process. A Bun primer sends `PARAM_SET SCR_ENABLE=1` (which echoes back as 1) and then issues the reboot. Verified: after the wrapper restarts arducopter, SITL reports `SCR_ENABLE=1` even when the defaults overlay is removed — so EEPROM *does* persist the value. **But scripting still doesn't initialise on the second boot**, with no `Lua:` or `Scripting:` STATUSTEXTs anywhere, and the wizard's declared params (e.g. `WIZ_NOISE_ACTIVE`) never appear in the param set. The cause hasn't been bottomed out in any session so far — `_enable` should be 1 in memory by the time `AP_Scripting::init()` runs, but something else is gating script subsystem activation that this codebase's debugging didn't surface.
-3. **Pre-baked `eeprom.bin` fixture.** Not yet attempted. Fragile — the binary format is version-specific and changes when the SFD submodule bumps.
-4. **Switching the SITL launcher from raw `arducopter` to `sim_vehicle.py`.** Not yet attempted. Adds MAVProxy as a transitive dep but mirrors what the autotest suite does, so should work.
+- On hardware, the scripting directory and the MAVLink-FTP root agree: both see `/APM/scripts`.
+- On SITL (posix), `SCRIPTING_DIRECTORY` is `./scripts` (see `vendor/.../AP_Scripting/lua_common_defs.h`), but an FTP upload to `APM/scripts/` lands at `<workdir>/APM/scripts` — a *different* directory. The scripting engine never sees the uploaded file.
 
-For now: Lua-engine wizards' E2E tests exercise the **"scripting isn't enabled"** path against stock SITL (which IS testable — the wizard's capability check correctly reports `SCR_ENABLE=0` and the operator-actionable alert renders). The live path — applet upload, control param round-trip, NAMED_VALUE_FLOAT progress, cleanup — is exercised against real hardware until one of options 3 or 4 above lands.
+`scripts/sitl-start.sh` fixes this by symlinking `./scripts -> APM/scripts` in the work dir, so an FTP upload to the hardware-correct `APM/scripts/` path lands exactly where SITL scripting scans. The wizard's upload path is unchanged and stays correct for real hardware.
 
-The pre-place mechanism in `scripts/sitl-start.sh` (drop applets into the SITL work dir's `scripts/` folder) is kept ready for the day this works.
+Two facts about how applets load drive the wizard lifecycle (and the test):
+
+1. **Scripts load once, at scripting-engine start** (`lua_scripts.cpp`: `load_all_scripts_in_dir` runs before the run loop). A file FTP'd in at runtime is *not* auto-detected.
+2. **`MAV_CMD_SCRIPTING` with `param1 = SCRIPTING_CMD_STOP_AND_RESTART` rescans without a reboot.** The scripting thread tears down and recreates its Lua state, re-reading the directory. So the wizard install path is **upload (FTP) → restart scripting → wait for the applet's control param** — no full FC reboot. See `src/workflow/lua-engine.ts`.
+
+The **only** reboot in the Lua flow is the one-time **enable** of `SCR_ENABLE` when it's off — which the drone-settings page owns (write → reboot → auto-reconnect). Wizards treat scripting-on as a precondition and point the operator at Drone settings if it isn't.
+
+The "scripting isn't enabled" fallback path is still covered separately (`test/e2e/imu-noise-wizard.spec.ts`, against stock SITL with `SCR_ENABLE=0`). Because the shared SITL instance carries scripting state across specs, the live spec is named to sort *after* the specs that assert scripting is off, and tolerates scripting being already on.
 
 ## SITL bridge
 
