@@ -43,6 +43,12 @@ cd "$WORK"
 mkdir -p "$WORK/APM/scripts"
 ln -s APM/scripts "$WORK/scripts"
 
+# Boot as a quad X (the common real-world layout) rather than SITL's
+# built-in Plus, so the motor-check wizard shows X positions (front-left,
+# front-right, …) matching the X airframe model. Applied as a defaults
+# overlay layered on copter.parm.
+printf 'FRAME_CLASS 1\nFRAME_TYPE 1\n' >"$WORK/frame.parm"
+
 echo "Starting SITL in $WORK"
 # Wrapper subshell: loops arducopter on exit so PREFLIGHT_REBOOT_SHUTDOWN
 # triggers a clean restart rather than ending the SITL session. The trap
@@ -54,13 +60,14 @@ echo "Starting SITL in $WORK"
 # run_in_terminal_window.sh. Without it bash elides the subshell and
 # SITL's _fdm_input_step self-terminates on first FDM input.
 #
-# --model + is a plus-config quad (the canonical SITL multirotor model).
-# --speedup 1 forces real-time.
+# --model X is a quad-X physics model, matching the X frame we boot via the
+# FRAME_TYPE overlay above (--model only sets SIM physics, not the
+# autopilot's FRAME_TYPE — that needs the param). --speedup 1 = real-time.
 (
   : ;
   trap 'pkill -P $$ 2>/dev/null; exit 0' INT TERM
   while true; do
-    "$BIN" --model + --speedup 1 --defaults "$DEFAULTS" </dev/null >>sitl.log 2>&1 || true
+    "$BIN" --model X --speedup 1 --defaults "$DEFAULTS,$WORK/frame.parm" </dev/null >>sitl.log 2>&1 || true
     # Brief pause so a crash-loop doesn't peg the CPU.
     sleep 0.5
   done

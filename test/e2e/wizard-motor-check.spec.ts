@@ -14,29 +14,30 @@
  */
 
 // End-to-end test for the motor-check wizard's happy path against SITL.
-// SITL boots as a quad Plus (FRAME_CLASS=1, FRAME_TYPE=0), correctly
-// "wired", so an operator who confirms each motor where/how the firmware
-// expects gets an all-clear. Drives real MAV_CMD_DO_MOTOR_TEST spins and
-// exercises the full flow: props-off gate → walk each motor by number
-// (auto-spun) → confirm position + direction → review pass → Done badge.
+// scripts/sitl-start.sh boots SITL as a quad X (FRAME_CLASS=1,
+// FRAME_TYPE=1), correctly "wired", so an operator who confirms each motor
+// where/how the firmware expects gets an all-clear. Drives real
+// MAV_CMD_DO_MOTOR_TEST spins and exercises the full flow: props-off gate
+// → walk each motor (auto-spun) → confirm position + direction → review
+// pass → Done badge.
 //
-// The wizard steps motors in the firmware's test order — a clockwise
-// sweep. For SITL's quad Plus that's front → right → rear → left, each
-// with its expected spin.
+// The wizard steps motors in the firmware's test order — a clockwise sweep
+// from the front-right: front-right → rear-right → rear-left → front-left,
+// each with its expected spin.
 
 import { expect, test } from '@playwright/test'
 
 const SITL_QUERY = '?transport=websocket&host=localhost:5761'
 const SITL_URL = `/${SITL_QUERY}`
 
-const PLUS_SEQUENCE = [
-  { position: 'Front', direction: 'Clockwise' },
-  { position: 'Right', direction: 'Counter-clockwise' },
-  { position: 'Rear', direction: 'Clockwise' },
-  { position: 'Left', direction: 'Counter-clockwise' },
+const X_SEQUENCE = [
+  { position: 'Front right', direction: 'Counter-clockwise' },
+  { position: 'Rear right', direction: 'Clockwise' },
+  { position: 'Rear left', direction: 'Counter-clockwise' },
+  { position: 'Front left', direction: 'Clockwise' },
 ]
 
-test('Motor check passes when every motor is confirmed correct (SITL quad +)', async ({ page }) => {
+test('Motor check passes when every motor is confirmed correct (SITL quad X)', async ({ page }) => {
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
@@ -47,19 +48,19 @@ test('Motor check passes when every motor is confirmed correct (SITL quad +)', a
 
   // Safety gate (frame loads from params first).
   await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText(/Quad \+/)).toBeVisible()
+  await expect(page.getByText(/Quad X/)).toBeVisible()
   await page.getByRole('switch', { name: 'Propellers are removed' }).click()
   await page.getByRole('button', { name: 'Start motor check' }).click()
 
-  // Walk all four motors. Each auto-spins; we confirm the position
-  // (pre-selected to the expected one) and pick the direction.
-  for (let i = 0; i < PLUS_SEQUENCE.length; i++) {
-    const step = PLUS_SEQUENCE[i]!
+  // Walk all four motors. Each auto-spins; position + direction are
+  // pre-selected to the expected values — we confirm them.
+  for (let i = 0; i < X_SEQUENCE.length; i++) {
+    const step = X_SEQUENCE[i]!
     const posButton = page.getByRole('button', { name: step.position, exact: true })
     await expect(posButton).toBeVisible({ timeout: 10_000 })
     await posButton.click()
     await page.getByRole('button', { name: step.direction, exact: true }).click()
-    const advance = i === PLUS_SEQUENCE.length - 1 ? 'Finish' : 'Next motor'
+    const advance = i === X_SEQUENCE.length - 1 ? 'Finish' : 'Next motor'
     await page.getByRole('button', { name: advance }).click()
   }
 

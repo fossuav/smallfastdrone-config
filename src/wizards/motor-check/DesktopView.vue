@@ -187,9 +187,12 @@ async function enterStep() {
   const m = currentMotor.value
   if (!m)
     return
+  // Default both the position and the direction to what the firmware
+  // expects, so the graphic shows the expected motor spinning the expected
+  // way; the operator only changes them if reality differs.
   const prior = observations.value.get(m.testOrder)
   selPosition.value = prior?.position ?? m.position
-  selSpin.value = prior?.spin ?? null
+  selSpin.value = prior?.spin ?? m.spin
   await spinCurrent()
 }
 
