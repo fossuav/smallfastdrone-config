@@ -29,6 +29,15 @@ bun run lint     # ESLint via @antfu/eslint-config (lint + format check)
 bun run lint:fix # auto-fix what's auto-fixable
 ```
 
+### Scaffold a wizard
+
+```bash
+bun run new:wizard <id> [Human Title...]      # desktop wizard
+bun run new:wizard <id> --lua                 # + a Lua applet stub
+```
+
+Creates `src/wizards/<id>/` with a `manifest.ts` + `DesktopView.vue` (and `applet.lua` with `--lua`) following house conventions — GPL header, the manifest shape, `returnTo`/`markComplete`, and a visual placeholder. Wizards are auto-discovered, so the new one shows up in the library immediately. The output typechecks and lints clean but is a stub: every `TODO` marks a decision to make (the visual, the operator copy, the params it owns, the actual work). `--category`/`--hero` override the defaults.
+
 ## SITL
 
 SmallFastDrone source is vendored as a git submodule at `vendor/smallfastdrone/`. `bun run setup` initialises it. Then:
@@ -67,6 +76,13 @@ bun run test:unit:watch    # Vitest in watch mode
 bun run test:e2e           # Playwright: starts SITL + bridge + Vite, runs the suite, tears down
 bun run test:e2e:headed    # Same with a visible browser, useful for debugging
 bun run test:e2e:debug     # Pause / step through tests interactively
+bun run lua:check <applet.lua> [module.lua ...]   # load a Lua/CRSF applet on SITL + report errors
+```
+
+`lua:check` is the quick "does this applet load?" check for Lua/CRSF wizards: it places the applet (and any `require`'d modules) on a running SITL, enables scripting, reboots, and watches the GCS text stream for the load line and any Lua errors. The CRSF *menu interaction* still needs a real transmitter. Example:
+
+```bash
+bun run lua:check src/wizards/motor-check/applet.lua src/wizards/motor-check/crsf_helper.lua
 ```
 
 `dev-setup.sh` installs the Playwright Chromium browser (~115 MB, first time only) and warns if the system libs Chromium needs (`libnss3`, `libnspr4`, …) are missing — install with `sudo bun x playwright install-deps chromium` if so.

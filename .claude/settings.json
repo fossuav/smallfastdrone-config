@@ -1,0 +1,22 @@
+{
+  "//": "Shared, durable pre-authorisations for this repo's safe dev commands. Exact script names only — no `bun run *`, which would allow running arbitrary files. Personal/broader grants live in the gitignored settings.local.json.",
+  "permissions": {
+    "allow": [
+      "Bash(bun run typecheck)",
+      "Bash(bun run lint)",
+      "Bash(bun run lint:fix)",
+      "Bash(bun run build)",
+      "Bash(bun run test:unit)",
+      "Bash(bun run test:unit:watch)",
+      "Bash(bun run test:e2e)",
+      "Bash(bun run test:e2e *)",
+      "Bash(bun run sitl:build)",
+      "Bash(bun run sitl:start)",
+      "Bash(bun run sitl:stop)",
+      "Bash(bun run params:rebuild)",
+      "Bash(bun run lua:check *)",
+      "Bash(./scripts/lua-check.sh *)",
+      "Bash(luac5.3 -p *)"
+    ]
+  }
+}

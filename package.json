@@ -22,7 +22,9 @@
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e:debug": "playwright test --debug",
+    "lua:check": "./scripts/lua-check.sh",
+    "new:wizard": "./scripts/new-wizard.sh"
   },
   "dependencies": {
     "@nuxt/ui": "^4.7.1",
