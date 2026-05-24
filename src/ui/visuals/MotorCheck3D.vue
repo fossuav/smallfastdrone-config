@@ -14,16 +14,20 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Hero visual for the motor-check wizard — the Betaflight quad-X airframe
-// model (vendored, see src/assets/models/CREDITS.md) seen from near-above
-// with the nose pointing AWAY from the operator. Each motor gets a faint
-// ring; the motor under test glows and a prop spins above it in its
-// expected direction, mirroring what the operator sees on the bench.
+// Hero visual for the motor-check wizard, seen from near-above with the
+// nose pointing AWAY from the operator. Each motor gets a faint ring; the
+// motor under test glows and a prop spins above it in its expected
+// direction, mirroring what the operator sees on the bench.
+//
+// Two body styles. Quad-X uses the vendored Betaflight airframe model
+// (src/assets/models/CREDITS.md). Every other frame (hexa, octa, quad +,
+// …) draws a simple-but-accurate model — a hub with one arm per motor at
+// its true airframe angle — rather than fudging the 4-arm X mesh into a
+// shape it isn't. Nicer per-frame models can come later.
 //
 // Near-top-down on purpose: motor screen positions then follow
 // motorTopdownXY, so the wizard view can lay text labels precisely over
-// each motor (see MOTOR_OVERLAY_RADIUS there). The model is a single mesh,
-// so highlighting is overlaid rather than recolouring it.
+// each motor.
 
 import type { Object3D } from 'three'
 import type { Spin } from '../../workflow/motor-geometry'
@@ -48,16 +52,17 @@ export interface MotorVisual {
 
 const props = defineProps<{
   motors: MotorVisual[]
-  // Extra yaw (deg) applied to the body only — the vendored model is an
-  // X-frame; a Plus frame rotates it 45° so its arms line up with the rings.
-  bodyYawDeg?: number
+  // Draw the procedural hub+arms model instead of the quad-X mesh. Set for
+  // every frame the vendored model doesn't natively represent.
+  arms?: boolean
 }>()
 
 const RING_R = 1.05
 const RING_Y = 0.12
 const PROP_Y = 0.45
-// Native yaw to point the model's nose at -Z (away from the camera).
-const MODEL_BASE_YAW = 0
+// Procedural frame body sits just below the rings.
+const ARM_Y = 0
+const FRAME_COLOR = '#6d28d9'
 
 const COLOR = {
   idle: '#C9A35F',
@@ -70,8 +75,11 @@ function ringColor(state: MotorVisual['state']): string {
   return COLOR[state]
 }
 
+// Load the vendored quad-X mesh only when we'll actually show it.
 const body = shallowRef<Object3D | null>(null)
 onMounted(() => {
+  if (props.arms)
+    return
   const loader = new GLTFLoader()
   loader.load(modelUrl, (gltf) => {
     const scene = gltf.scene
@@ -85,8 +93,6 @@ onMounted(() => {
     body.value = scene
   })
 })
-
-const bodyYaw = computed(() => MODEL_BASE_YAW + ((props.bodyYawDeg ?? 0) * Math.PI) / 180)
 
 const pulse = ref(0)
 const spin = ref(0)
@@ -122,6 +128,13 @@ const rings = computed(() => props.motors.map(m => ({
   // cw spins negative about Y viewed from above.
   propSpin: m.spin === 'cw' ? -spin.value : spin.value,
 })))
+
+// One arm per motor for the procedural body — a box reaching from the hub
+// out to the motor ring. rotation-y aligns the box's +X to the motor angle.
+const armGroups = computed(() => props.motors.map(m => ({
+  key: m.key,
+  rotationY: Math.PI / 2 - (m.angleDeg * Math.PI) / 180,
+})))
 </script>
 
 <template>
@@ -133,10 +146,22 @@ const rings = computed(() => props.motors.map(m => ({
     <TresDirectionalLight :position="[2, 6, 3]" :intensity="1.1" />
     <TresDirectionalLight :position="[-2, 3, -2]" :intensity="0.4" />
 
-    <!-- Vendored airframe body, oriented nose-away -->
-    <TresGroup :rotation-y="bodyYaw">
-      <primitive v-if="body" :object="body" />
-    </TresGroup>
+    <!-- Procedural hub + arms — frame-agnostic, accurate for any layout. -->
+    <template v-if="arms">
+      <TresMesh :position="[0, ARM_Y, 0]">
+        <TresCylinderGeometry :args="[0.3, 0.34, 0.16, 24]" />
+        <TresMeshStandardMaterial :color="FRAME_COLOR" :metalness="0.3" :roughness="0.6" />
+      </TresMesh>
+      <TresGroup v-for="a in armGroups" :key="a.key" :rotation-y="a.rotationY">
+        <TresMesh :position="[RING_R / 2, ARM_Y, 0]">
+          <TresBoxGeometry :args="[RING_R, 0.06, 0.12]" />
+          <TresMeshStandardMaterial :color="FRAME_COLOR" :metalness="0.3" :roughness="0.6" />
+        </TresMesh>
+      </TresGroup>
+    </template>
+
+    <!-- Vendored quad-X airframe, oriented nose-away. -->
+    <primitive v-else-if="body" :object="body" />
 
     <template v-for="r in rings" :key="r.key">
       <!-- Highlight ring -->

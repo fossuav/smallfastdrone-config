@@ -22,14 +22,13 @@
 // it turned. Observations are compared against the firmware frame
 // geometry and reported per motor.
 //
-// When something's wrong the review screen turns from report into fix:
-// computeCorrections() works out the SERVOn_FUNCTION remap (motor order)
-// and the SERVO_BLH_RVMASK toggle (spin direction); "Fix this for me"
-// writes them, restarts the drone (both are reboot-required), reconnects
-// automatically, and drops the operator back to re-run the check.
-// Direction correction needs the reverse-mask param, which only exists on
-// builds with BLHeli support (absent in SITL) — so it's gated on the live
-// FC exposing it; order remap always works. See docs/WIZARDS.md.
+// A props-in/out toggle (default props-in) sets which way each motor
+// should turn. When something's wrong the review turns from report into
+// fix: planCorrection() prefers switching FRAME_TYPE to a standard layout
+// that matches the observed wiring + orientation, falls back to a
+// SERVOn_FUNCTION remap, and reverses residual motors via SERVO_BLH_RVMASK
+// (gated on the FC exposing it). "Fix this for me" writes the change,
+// restarts the drone, reconnects, and re-runs the check. See docs/WIZARDS.md.
 //
 // Spinning goes through MAV_CMD_DO_MOTOR_TEST (props off, landed, safety
 // off). An emergency Stop is always one tap away while a motor is live,
@@ -56,7 +55,7 @@ import {
   REVERSE_MASK_PARAM,
   servoFunctionParam,
 } from '../../workflow/motor-check'
-import { frameGeometry, frameVariants, motorTopdownXY, positionLabel, spinForPosition, spinLabel } from '../../workflow/motor-geometry'
+import { expectedSpin, frameGeometry, frameVariants, motorTopdownXY, positionLabel, spinLabel } from '../../workflow/motor-geometry'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../../workflow/reconnect'
 
 const WIZARD_ID = 'motor-check'
@@ -64,7 +63,8 @@ const COMP_ID_AUTOPILOT = 1
 const MSGID_COMMAND_ACK = 77
 const MAV_CMD_DO_MOTOR_TEST = 209
 const MAV_RESULT_ACCEPTED = 0
-const FRAME_TYPE_PLUS = 0
+const FRAME_CLASS_QUAD = 1
+const FRAME_TYPE_X = 1
 // Generous spin so the operator has time to look + answer without the
 // motor cutting out mid-thought. Stopped explicitly when stepping/leaving.
 const SPIN_TIMEOUT_SEC = 20
@@ -90,10 +90,13 @@ const errorMessage = ref<string | null>(null)
 // expect to watch motors spin in. Each step still shows its motor number.
 const motors = ref<FrameMotor[]>([])
 const frameLabel = ref('')
-// X-frame model rotated 45° for a Plus frame so its arms meet the rings.
-const bodyYawDeg = ref(0)
 // Full geometry kept so the review step can compute corrections.
 const geometry = ref<FrameGeometry | null>(null)
+// The vendored airframe model is a quad-X; use it only for that frame and
+// draw a simple accurate arms-per-motor model for everything else.
+const useArmsModel = computed(() =>
+  !(geometry.value?.frameClass === FRAME_CLASS_QUAD && geometry.value?.frameType === FRAME_TYPE_X),
+)
 
 const propsOff = ref(false)
 // Propeller orientation the operator is building for. Default props-in
@@ -105,6 +108,13 @@ const propsOut = ref(false)
 const plan = ref<CorrectionPlan | null>(null)
 // Set after a fix + restart so the re-run safety screen says so.
 const justFixed = ref(false)
+
+// Expected spin for a motor under the operator's chosen props orientation,
+// relative to the connected frame.
+function motorExpectedSpin(m: FrameMotor): Spin {
+  const geo = geometry.value
+  return geo ? expectedSpin(m, propsOut.value, geo) : m.spin
+}
 
 // What the operator reported, keyed by test order.
 interface Observation { position: MotorPosition, spin: Spin }
@@ -141,14 +151,13 @@ onMounted(async () => {
     const geo = frameGeometry(Math.trunc(cls.value), frameType)
     if (!geo) {
       phase.value = 'unsupported'
-      errorMessage.value = 'This frame isn\'t supported by the motor check yet — only quad layouts for now.'
+      errorMessage.value = 'This frame isn\'t supported by the motor check yet — quad, hexa, and octa (X and +) for now.'
       return
     }
     // geo.motors is already in test order (clockwise from front-right).
     geometry.value = geo
     motors.value = geo.motors
     frameLabel.value = geo.label
-    bodyYawDeg.value = frameType === FRAME_TYPE_PLUS ? 45 : 0
     phase.value = 'safety'
   }
   catch (e) {
@@ -225,7 +234,7 @@ async function enterStep() {
   selPosition.value = prior?.position ?? m.position
   // Expected spin follows the props-in/out choice, not the FC's current
   // frame — so toggling props-out flips what "correct" looks like.
-  selSpin.value = prior?.spin ?? spinForPosition(m.position, propsOut.value)
+  selSpin.value = prior?.spin ?? motorExpectedSpin(m)
   await spinCurrent()
 }
 
@@ -296,7 +305,7 @@ const results = computed<Result[]>(() =>
       motor,
       observed,
       positionOk: observed?.position === motor.position,
-      spinOk: observed?.spin === spinForPosition(motor.position, propsOut.value),
+      spinOk: observed?.spin === motorExpectedSpin(motor),
     }
   }),
 )
@@ -464,9 +473,8 @@ function leave() {
 const displaySpin = computed<Spin>(() => {
   if (selSpin.value)
     return selSpin.value
-  if (selPosition.value)
-    return spinForPosition(selPosition.value, propsOut.value)
-  return 'cw'
+  const sel = motors.value.find(m => m.position === selPosition.value)
+  return sel ? motorExpectedSpin(sel) : 'cw'
 })
 
 // 3D states. While testing, the graphic mirrors the operator's answer:
@@ -476,7 +484,7 @@ const displaySpin = computed<Spin>(() => {
 const motorVisuals = computed<MotorVisual[]>(() =>
   motors.value.map((m) => {
     let state: MotorVisual['state'] = 'idle'
-    let spin = spinForPosition(m.position, propsOut.value)
+    let spin = motorExpectedSpin(m)
     if (phase.value === 'testing') {
       if (m.position === selPosition.value) {
         state = 'active'
@@ -601,7 +609,7 @@ function labelStyle(angleDeg: number): Record<string, string> {
       </div>
 
       <div class="relative mx-auto aspect-square w-full max-w-sm">
-        <MotorCheck3D :motors="motorVisuals" :body-yaw-deg="bodyYawDeg" />
+        <MotorCheck3D :motors="motorVisuals" :arms="useArmsModel" />
         <div
           v-for="m in motors"
           :key="m.testOrder"
@@ -688,7 +696,7 @@ function labelStyle(angleDeg: number): Record<string, string> {
     <!-- review -->
     <div v-else-if="phase === 'review'" class="space-y-4">
       <div class="mx-auto aspect-square w-full max-w-xs">
-        <MotorCheck3D :motors="motorVisuals" :body-yaw-deg="bodyYawDeg" />
+        <MotorCheck3D :motors="motorVisuals" :arms="useArmsModel" />
       </div>
 
       <div v-if="allOk" class="space-y-2 py-2 text-center">
@@ -764,7 +772,7 @@ function labelStyle(angleDeg: number): Record<string, string> {
                   </span>
                   <span v-else-if="!r.spinOk" class="text-error">
                     — turning {{ r.observed ? spinLabel(r.observed.spin) : '?' }},
-                    should be {{ spinLabel(spinForPosition(r.motor.position, propsOut)) }}
+                    should be {{ spinLabel(motorExpectedSpin(r.motor)) }}
                   </span>
                 </template>
               </div>

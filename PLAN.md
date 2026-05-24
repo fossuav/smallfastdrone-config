@@ -153,7 +153,8 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
   - `motor-check` (BRINGUP phase 04) — desktop-engine, props-off motor test that catches mis-wires:
     - slice 1 / 2a (done): blind detect → per-motor report against the firmware mixer geometry; correction maths computed + unit-tested.
     - slice 2b (done): `planCorrection` turns the report into a fix — **prefer switching `FRAME_TYPE`** to a standard layout (X/H, Betaflight, DJI, clockwise, +/+rev) that matches the observed wiring + the operator's **props-in/out** choice; fall back to a custom `SERVOn_FUNCTION` remap; reverse residual individual motors via `SERVO_BLH_RVMASK`. Then reboot + auto-reconnect (`useReconnect`) + re-check. Props-out is a one-param FRAME_TYPE change (no reverse mask); RVMASK direction-reverse needs BLHeli, enabled in SITL via the `blheli-sitl` branch.
-    - then: hex/octo geometry in `motor-geometry.ts`, then chain `motor-check` into the bringup meta (`SUB_WIZARD_IDS`).
+    - hex/octo geometry (done): hexa X/+ and octa X/+ in `motor-geometry.ts`; non-quad-X frames draw a simple accurate hub+arms model rather than fudging the quad-X mesh. Deferred: hex/octo DJI/CW orders + raw-coord frames (hexa H, octa V/H/I).
+    - then: chain `motor-check` into the bringup meta (`SUB_WIZARD_IDS`) — the meta test runs a Hex.
 
 **Done when:** Operator can run any of the desktop wizards through to commit; the Lua-engine wizard runs end-to-end against SITL with scripting enabled — applet uploaded, runs, completes, uninstalls cleanly (SITL log shows no orphan script after completion); and `motor-check` turns its per-motor report into a committed fix (order remap re-verified against SITL).
 

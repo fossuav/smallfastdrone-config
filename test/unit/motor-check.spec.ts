@@ -30,7 +30,7 @@ import {
   servoFunctionParam,
   wiringIsDefault,
 } from '../../src/workflow/motor-check'
-import { frameGeometry, frameVariants, spinForPosition } from '../../src/workflow/motor-geometry'
+import { expectedSpin, flipSpin, frameGeometry, frameVariants } from '../../src/workflow/motor-geometry'
 
 // Quad X: idx0 FR/ccw (T1), idx1 RL/ccw (T3), idx2 FL/cw (T4), idx3 RR/cw (T2).
 const QUAD_X = frameGeometry(1, 1)!
@@ -179,16 +179,16 @@ describe('applyReverseMask', () => {
   })
 })
 
-describe('spinForPosition', () => {
-  it('gives the props-in spins and flips them for props-out', () => {
-    // props-in (ArduPilot X): FR/RL ccw, FL/RR cw.
-    expect(spinForPosition('front-right', false)).toBe('ccw')
-    expect(spinForPosition('rear-left', false)).toBe('ccw')
-    expect(spinForPosition('front-left', false)).toBe('cw')
-    expect(spinForPosition('rear-right', false)).toBe('cw')
-    // props-out is the mirror.
-    expect(spinForPosition('front-right', true)).toBe('cw')
-    expect(spinForPosition('front-left', true)).toBe('ccw')
+describe('flipSpin / expectedSpin', () => {
+  it('flips a spin direction', () => {
+    expect(flipSpin('cw')).toBe('ccw')
+    expect(flipSpin('ccw')).toBe('cw')
+  })
+
+  it('returns the frame spin for the same orientation and flips for the other', () => {
+    const m = QUAD_X.motors[0]! // front-right, ccw, props-in frame
+    expect(expectedSpin(m, false, QUAD_X)).toBe('ccw') // props-in matches frame
+    expect(expectedSpin(m, true, QUAD_X)).toBe('cw') // props-out flips
   })
 })
 
@@ -268,5 +268,65 @@ describe('planCorrection (quad X current frame, default wiring)', () => {
     const obs = correctObservations()
     obs.set(1, { position: 'rear-left', spin: 'ccw' }) // duplicate of T3
     expect(planCorrection(QUAD_X, obs, DEFAULT_CHANNELS, false, VARIANTS).kind).toBe('inconsistent')
+  })
+})
+
+describe('hexa / octa geometry', () => {
+  const FRAMES = [
+    { name: 'hexa X', cls: 2, type: 1, count: 6 },
+    { name: 'hexa +', cls: 2, type: 0, count: 6 },
+    { name: 'octa X', cls: 3, type: 1, count: 8 },
+    { name: 'octa +', cls: 3, type: 0, count: 8 },
+  ]
+
+  for (const { name, cls, type, count } of FRAMES) {
+    it(`${name}: ${count} motors, contiguous test order + indices, unique positions`, () => {
+      const geo = frameGeometry(cls, type)
+      expect(geo).toBeTruthy()
+      const seq = Array.from({ length: count }, (_, i) => i + 1)
+      expect(geo!.motors.map(m => m.testOrder).sort((a, b) => a - b)).toEqual(seq)
+      expect(geo!.motors.map(m => m.motorIndex).sort((a, b) => a - b)).toEqual(seq.map(n => n - 1))
+      // Unique positions are required — the operator identifies motors by them.
+      expect(new Set(geo!.motors.map(m => m.position)).size).toBe(count)
+    })
+  }
+
+  it('hexa X matches the firmware (spot checks)', () => {
+    const byOrder = new Map(frameGeometry(2, 1)!.motors.map(m => [m.testOrder, m]))
+    expect(byOrder.get(1)).toMatchObject({ angleDeg: 30, position: 'front-right', spin: 'ccw' })
+    expect(byOrder.get(2)).toMatchObject({ angleDeg: 90, position: 'right', spin: 'cw' })
+  })
+
+  it('octa X labels its 22.5°-offset motors with the side positions', () => {
+    const byOrder = new Map(frameGeometry(3, 1)!.motors.map(m => [m.testOrder, m]))
+    expect(byOrder.get(1)).toMatchObject({ angleDeg: 22.5, position: 'front-right' })
+    expect(byOrder.get(2)).toMatchObject({ angleDeg: 67.5, position: 'right-front' })
+  })
+})
+
+describe('planCorrection on hexa X', () => {
+  const HEXA_X = frameGeometry(2, 1)!
+  const HEXA_CHANNELS = new Map([[1, 33], [2, 34], [3, 35], [4, 36], [5, 37], [6, 38]])
+  const VARIANTS = frameVariants(2)
+
+  function correct(): Map<number, MotorObservation> {
+    return new Map(HEXA_X.motors.map(m => [m.testOrder, { position: m.position, spin: m.spin }]))
+  }
+
+  it('reports nothing to do for a correctly wired hexa X', () => {
+    expect(planCorrection(HEXA_X, correct(), HEXA_CHANNELS, false, VARIANTS).kind).toBe('none')
+  })
+
+  it('reverses a single backwards motor (direction-only)', () => {
+    const t1 = HEXA_X.motors.find(m => m.testOrder === 1)!
+    const channel = [...HEXA_CHANNELS].find(([, fn]) => fn === motorFunctionId(t1.motorIndex))![0]
+    const obs = correct()
+    obs.set(1, { position: t1.position, spin: flipSpin(t1.spin) })
+    const p = planCorrection(HEXA_X, obs, HEXA_CHANNELS, false, VARIANTS)
+    expect(p.kind).toBe('remap')
+    if (p.kind === 'remap') {
+      expect(p.remap).toEqual([])
+      expect(p.reverseChannels).toEqual([channel])
+    }
   })
 })

@@ -31,7 +31,7 @@
 //   → output channel.
 
 import type { FrameGeometry, MotorPosition, Spin } from './motor-geometry'
-import { spinForPosition } from './motor-geometry'
+import { flipSpin } from './motor-geometry'
 
 // SERVOn_FUNCTION value for a motor by 0-based mixer index. Motor1..8 are
 // k_motor1..8 = 33..40; Motor9..12 are k_motor9..12 = 82..85 (from
@@ -327,11 +327,20 @@ export function planCorrection(
   }
 
   // Fallback: custom output remap to the current frame, plus reversing any
-  // motor not turning the chosen-orientation direction.
+  // motor not turning the chosen-orientation direction. "Desired spin" is
+  // the current frame's spin for each position, flipped if the operator's
+  // props orientation differs from the frame's.
   const remap = computeRemap(currentGeometry, build, channelFunctions)
+  const spinByPosition = new Map<MotorPosition, Spin>()
+  for (const m of currentGeometry.motors)
+    spinByPosition.set(m.position, m.spin)
+  const desiredSpin = (pos: MotorPosition): Spin => {
+    const base = spinByPosition.get(pos)!
+    return propsOut === currentGeometry.propsOut ? base : flipSpin(base)
+  }
   const reverseChannels: number[] = []
   for (const [channel, physSpin] of build.physSpin) {
-    if (physSpin !== spinForPosition(build.physPosition.get(channel)!, propsOut))
+    if (physSpin !== desiredSpin(build.physPosition.get(channel)!))
       reverseChannels.push(channel)
   }
   reverseChannels.sort((a, b) => a - b)

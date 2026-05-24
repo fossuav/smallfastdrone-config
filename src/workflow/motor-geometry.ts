@@ -30,18 +30,22 @@
 // 270°/-90° = left. Spin direction is the propeller's rotation viewed
 // from above.
 //
-// v1 covers the quad frames (the SmallFastDrone bread-and-butter). The
-// table structure extends to hex/octo by transcribing the matching
-// MotorDef arrays; the wizard reports "frame not supported yet" for
-// anything absent so it never guesses.
+// v1 covers the common quad / hexa / octa layouts (X and + for hexa/octa,
+// plus the quad order/orientation variants). The table structure extends
+// to other frames by transcribing the matching MotorDef arrays; the wizard
+// reports "frame not supported yet" for anything absent so it never guesses.
 
 // Propeller rotation viewed from above.
 export type Spin = 'cw' | 'ccw'
 
-// Operator-facing position name — no motor numbers, no MAVLink terms.
+// Operator-facing position name — no motor numbers, no MAVLink terms. The
+// eight cardinal/intercardinal names cover quad + hexa + octa-plus; the
+// four "side" names (e.g. right-front) name octa-X's pairs that straddle a
+// diagonal (22.5° / 67.5° …), which don't land on a cardinal.
 export type MotorPosition
   = | 'front' | 'front-right' | 'right' | 'rear-right'
     | 'rear' | 'rear-left' | 'left' | 'front-left'
+    | 'right-front' | 'right-rear' | 'left-rear' | 'left-front'
 
 // One motor in a frame.
 export interface FrameMotor {
@@ -83,6 +87,8 @@ export interface FrameGeometry {
 // sequential by family, so each is taken from the firmware directly
 // (getting one wrong sets the wrong frame, which flips a drone).
 const FRAME_CLASS_QUAD = 1
+const FRAME_CLASS_HEXA = 2
+const FRAME_CLASS_OCTA = 3
 const FRAME_TYPE_PLUS = 0
 const FRAME_TYPE_X = 1
 const FRAME_TYPE_H = 3 // X order, props-out
@@ -92,25 +98,47 @@ const FRAME_TYPE_DJI_X = 13 // DJI order
 const FRAME_TYPE_CW_X = 14 // clockwise-from-front-right order
 const FRAME_TYPE_BF_X_REV = 18 // Betaflight order, props-out
 
-// Map an airframe angle to an operator-facing position label. The quad
-// frames only ever use the eight cardinal/intercardinal angles below.
+// Airframe angle (normalised to [0,360), 1-decimal key) → operator-facing
+// position. Multiple angles share a label across frames (a quad's 45° and a
+// hexa's 30° are both "front right") but within any one frame each motor
+// gets a distinct label — verified in the unit tests. Octa-X's 22.5°-offset
+// motors straddle the diagonals, so they use the four "side" names.
+const POSITION_BY_ANGLE = new Map<number, MotorPosition>([
+  [0, 'front'],
+  [22.5, 'front-right'], // octa X
+  [30, 'front-right'], // hexa X
+  [45, 'front-right'], // quad / octa +
+  [60, 'front-right'], // hexa +
+  [67.5, 'right-front'], // octa X
+  [90, 'right'],
+  [112.5, 'right-rear'], // octa X
+  [120, 'rear-right'], // hexa +
+  [135, 'rear-right'], // quad / octa +
+  [150, 'rear-right'], // hexa X
+  [157.5, 'rear-right'], // octa X
+  [180, 'rear'],
+  [202.5, 'rear-left'], // octa X
+  [210, 'rear-left'], // hexa X
+  [225, 'rear-left'], // quad / octa +
+  [240, 'rear-left'], // hexa +
+  [247.5, 'left-rear'], // octa X
+  [270, 'left'],
+  [292.5, 'left-front'], // octa X
+  [300, 'front-left'], // hexa +
+  [315, 'front-left'], // quad / octa +
+  [330, 'front-left'], // hexa X
+  [337.5, 'front-left'], // octa X
+])
+
+// Map an airframe angle to its operator-facing position label.
 function positionForAngle(angleDeg: number): MotorPosition {
-  // Normalise to [0, 360).
-  const a = ((angleDeg % 360) + 360) % 360
-  switch (a) {
-    case 0: return 'front'
-    case 45: return 'front-right'
-    case 90: return 'right'
-    case 135: return 'rear-right'
-    case 180: return 'rear'
-    case 225: return 'rear-left'
-    case 270: return 'left'
-    case 315: return 'front-left'
-    default:
-      // Should never happen for the supported frames; fall back to the
-      // nearest cardinal so the UI degrades rather than throws.
-      return a < 90 || a >= 315 ? 'front' : a < 180 ? 'right' : a < 270 ? 'rear' : 'left'
-  }
+  const a = Math.round((((angleDeg % 360) + 360) % 360) * 10) / 10
+  const hit = POSITION_BY_ANGLE.get(a)
+  if (hit !== undefined)
+    return hit
+  // Unsupported angle — fall back to the nearest cardinal so the UI
+  // degrades rather than throws.
+  return a < 90 || a >= 315 ? 'front' : a < 180 ? 'right' : a < 270 ? 'rear' : 'left'
 }
 
 // Operator-facing label for a position — "front-left" → "Front left".
@@ -140,29 +168,19 @@ function motor(testOrder: number, motorIndex: number, angleDeg: number, spin: Sp
   return { testOrder, motorIndex, angleDeg, position: positionForAngle(angleDeg), spin }
 }
 
-// Canonical props-IN spin for each airframe position, read off the
-// firmware's default X and PLUS tables. Every props-in quad variant (X,
-// BF_X, DJI_X, CW_X) shares this position→spin map; props-out is every
-// entry flipped. The wizard uses this so "which way should it turn?"
-// follows the props-in/out choice rather than a specific frame type.
-const SPIN_IN: Record<MotorPosition, Spin> = {
-  'front': 'cw',
-  'front-right': 'ccw',
-  'right': 'ccw',
-  'rear-right': 'cw',
-  'rear': 'cw',
-  'rear-left': 'ccw',
-  'left': 'ccw',
-  'front-left': 'cw',
+// Flip a spin direction.
+export function flipSpin(s: Spin): Spin {
+  return s === 'cw' ? 'ccw' : 'cw'
 }
 
-// Expected spin for a position given the propeller orientation. props-out
-// is simply the mirror of props-in.
-export function spinForPosition(position: MotorPosition, propsOut: boolean): Spin {
-  const inSpin = SPIN_IN[position]
-  if (!propsOut)
-    return inSpin
-  return inSpin === 'cw' ? 'ccw' : 'cw'
+// The spin a motor should turn for the operator's chosen props orientation,
+// relative to the frame it belongs to. Each FrameMotor.spin is correct for
+// its own frame's orientation (geo.propsOut); building the opposite
+// orientation flips every motor. This works across frame classes —
+// hexa/octa spins don't follow the quad's position→spin rule, so we read
+// from the frame's own table rather than a global position map.
+export function expectedSpin(motor: FrameMotor, propsOut: boolean, geo: FrameGeometry): Spin {
+  return propsOut === geo.propsOut ? motor.spin : flipSpin(motor.spin)
 }
 
 // All quad layouts we recognise, transcribed in test order from the
@@ -292,6 +310,82 @@ const QUAD_PLUSREV: FrameGeometry = {
   ],
 }
 
+// Hexa X — AP_MotorsMatrix.cpp setup_hexa_matrix MOTOR_FRAME_TYPE_X.
+// Six arms at ±30 / ±90 / ±150. (Hexa props-out is the raw-coord "H"
+// frame, not modelled yet; DJI/CW hexa orders are deferred.)
+const HEXA_X: FrameGeometry = {
+  frameClass: FRAME_CLASS_HEXA,
+  frameType: FRAME_TYPE_X,
+  label: 'Hexa X',
+  layoutName: 'X',
+  propsOut: false,
+  motors: [
+    motor(1, 4, 30, 'ccw'),
+    motor(2, 0, 90, 'cw'),
+    motor(3, 3, 150, 'ccw'),
+    motor(4, 5, -150, 'cw'),
+    motor(5, 1, -90, 'ccw'),
+    motor(6, 2, -30, 'cw'),
+  ],
+}
+
+// Hexa Plus — arms at 0 / ±60 / ±120 / 180.
+const HEXA_PLUS: FrameGeometry = {
+  frameClass: FRAME_CLASS_HEXA,
+  frameType: FRAME_TYPE_PLUS,
+  label: 'Hexa +',
+  layoutName: 'Plus',
+  propsOut: false,
+  motors: [
+    motor(1, 0, 0, 'cw'),
+    motor(2, 3, 60, 'ccw'),
+    motor(3, 5, 120, 'cw'),
+    motor(4, 1, 180, 'ccw'),
+    motor(5, 2, -120, 'cw'),
+    motor(6, 4, -60, 'ccw'),
+  ],
+}
+
+// Octa X — AP_MotorsMatrix.cpp setup_octa_matrix MOTOR_FRAME_TYPE_X.
+// Eight arms at ±22.5 / ±67.5 / ±112.5 / ±157.5 (the 22.5° offset is why
+// octa-X uses the "side" position names). DJI/CW octa orders deferred.
+const OCTA_X: FrameGeometry = {
+  frameClass: FRAME_CLASS_OCTA,
+  frameType: FRAME_TYPE_X,
+  label: 'Octa X',
+  layoutName: 'X',
+  propsOut: false,
+  motors: [
+    motor(1, 0, 22.5, 'cw'),
+    motor(2, 2, 67.5, 'ccw'),
+    motor(3, 7, 112.5, 'cw'),
+    motor(4, 3, 157.5, 'ccw'),
+    motor(5, 1, -157.5, 'cw'),
+    motor(6, 5, -112.5, 'ccw'),
+    motor(7, 6, -67.5, 'cw'),
+    motor(8, 4, -22.5, 'ccw'),
+  ],
+}
+
+// Octa Plus — arms on the eight cardinal/intercardinal axes.
+const OCTA_PLUS: FrameGeometry = {
+  frameClass: FRAME_CLASS_OCTA,
+  frameType: FRAME_TYPE_PLUS,
+  label: 'Octa +',
+  layoutName: 'Plus',
+  propsOut: false,
+  motors: [
+    motor(1, 0, 0, 'cw'),
+    motor(2, 2, 45, 'ccw'),
+    motor(3, 7, 90, 'cw'),
+    motor(4, 3, 135, 'ccw'),
+    motor(5, 1, 180, 'cw'),
+    motor(6, 5, -135, 'ccw'),
+    motor(7, 6, -90, 'cw'),
+    motor(8, 4, -45, 'ccw'),
+  ],
+}
+
 const GEOMETRIES: FrameGeometry[] = [
   QUAD_X,
   QUAD_H,
@@ -301,6 +395,10 @@ const GEOMETRIES: FrameGeometry[] = [
   QUAD_CW_X,
   QUAD_PLUS,
   QUAD_PLUSREV,
+  HEXA_X,
+  HEXA_PLUS,
+  OCTA_X,
+  OCTA_PLUS,
 ]
 
 // Look up the geometry for a connected FC's FRAME_CLASS / FRAME_TYPE.
