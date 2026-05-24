@@ -4,11 +4,13 @@ Directory-scoped context for `src/wizards/`. Read [docs/WIZARDS.md](../../docs/W
 
 ## A wizard is a folder
 
+**Start with the scaffold:** `bun run new:wizard <id> [Title...]` (add `--lua` for a Lua applet) drops a current-conventions stub you fill in — don't hand-build a wizard folder from memory. Wizards are auto-discovered (Vite glob in `src/workflow/wizard-runtime.ts`), so the new folder shows up in the library with no registry edit. If you change a convention the scaffold bakes in (the manifest shape, the DesktopView patterns, the applet skeleton), update `scripts/new-wizard.sh` in the same change so the next author starts from current truth — see the helper-scripts rule in the root [CLAUDE.md](../../CLAUDE.md).
+
 `src/wizards/<id>/`:
 
 - `manifest.ts` — required. The `WizardManifest` (see `src/workflow/wizard-runtime.ts`). Declares title/description/category/hero/outcome, `engines`, `owns_params`, `prerequisites`, lifecycle flags, optional `locked`.
 - `DesktopView.vue` — required for any wizard this tool ships. The operator-facing Vue UI; orchestrates the wizard's engine via `useLuaEngine()` / the params store / the session store. Bringup-launched wizards honour a `?returnTo=` query for the back path.
-- `applet.lua` — only for Lua-engine wizards. The FC-side script.
+- `applet.lua` — only for Lua-engine wizards. The FC-side script. Verify it loads with `bun run lua:check src/wizards/<id>/applet.lua`.
 
 ## Writing `applet.lua` — read the Lua playbooks first
 
