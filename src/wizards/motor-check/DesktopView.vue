@@ -138,8 +138,12 @@ onMounted(async () => {
     return
   }
   try {
-    if (params.count === 0)
-      await params.load()
+    // Always refetch: the frame and motor-output assignments
+    // (SERVOn_FUNCTION) may have changed since params were last loaded —
+    // e.g. the operator just ran frame-select, which the FC applies live
+    // (it reassigns the motor outputs) — and we're about to spin motors
+    // based on them.
+    await params.load()
     const cls = params.params.get('FRAME_CLASS')
     const typ = params.params.get('FRAME_TYPE')
     if (!cls || !typ) {

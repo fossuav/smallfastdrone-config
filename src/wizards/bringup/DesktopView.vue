@@ -15,8 +15,8 @@
  */
 
 // Bringup meta-wizard DesktopView. Walks the operator through a fixed
-// ordered list of sub-wizards: preflight, then frame-select. (Future
-// slices grow this list to cover sensors, RC, motors, failsafes, etc.
+// ordered list of sub-wizards: preflight, frame-select, then motor-check.
+// (Future slices grow this list to cover sensors, RC, failsafes, etc.
 // per docs/BRINGUP.md — bringup picks them up automatically as long
 // as their ids are listed below.) Each step links to the standalone
 // sub-wizard URL with a returnTo query so the sub-wizard's back path
@@ -35,10 +35,11 @@ const session = useSessionStore()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 
-// Ordered chain of sub-wizard ids. Sequence matters — later steps
-// assume earlier ones have run (e.g. frame-select assumes the
-// operator has eyeballed sensor health via preflight).
-const SUB_WIZARD_IDS = ['preflight', 'frame-select'] as const
+// Ordered chain of sub-wizard ids. Sequence matters — later steps assume
+// earlier ones have run: frame-select assumes the operator eyeballed
+// sensor health via preflight, and motor-check assumes the frame is set
+// (it reads FRAME_CLASS/TYPE to know the motor layout).
+const SUB_WIZARD_IDS = ['preflight', 'frame-select', 'motor-check'] as const
 
 // Per-step projection of manifest + completion record so the template
 // stays declarative. Steps for unknown ids degrade gracefully — a
