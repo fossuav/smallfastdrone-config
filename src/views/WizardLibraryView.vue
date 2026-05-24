@@ -122,6 +122,15 @@ function timeAgo(ms: number): string {
               >
                 Done
               </UBadge>
+              <UBadge
+                v-if="w.manifest.field_capable"
+                color="info"
+                variant="subtle"
+                size="sm"
+                icon="i-lucide-radio"
+              >
+                Field-capable
+              </UBadge>
             </div>
           </div>
           <div>

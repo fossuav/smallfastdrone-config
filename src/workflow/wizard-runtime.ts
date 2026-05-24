@@ -77,6 +77,11 @@ export interface WizardManifest {
   // Lifecycle flags — see docs/WIZARDS.md "Manifest".
   in_flight: boolean
   requires_props_off: boolean
+  // The wizard can also run in the field via the radio's CRSF menu (a Lua
+  // applet the operator installs from the desktop, then uses without a
+  // laptop). Drives a "field-capable" badge in the library; the install
+  // lifecycle lives in the wizard's DesktopView.
+  field_capable?: boolean
   // Commercial gating seam. `locked: true` greys the card and replaces
   // Start with a "Coming soon" affordance; no real entitlement check
   // in v1.

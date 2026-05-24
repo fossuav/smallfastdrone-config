@@ -45,4 +45,8 @@ export const manifest: WizardManifest = {
   in_flight: false,
   // This wizard spins motors. The operator must confirm props are off.
   requires_props_off: true,
+  // Installable on the radio's CRSF menu for no-laptop use at the field
+  // (src/wizards/motor-check/applet.lua). Install/remove lives on the
+  // wizard's safety screen.
+  field_capable: true,
 }

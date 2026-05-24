@@ -175,9 +175,21 @@ Every wizard this tool ships has a Vue component at `src/wizards/<id>/DesktopVie
 - Surfaces an Abort affordance that cleanly stops the engine.
 - Calls `runtime.complete(result)` on success or `runtime.abort(reason)` on cancel.
 
-### CRSF view (optional)
+### CRSF view (optional) — field-capable wizards
 
-For Lua-engine wizards that benefit from in-field operation, the wizard can declare a CRSF menu schema at `src/wizards/<id>/crsf-menu.lua`. This is **not a concern of this tool's runtime** — the menu is purely FC-side, served by SFD's CRSF menu stack (see `../smallfastdrone/libraries/AP_Scripting/CLAUDE_CRSF_MENU.md`). Declaring it in the manifest is informational; the wizard library card renders a "field-capable" badge so operators know they don't need a laptop for this one.
+A wizard that benefits from in-field, no-laptop operation ships an `applet.lua` (its FC-side logic + a CRSF menu) at `src/wizards/<id>/applet.lua`, and sets `field_capable: true` in the manifest. The library card then shows a "field-capable" badge. The menu itself runs purely on the FC, served by SFD's CRSF stack (see [lua/CLAUDE_CRSF_MENU.md](lua/CLAUDE_CRSF_MENU.md)); the operator drives it from the transmitter.
+
+The applet `require`s the firmware's `crsf_helper`, which isn't in SITL's ROMFS, so it's **bundled** at `src/wizards/<id>/crsf_helper.lua` and uploaded to `scripts/modules/` alongside the applet.
+
+**Install-and-keep lifecycle.** Unlike a desktop-driven Lua wizard (upload → run → remove), a field applet is *installed and left on the FC* so it's there at the field. The tool's desktop view owns install/remove:
+
+- **Install**: `uploadModule('crsf_helper.lua', …)` → `uploadApplet(id, …)` → `restartScripting()` (rescans, no reboot). It then stays until removed. Scripting must be on; if it isn't, the panel offers **`enableScripting()`** inline (write `SCR_ENABLE=1` → reboot → auto-reconnect, the same sequence the drone-settings toggle uses) so the operator doesn't detour through settings.
+- **Remove**: `removeApplet(id)` → `restartScripting()` (drops it from the radio menu). The shared `crsf_helper` module is left in place.
+- **Status**: `isAppletInstalled(id)` lists `APM/scripts` (FTP `LIST_DIRECTORY`, a session-less op) and checks for the applet — so the panel reflects the real install state across sessions. (Don't use a file *open* to probe: it holds an FC FTP session that wedges a following install.)
+
+The correction/decision maths in the applet must mirror the tool-side TS it duplicates (e.g. motor-check's `compute_corrections` ↔ `computeCorrections`). **Testability:** the spin/param/reboot mechanics and "applet loads + registers its menu" are SITL-verifiable; the menu interaction rides the CRSF radio link (no transmitter in SITL) so it's hardware-verified — call it out in the applet's `.md`.
+
+**Future — a scripting lifecycle manager.** As more field applets land, the tool should grow a single manager that shows every installed script and enables/disables each by **moving it between `APM/scripts` (active) and a disabled subdirectory** (e.g. `APM/scripts/disabled`) — presence in the active dir is what "enabled" means, so we never touch the firmware's scripting internals, only the filesystem via FTP. This generalises the per-wizard install/remove above (install = copy in + restart scripting; disable = move out + restart). The FTP `listDirectory` primitive added here is the first building block; the manager is the natural home for cross-script concerns (heap budgeting, version/update, orphan cleanup) once there's more than one.
 
 ## Capability detection
 

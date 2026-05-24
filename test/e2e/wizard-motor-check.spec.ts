@@ -208,3 +208,26 @@ test('Motor check switches to the props-out layout, restarts, and reconnects (SI
   await expect(page.getByText('Restarting your drone…')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('Fix applied — let\'s check again')).toBeVisible({ timeout: 90_000 })
 })
+
+test('Motor check installs the field version, detects it on reopen, and removes it', async ({ page }) => {
+  test.setTimeout(150_000)
+  // Relies on scripting being enabled by an earlier spec
+  // (wizard-imu-noise-live, which runs before this one and leaves
+  // SCR_ENABLE=1) — same dependency style as that spec.
+  await openMotorCheck(page)
+
+  // Not installed yet (directory listing found no applet) → install.
+  await page.getByRole('button', { name: 'Install on radio' }).click()
+  await expect(page.getByRole('button', { name: 'Remove from radio' })).toBeVisible({ timeout: 60_000 })
+
+  // Reopen the wizard: the on-mount directory-listing check must detect the
+  // applet on the FC and show it as installed (not back to "Install").
+  await openMotorCheck(page)
+  await expect(page.getByRole('button', { name: 'Remove from radio' })).toBeVisible({ timeout: 30_000 })
+
+  // Remove → reopen → detected as not installed again (clean for later specs).
+  await page.getByRole('button', { name: 'Remove from radio' }).click()
+  await expect(page.getByRole('button', { name: 'Install on radio' })).toBeVisible({ timeout: 30_000 })
+  await openMotorCheck(page)
+  await expect(page.getByRole('button', { name: 'Install on radio' })).toBeVisible({ timeout: 30_000 })
+})

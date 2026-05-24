@@ -46,6 +46,7 @@ import { buildScriptingRestart } from '../protocol/mavlink'
 import { buildParamRequestRead, buildParamSet } from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
+import { sleep, STORAGE_SETTLE_MS, useReconnect } from './reconnect'
 
 // MAV_COMP_ID_AUTOPILOT1 — the FC's component id, which is what PARAM_SET
 // and REQUEST_MESSAGE must target.
@@ -76,6 +77,8 @@ const CONTROL_PARAM_POLL_MS = 500
 // typically floats since AP_Param's Lua bridge uses REAL32 by default
 // for table-added params. Callers can override for non-float params.
 const MAV_PARAM_TYPE_REAL32 = 9
+// MAV_PARAM_TYPE_INT8 — SCR_ENABLE is an int8 flag.
+const MAV_PARAM_TYPE_INT8 = 2
 
 // PARAM_SET ack timeout — long enough for a slow USB link but short
 // enough that a stuck write doesn't hang a wizard for seconds.
@@ -114,9 +117,17 @@ export function appletPath(wizardId: string): string {
   return `APM/scripts/${appletFilename(wizardId)}`
 }
 
+// Where Lua `require` looks for modules (see lua_bindings.cpp
+// LUA_PATH_SCRIPTS). Field applets that `require` a helper ship it here.
+const MODULES_DIR = 'APM/scripts/modules'
+export function modulePath(name: string): string {
+  return `${MODULES_DIR}/${name}`
+}
+
 export function useLuaEngine() {
   const session = useSessionStore()
   const params = useParamsStore()
+  const { autoReconnect } = useReconnect()
 
   // Build a MavFtp targeting the connected FC. Throws if there's no
   // active session — callers should guard with session.connected
@@ -145,6 +156,26 @@ export function useLuaEngine() {
     if (!scrEnable)
       return { available: false, enabled: false }
     return { available: true, enabled: scrEnable.value > 0 }
+  }
+
+  // Turn scripting on: write SCR_ENABLE=1, settle, reboot, auto-reconnect,
+  // reload params. This is the one reboot in the Lua lifecycle (SCR_ENABLE
+  // is AP_PARAM_FLAG_ENABLE — only takes effect at boot). Returns true once
+  // the FC is back with scripting enabled. The drone-settings page uses the
+  // same sequence for its toggle; a field-install flow calls this so the
+  // operator doesn't have to detour through settings.
+  async function enableScripting(): Promise<boolean> {
+    const res = await setParam('SCR_ENABLE', 1, MAV_PARAM_TYPE_INT8)
+    if (!res.acked)
+      return false
+    await sleep(STORAGE_SETTLE_MS)
+    await session.reboot()
+    const back = await autoReconnect()
+    if (!back)
+      return false
+    params.clear()
+    await params.load()
+    return true
   }
 
   // Upload a Lua applet to the FC. Ensures the APM/ + APM/scripts/
@@ -177,6 +208,41 @@ export function useLuaEngine() {
         return
       throw e
     })
+  }
+
+  // Upload a Lua module (a `require`-able dependency, e.g. crsf_helper) to
+  // scripts/modules/. Used by install-and-keep field wizards that ship a
+  // helper alongside their applet. Ensures the directory tree exists.
+  async function uploadModule(name: string, source: string | Uint8Array): Promise<void> {
+    const bytes = typeof source === 'string'
+      ? new TextEncoder().encode(source)
+      : source
+    const ftp = getFtp()
+    for (const dir of ['APM', 'APM/scripts', MODULES_DIR]) {
+      await ftp.createDirectory(dir).catch((e) => {
+        if (e instanceof MavFtpError && e.errCode === 8)
+          return
+        throw e
+      })
+    }
+    await ftp.uploadFile(modulePath(name), bytes)
+  }
+
+  // Is a wizard's applet currently present on the FC? Install-and-keep
+  // (field / CRSF) wizards use this to show install status. Uses a
+  // directory LISTING (a session-less FTP op) rather than opening the
+  // file — opening leaves a file session that wedges a following install.
+  // Any FTP error is treated as "not installed"; install is idempotent.
+  async function isAppletInstalled(wizardId: string): Promise<boolean> {
+    const ftp = getFtp()
+    const target = appletFilename(wizardId)
+    try {
+      const entries = await ftp.listDirectory('APM/scripts')
+      return entries.some(e => !e.isDir && e.name === target)
+    }
+    catch {
+      return false
+    }
   }
 
   // Restart the FC's Lua scripting engine so a freshly-uploaded applet
@@ -329,9 +395,13 @@ export function useLuaEngine() {
   return {
     appletFilename,
     appletPath,
+    modulePath,
     checkScripting,
+    enableScripting,
     uploadApplet,
     removeApplet,
+    uploadModule,
+    isAppletInstalled,
     restartScripting,
     readParam,
     waitForControlParam,

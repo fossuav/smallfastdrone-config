@@ -116,6 +116,38 @@ interface FtpResponse {
   data: Uint8Array
 }
 
+// One entry from listDirectory().
+export interface FtpDirEntry {
+  name: string
+  isDir: boolean
+  // Size in bytes for files; undefined for directories.
+  size?: number
+}
+
+// Parse a LIST_DIRECTORY data blob into entries. The blob is null-separated
+// records, each "F<name>\t<size>" (file) or "D<name>" (directory) — see
+// GCS_FTP.cpp gen_dir_entry. Unknown/empty records are skipped.
+function parseDirEntries(data: Uint8Array): FtpDirEntry[] {
+  const text = new TextDecoder().decode(data)
+  const out: FtpDirEntry[] = []
+  for (const record of text.split('\0')) {
+    if (record.length < 2)
+      continue
+    const kind = record[0]
+    const rest = record.slice(1)
+    if (kind === 'D') {
+      out.push({ name: rest, isDir: true })
+    }
+    else if (kind === 'F') {
+      const tab = rest.indexOf('\t')
+      const name = tab >= 0 ? rest.slice(0, tab) : rest
+      const size = tab >= 0 ? Number.parseInt(rest.slice(tab + 1), 10) : undefined
+      out.push({ name, isDir: false, size: Number.isNaN(size) ? undefined : size })
+    }
+  }
+  return out
+}
+
 export class MavFtp {
   // Sequence counter — incremented per request. Each request frame
   // carries the current seq; the server's response carries seq+1 per
@@ -214,6 +246,35 @@ export class MavFtp {
     finally {
       await this.sendOp(FTP_OP.TERMINATE_SESSION, session, 0, EMPTY).catch(() => {})
     }
+  }
+
+  // List a directory's entries. A session-less op (unlike download, which
+  // opens a file session) so it doesn't tie up an FC FTP session. Pages
+  // through with `offset` = entries-to-skip until the FC returns an EOF
+  // NAK. Throws MavFtpError (FailErrno) if the directory doesn't exist.
+  // Entry wire format (GCS_FTP.cpp gen_dir_entry): null-separated, each
+  // "F<name>\t<size>" for a file or "D<name>" for a directory.
+  async listDirectory(remotePath: string): Promise<FtpDirEntry[]> {
+    const out: FtpDirEntry[] = []
+    let offset = 0
+    while (true) {
+      let resp: FtpResponse
+      try {
+        resp = await this.sendOp(FTP_OP.LIST_DIRECTORY, 0, offset, encodePath(remotePath))
+      }
+      catch (e) {
+        // EOF NAK = we've paged past the last entry.
+        if (e instanceof MavFtpError && e.errCode === 6)
+          break
+        throw e
+      }
+      const entries = parseDirEntries(resp.data.subarray(0, resp.size))
+      if (entries.length === 0)
+        break
+      out.push(...entries)
+      offset += entries.length
+    }
+    return out
   }
 
   // Delete a file at the given remote path. Throws MavFtpError with

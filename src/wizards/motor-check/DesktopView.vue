@@ -47,6 +47,7 @@ import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import MotorCheck3D from '../../ui/visuals/MotorCheck3D.vue'
+import { useLuaEngine } from '../../workflow/lua-engine'
 import {
   applyReverseMask,
   collectMotorChannels,
@@ -57,6 +58,8 @@ import {
 } from '../../workflow/motor-check'
 import { expectedSpin, frameGeometry, frameVariants, motorTopdownXY, positionLabel, spinLabel } from '../../workflow/motor-geometry'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../../workflow/reconnect'
+import appletSource from './applet.lua?raw'
+import helperSource from './crsf_helper.lua?raw'
 
 const WIZARD_ID = 'motor-check'
 const COMP_ID_AUTOPILOT = 1
@@ -76,6 +79,7 @@ const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
 const { autoReconnect } = useReconnect()
+const lua = useLuaEngine()
 
 const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
 
@@ -114,6 +118,88 @@ const justFixed = ref(false)
 function motorExpectedSpin(m: FrameMotor): Spin {
   const geo = geometry.value
   return geo ? expectedSpin(m, propsOut.value, geo) : m.spin
+}
+
+// --- Field (radio / CRSF) version: install-and-keep lifecycle ---
+// The same check, installed on the FC so it can be run from the radio's
+// CRSF menu at the field with no laptop. Install uploads the applet + its
+// helper and restarts scripting to load it; it stays until removed.
+type FieldStatus
+  = | 'checking' | 'unavailable' | 'scripting-off' | 'enabling'
+    | 'not-installed' | 'installing' | 'installed' | 'removing' | 'error'
+const fieldStatus = ref<FieldStatus>('checking')
+const fieldError = ref<string | null>(null)
+
+// Probe scripting + whether the applet is already on the FC. The
+// existence check uses a directory listing (session-less), so it doesn't
+// wedge the FTP session a subsequent install needs.
+async function checkFieldStatus() {
+  fieldStatus.value = 'checking'
+  fieldError.value = null
+  try {
+    const scr = await lua.checkScripting()
+    if (!scr.available)
+      fieldStatus.value = 'unavailable'
+    else if (!scr.enabled)
+      fieldStatus.value = 'scripting-off'
+    else
+      fieldStatus.value = (await lua.isAppletInstalled(WIZARD_ID)) ? 'installed' : 'not-installed'
+  }
+  catch (e) {
+    fieldStatus.value = 'error'
+    fieldError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+// Turn scripting on (write + reboot + reconnect), then install. Lets the
+// operator install the field version without a detour through settings.
+async function enableAndInstall() {
+  fieldStatus.value = 'enabling'
+  fieldError.value = null
+  const ok = await lua.enableScripting()
+  if (!ok) {
+    fieldStatus.value = 'error'
+    fieldError.value = 'Couldn\'t turn on scripting and reconnect. Try the Drone settings page.'
+    return
+  }
+  await installField()
+}
+
+// Upload the applet + helper and load them (no reboot — scripting restart
+// rescans). Leaves them installed for field use.
+async function installField() {
+  fieldStatus.value = 'installing'
+  fieldError.value = null
+  try {
+    await lua.uploadModule('crsf_helper.lua', helperSource)
+    await lua.uploadApplet(WIZARD_ID, appletSource)
+    await lua.restartScripting()
+    fieldStatus.value = 'installed'
+  }
+  catch (e) {
+    fieldStatus.value = 'error'
+    fieldError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+// Remove the applet and rescan so it leaves the radio menu. The shared
+// crsf_helper module is left in place (other field wizards may use it).
+async function removeField() {
+  fieldStatus.value = 'removing'
+  fieldError.value = null
+  try {
+    await lua.removeApplet(WIZARD_ID)
+    await lua.restartScripting()
+    fieldStatus.value = 'not-installed'
+  }
+  catch (e) {
+    fieldStatus.value = 'error'
+    fieldError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+function goToSettings() {
+  router.push('/settings')
 }
 
 // What the operator reported, keyed by test order.
@@ -163,6 +249,9 @@ onMounted(async () => {
     motors.value = geo.motors
     frameLabel.value = geo.label
     phase.value = 'safety'
+    // Probe the field-install status in the background; the safety screen
+    // shows its panel as soon as this resolves.
+    void checkFieldStatus()
   }
   catch (e) {
     phase.value = 'error'
@@ -588,6 +677,72 @@ function labelStyle(angleDeg: number): Record<string, string> {
         <UButton color="primary" :disabled="!propsOff" @click="start">
           Start motor check
         </UButton>
+      </div>
+
+      <!-- Field version: install on the radio's menu for no-laptop use. -->
+      <div class="border-default mt-2 space-y-2 rounded-lg border border-dashed p-3">
+        <div class="flex items-center gap-2">
+          <UIcon name="i-lucide-radio" class="text-info size-4" />
+          <span class="text-default text-sm font-medium">Run this at the field (no laptop)</span>
+        </div>
+        <p class="text-muted text-xs">
+          Install this check on your radio so you can run it from the
+          transmitter's own menu — handy after a field repair or motor swap.
+        </p>
+
+        <div v-if="fieldStatus === 'checking'" class="text-muted flex items-center gap-2 text-xs">
+          <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Checking…
+        </div>
+        <UAlert
+          v-else-if="fieldStatus === 'unavailable'"
+          color="neutral"
+          variant="subtle"
+          description="This drone's firmware doesn't support scripting, so the field version isn't available."
+        />
+        <div v-else-if="fieldStatus === 'scripting-off'" class="space-y-2">
+          <p class="text-muted text-xs">
+            This needs Lua scripting on. We can turn it on for you — it restarts
+            your drone (a few seconds) and reconnects automatically.
+          </p>
+          <div class="flex items-center justify-between gap-2">
+            <UButton size="xs" color="neutral" variant="ghost" @click="goToSettings">
+              Drone settings
+            </UButton>
+            <UButton size="sm" color="info" icon="i-lucide-download" @click="enableAndInstall">
+              Enable scripting &amp; install
+            </UButton>
+          </div>
+        </div>
+        <div v-else-if="fieldStatus === 'enabling'" class="text-muted flex items-center gap-2 text-xs">
+          <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Turning on scripting + restarting…
+        </div>
+        <div v-else-if="fieldStatus === 'not-installed'" class="flex justify-end">
+          <UButton size="sm" color="info" icon="i-lucide-download" @click="installField">
+            Install on radio
+          </UButton>
+        </div>
+        <div v-else-if="fieldStatus === 'installing'" class="text-muted flex items-center gap-2 text-xs">
+          <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Installing…
+        </div>
+        <div v-else-if="fieldStatus === 'installed'" class="space-y-2">
+          <p class="text-success flex items-center gap-1.5 text-xs">
+            <UIcon name="i-lucide-circle-check" class="size-3.5 shrink-0" />
+            <span>Installed — find <strong>Motor check</strong> in your radio's menu.</span>
+          </p>
+          <div class="flex justify-end">
+            <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-trash-2" @click="removeField">
+              Remove from radio
+            </UButton>
+          </div>
+        </div>
+        <div v-else-if="fieldStatus === 'removing'" class="text-muted flex items-center gap-2 text-xs">
+          <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Removing…
+        </div>
+        <UAlert
+          v-else-if="fieldStatus === 'error'"
+          color="warning"
+          :description="fieldError ?? 'Something went wrong with the field install.'"
+        />
       </div>
     </div>
 
