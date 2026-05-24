@@ -37,6 +37,7 @@ When implementing UI, ask: *would a non-expert operator understand this and feel
 
 - [PLAN.md](PLAN.md) — phase plan, decisions log, scope.
 - [PROGRESS.md](PROGRESS.md) — current state of the build. Update when you finish a milestone or change scope.
+- [TODO.md](TODO.md) — deferred issues & papercuts consciously parked for later. Not the roadmap (that's PLAN.md) — the holding pen so known rough edges don't get lost.
 - [docs/UX.md](docs/UX.md) — operator-first design principles, visual language, microcopy rules, expert mode, anti-patterns. **Read before touching any UI.**
 - [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md) — adopted Vue / TS / formatter standards. **Read before writing any code.** Lists the "AI slop" patterns to avoid.
 - [docs/TESTING.md](docs/TESTING.md) — test pyramid, SFD submodule + SITL, bridge, per-phase test acceptance. **Read before writing tests or new protocol/workflow code.**
