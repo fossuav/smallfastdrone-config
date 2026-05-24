@@ -4,12 +4,18 @@ Single source of truth for what's been done, what's in flight, and what's blocke
 
 Update alongside any meaningful change. Keep entries short. This file replaces memory storage for project state — don't store progress in `~/.claude/projects/.../memory/`.
 
-## Status: Planning
+## Status: Phase 3 in progress
 
-Project is at the planning stage. No application code exists yet. The repo currently contains:
+Phases 0–2 are complete: scaffold + test infra, MAVLink session + full param browser, and the pluggable wizard runtime + library + bringup meta-wizard. Phase 3 (first Lua engine + recipe-style wizards) is underway. Landed ahead of / across their formal phases:
 
-- Plan and architecture docs (this directory)
-- LICENSE, README.md (stubs)
+- **Lua engine** (`src/workflow/lua-engine.ts`): FTP upload → `MAV_CMD_SCRIPTING` restart → wait-for-control-param, validated end-to-end against SITL by the **imu-noise** Lua wizard (the "first Lua-engine wizard" Phase 3 item).
+- **Drone-settings page** (`src/views/SettingsView.vue`): operator feature toggles → write + reboot + **auto-reconnect** pattern (scripting is the first toggle).
+- **Motor-check** bringup wizard (BRINGUP phase 04): props-off motor test against SITL, blind identify → report; correction maths (`src/workflow/motor-check.ts`) done + unit-tested but **not yet wired into the UI**.
+- **Vitest** is set up (first unit tests in the repo).
+
+**Next session — start here:** motor-check **slice 2b** = wire `computeCorrections()` into the wizard. Turn the review screen from *report* → *fix*: apply the `SERVOn_FUNCTION` remap + `SERVO_BLH_RVMASK` toggle (XOR the `reverseChannels` bits into the current mask), then reboot + auto-reconnect (reuse the flow in `SettingsView.vue`) + re-verify. **Direction correction is hardware-only** — `SERVO_BLH_RVMASK` isn't compiled into SITL, so gate it on the param's presence; only the order remap is SITL-testable. After that: hex/octo geometry in `motor-geometry.ts`, then chain motor-check into the bringup meta (`src/wizards/bringup/DesktopView.vue` `SUB_WIZARD_IDS`). Still not started overall: recipe wizards (cinewhoop / throw / failsafes), Phases 4–6, CI workflow.
+
+Not yet built: LICENSE is real; the security seam (Phase 5) and MSP/BLHeli (Phase 6) are design-only.
 
 ## Phases
 
@@ -18,8 +24,8 @@ Project is at the planning stage. No application code exists yet. The repo curre
 | Planning | ✅ Complete (2026-05-15) | Initial plan, architecture, bringup, security docs in place |
 | Phase 0 — Scaffolding | ✅ Complete (2026-05-18) | All 13 planned slices landed (scaffold, lint, UI lib, router+views, Pinia+expert, SFD submodule + SITL, transport + bridge, MAVLink heartbeat, AUTOPILOT_VERSION, Playwright E2E, Tres.js 3D drone + logo, WebSerial, PWA). HTTPS dev (mkcert) plugin is installed but disabled — re-enable when WebAuthn / remote-key-exchange / LAN device testing actually needs HTTPS. |
 | Phase 1 — MAVLink + params | ✅ Complete (2026-05-19) | node-mavlink (Phase 0), heartbeat + AUTOPILOT_VERSION (Phase 0). Full param browser: fetch, metadata-driven descriptions / units / range hints / enum dropdowns / decoded bitmasks, inline edit + dirty tracking + per-row undo + Discard, Apply (PARAM_SET ack + PREFLIGHT_STORAGE) with per-row state icons + summary banner. 5 E2E tests covering connect, browse, edit, enum dropdown, and Apply. |
-| Phase 2 — Bringup wizard | ✅ Complete (2026-05-20) | Pluggable wizard runtime + library + runner + `frame-select` + `pid-autotune-pro` locked stub (slice A); `preflight` sub-wizard + `bringup` meta-wizard chaining the two with returnTo plumbing + per-FC completion tracker backed by localStorage + library Done badges + dynamic outcomes (slice B). 10 Playwright tests green. IndexedDB upgrade + full sub-wizard set (sensors, RC, motors, failsafes, …) land in later slices alongside the wizards that need them. |
-| Phase 3 — Recipe library | ⏳ Not started | SFD-flavoured tuning recipes, dry-run + commit |
+| Phase 2 — Bringup wizard | ✅ Complete (2026-05-20) | Pluggable wizard runtime + library + runner + `frame-select` + `pid-autotune-pro` locked stub (slice A); `preflight` sub-wizard + `bringup` meta-wizard chaining the two (slice B). Later slices added more bringup sub-wizards: `imu-noise` (Lua), `motor-check` (BRINGUP phase 04), plus the drone-settings page. The bringup meta currently chains `preflight` + `frame-select`; `motor-check` is standalone in the library until hex/octo geometry lands. |
+| Phase 3 — Recipe library + first Lua engine | 🔄 In progress | **Done:** Lua engine (FTP + scripting-restart) + first Lua wizard `imu-noise` end-to-end vs SITL. **Pending:** recipe-style desktop wizards (cinewhoop / throw / failsafes); motor-check auto-correction (slice 2b). |
 | Phase 4 — Log handling | ⏳ Not started | LOG_REQUEST_LIST/DATA pull, handoff to analysis-private |
 | Phase 5 — DFU + Security seam | ⏳ Not started | WebUSB DFU flashing of SFD firmware via SignedArtifactUploader; no direct upload paths |
 | Phase 6 — MSP + BLHeli passthrough | ⏳ Not started | Minimal MSP for BLHeli entry; full 4-way for ESC settings + firmware flash |
@@ -32,8 +38,9 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 | SITL build orchestration | ✅ Landed (slice 7) | `bun run sitl:build` / `start` / `stop`. `dev-setup.sh` checks for gcc/g++/python3/ccache and warns if missing. |
 | SITL bridge (`test/sitl/bridge.ts`) | ✅ Landed (slice 9-10) | Zero-dep Bun script; verified end-to-end forwarding SITL bytes to a WS client |
 | Transport abstraction (incl. `WebSocketTransport`) | ✅ Landed (slice 9-10) | `src/transport/{types,websocket,webserial,select}.ts`; URL-param picker (`?transport=websocket&host=...`); WebSerial is stubbed until there's bench hardware |
-| Playwright E2E (first test) | ✅ Landed | `playwright.config.ts` with two webServers (SITL+bridge, Vite); `test/e2e/connect.spec.ts` drives the connect → heartbeat → AUTOPILOT_VERSION flow against real SITL. Runs in ~17 s. |
-| CI workflow | ⏳ Not started | Submodule checkout, ccache, layered test runs |
+| Playwright E2E | ✅ Landed | `playwright.config.ts` with two webServers (SITL+bridge, Vite); shared SITL, serial (`workers: 1`). 14 specs covering connect, params, wizards (frame-select, bringup meta, imu-noise scripting-off + live, motor-check), settings reboot. SITL boots a **quad X** (`sitl-start.sh` FRAME_TYPE=1 overlay) + scripts symlink for Lua FTP. |
+| Vitest unit tests | ✅ Landed | `vitest.config.ts` (node env, `test/unit/**`); `bun run test:unit`. First specs: `test/unit/motor-check.spec.ts` (6 tests on the correction maths). |
+| CI workflow | ⏳ Not started | Submodule checkout, ccache, layered test runs (lint, typecheck, unit, e2e). |
 
 ## Recent log
 

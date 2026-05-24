@@ -128,25 +128,23 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 
 ## Available commands
 
-To be filled in as Phase 0 lands. Anticipated:
+Actual `package.json` scripts (run with `bun run <name>`):
 
-- `bun run setup` — runs `scripts/dev-setup.sh` — idempotent install of all dev prerequisites (bun, project deps, and — as slices land — node, mkcert, Playwright browsers, SITL build deps)
-- `bun install` — install project deps only
-- `git submodule update --init --recursive` — pull SFD submodule (first checkout)
-- `bun dev` — Vite dev server (HTTPS via mkcert)
-- `bun run build` — production build
-- `bun run lint` — ESLint (antfu config) — lint + format check
-- `bun run lint:fix` — auto-fix
-- `bun run typecheck` — vue-tsc
-- `bun run sitl:build` — build SITL from `vendor/smallfastdrone/`
-- `bun run sitl:start` — start SITL listening on TCP 5760
-- `bun run sitl:stop` — stop SITL
-- `bun run test` — unit + integration
-- `bun run test:unit` — Vitest unit only, watch mode
-- `bun run test:integration` — Vitest integration (requires SITL built)
-- `bun run test:e2e` — Playwright (auto-starts bridge + SITL)
-- `bun run test:e2e:headed` — E2E with visible browser
-- `bun run test:hil` — hardware-in-the-loop (skipped in CI)
+- `bun run setup` — `scripts/dev-setup.sh`; idempotent dev-prereq install (submodule init, Playwright Chromium, SITL build-dep checks)
+- `bun install` — project deps only
+- `bun dev` — Vite dev server on :5173 (plain HTTP; mkcert installed but disabled — see vite.config.ts)
+- `bun run dev:sitl` — Vite + a background SITL together
+- `bun run build` / `bun run preview` — production build (vue-tsc + vite) / preview it
+- `bun run typecheck` — `vue-tsc -b --noEmit`
+- `bun run lint` / `bun run lint:fix` — ESLint (antfu config: lint + format)
+- `bun run test:unit` / `bun run test:unit:watch` — Vitest unit tests (`test/unit/**`, pure logic)
+- `bun run test:e2e` / `:headed` / `:debug` — Playwright; auto-starts SITL + bridge + Vite
+- `bun run sitl:build` / `sitl:start` / `sitl:stop` — build / run (TCP 5760, boots **quad X**) / stop SITL
+- `bun run bridge:start` — WebSocket↔TCP bridge for the browser (ws :5761 → SITL :5760)
+- `bun run ftp:smoke` — MAVLink-FTP round-trip smoke test against a running SITL
+- `bun run params:rebuild` — regenerate `src/protocol/param-metadata.json` from the submodule (after a bump)
+
+Not yet present (planned — see PLAN.md / docs/TESTING.md): `test:integration`, `test:hil`, a combined `test`, and the CI workflow.
 
 ## Out of scope (don't drift here)
 
