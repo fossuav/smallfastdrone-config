@@ -159,6 +159,11 @@ No flight, no scripting. Pure client-side compute + param writes. Examples: fram
 
 The Vue view *is* the engine — runtime provides the session store, param store, and completion hooks; the view drives.
 
+**Reboot-driving desktop wizards.** Some desktop wizards write reboot-required params and must restart the FC mid-flow (e.g. motor-check applies a `SERVOn_FUNCTION` remap + `SERVO_BLH_RVMASK` toggle, both reboot-required, then re-checks). The reboot + auto-reconnect sequence is shared — use `useReconnect()` from `src/workflow/reconnect.ts` (settle → `session.reboot()` → retry connect+heartbeat through the restart window → reload params), the same primitive the drone-settings page uses. Two rules:
+
+- A wizard that restarts the FC owns its own connection state for the duration. `WizardRunnerView` keeps a mounted wizard view alive across a transient connectivity drop — it does **not** tear the view down when prereqs briefly fail, only when the route id changes or the wizard is locked/unknown. (Tearing down mid-reboot would re-mount a fresh instance that races the in-flight reload.)
+- After the restart, re-verify rather than assume: drop the operator back to the start of the check so the fix is confirmed against the live FC, not trusted blind.
+
 ## Views
 
 ### Desktop view (required)

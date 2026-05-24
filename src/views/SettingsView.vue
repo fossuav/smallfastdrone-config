@@ -42,6 +42,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { buildParamSet, MSGID_PARAM_VALUE } from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
+import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../workflow/reconnect'
 
 // Hardcoded scripting toggle. When a second toggle lands this lifts
 // into a FeatureToggle interface + a registry; for one entry the inline
@@ -53,18 +54,10 @@ const TOGGLE = {
 } as const
 const COMP_ID_AUTOPILOT = 1
 const PARAM_ACK_TIMEOUT_MS = 1500
-// After PARAM_SET, wait before rebooting. ArduPilot auto-saves on
-// PARAM_SET but SITL's storage backend batches the write; rebooting
-// immediately races the flush. Imperceptible on real hardware.
-const STORAGE_SETTLE_MS = 1500
-// Auto-reconnect budget after a reboot. The FC needs a few seconds to
-// come back; we retry connect+heartbeat until this elapses.
-const RECONNECT_BUDGET_MS = 60_000
-const RECONNECT_RETRY_MS = 1500
-const HEARTBEAT_WAIT_MS = 5000
 
 const session = useSessionStore()
 const params = useParamsStore()
+const { autoReconnect } = useReconnect()
 
 type Phase
   = | 'checking'
@@ -245,84 +238,10 @@ async function reconnectAndFinish() {
   phase.value = 'idle'
 }
 
-// Wait for the reboot-induced transport drop, then retry connect +
-// heartbeat on a fixed cadence until a heartbeat lands or the budget
-// runs out. Each attempt disconnects first so we never reconnect onto
-// a half-open transport from a failed prior attempt.
-async function autoReconnect(): Promise<boolean> {
-  await waitForDisconnect(10_000)
-  const deadline = Date.now() + RECONNECT_BUDGET_MS
-  while (Date.now() < deadline) {
-    await session.disconnect().catch(() => {})
-    await session.connect().catch(() => {})
-    if (session.connected) {
-      const gotHeartbeat = await waitForHeartbeat(HEARTBEAT_WAIT_MS)
-      if (gotHeartbeat && session.sysid !== null)
-        return true
-    }
-    await sleep(RECONNECT_RETRY_MS)
-  }
-  return false
-}
-
 // Manual fallback from the reconnect-failed state — re-run the
 // reconnect loop on operator demand.
 function retryReconnect() {
   void reconnectAndFinish()
-}
-
-// Resolve once the transport drops (session.connected false), or after
-// a timeout. After session.reboot() the FC takes a moment to actually
-// exit; we wait for the drop before attempting reconnect so we don't
-// race the still-alive pre-reboot connection.
-function waitForDisconnect(timeoutMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    if (!session.connected) {
-      resolve()
-      return
-    }
-    let stop: (() => void) | null = null
-    const timer = setTimeout(() => {
-      stop?.()
-      resolve()
-    }, timeoutMs)
-    stop = watch(() => session.connected, (connected) => {
-      if (!connected) {
-        clearTimeout(timer)
-        stop?.()
-        resolve()
-      }
-    })
-  })
-}
-
-// Resolve once a fresh heartbeat sets session.sysid, or after a
-// timeout. session.connect() resolves on transport-open (before the
-// first heartbeat), and params.load() bails when sysid is null — so we
-// gate the reload on the heartbeat.
-function waitForHeartbeat(timeoutMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (session.sysid !== null) {
-      resolve(true)
-      return
-    }
-    let stop: (() => void) | null = null
-    const timer = setTimeout(() => {
-      stop?.()
-      resolve(false)
-    }, timeoutMs)
-    stop = watch(() => session.sysid, (sysid) => {
-      if (sysid !== null) {
-        clearTimeout(timer)
-        stop?.()
-        resolve(true)
-      }
-    })
-  })
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 // Cancel a pending change before it's applied — forget the operator

@@ -22,7 +22,7 @@
 // supplies the title bar and a back affordance.
 
 import type { Component } from 'vue'
-import { computed, ref, shallowRef, watchEffect } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useSessionStore } from '../stores/session'
 import {
@@ -38,6 +38,11 @@ const session = useSessionStore()
 // observed — defeats their internal optimisations).
 const desktopView = shallowRef<Component | null>(null)
 const loadError = ref<string | null>(null)
+// Which wizard id `desktopView` was mounted for. Lets us keep a running
+// wizard mounted across a transient connectivity drop (see watcher).
+const mountedId = ref<string | null>(null)
+// True once a view is mounted — the running wizard owns the screen.
+const hasView = computed(() => desktopView.value !== null)
 
 // The current wizard id from the URL (/wizard/:id).
 const wizardId = computed(() => String(route.params.id ?? ''))
@@ -67,21 +72,45 @@ const prereqs = computed(() =>
 // library so the experience is consistent.
 const isLocked = computed(() => wizard.value?.manifest.locked === true)
 
-// Kick the DesktopView loader once we have a manifest, prereqs pass,
-// and the wizard isn't locked. Re-runs if any of those change (route
-// flips to a different id, operator connects, etc.).
-watchEffect(async () => {
-  desktopView.value = null
-  loadError.value = null
-  if (!wizard.value || isLocked.value || !prereqs.value.ok)
-    return
-  try {
-    desktopView.value = await wizard.value.loadDesktopView()
-  }
-  catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-  }
-})
+// Load the DesktopView once we have a manifest, prereqs pass, and the
+// wizard isn't locked. Crucially, once a view is mounted we keep it —
+// even if prereqs transiently fail — until the route id changes or the
+// wizard becomes locked/unknown. A running wizard owns its own
+// connection state: some (motor-check correction, anything reboot-
+// required) deliberately drop the link to restart the FC, and must not
+// be torn down and re-mounted mid-flight. Watching the specific signals
+// (not watchEffect) keeps body reads of desktopView/mountedId untracked.
+watch(
+  [wizardId, isLocked, () => prereqs.value.ok, () => Boolean(wizard.value)],
+  async ([id, locked, prereqOk, haveWizard], prev) => {
+    if (!haveWizard || locked) {
+      desktopView.value = null
+      mountedId.value = null
+      loadError.value = null
+      return
+    }
+    // Route moved to a different wizard — drop the old view.
+    if (prev && id !== prev[0]) {
+      desktopView.value = null
+      mountedId.value = null
+    }
+    // Already mounted for this wizard — keep it across transient prereq
+    // drops (e.g. the wizard is rebooting the FC).
+    if (mountedId.value === id && desktopView.value)
+      return
+    if (!prereqOk)
+      return
+    loadError.value = null
+    try {
+      desktopView.value = await wizard.value!.loadDesktopView()
+      mountedId.value = id
+    }
+    catch (e) {
+      loadError.value = e instanceof Error ? e.message : String(e)
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -133,6 +162,22 @@ watchEffect(async () => {
       </p>
     </UCard>
 
+    <!-- Happy path: a mounted wizard's DesktopView. Checked before the
+         prereqs card so a running wizard that briefly drops connectivity
+         (e.g. while it restarts the FC) keeps its screen instead of
+         bouncing to "not ready". -->
+    <UCard v-else-if="hasView">
+      <template #header>
+        <div class="flex items-center gap-3">
+          <UIcon :name="wizard.manifest.hero" class="text-primary size-6" />
+          <h1 class="text-highlighted text-xl font-semibold">
+            {{ wizard.manifest.title }}
+          </h1>
+        </div>
+      </template>
+      <component :is="desktopView" />
+    </UCard>
+
     <!-- Prereqs aren't satisfied — show what's missing in plain language. -->
     <UCard v-else-if="!prereqs.ok">
       <template #header>
@@ -166,8 +211,7 @@ watchEffect(async () => {
       </p>
     </UCard>
 
-    <!-- Happy path: mount the wizard's DesktopView in a card with the
-         manifest's title as the header. -->
+    <!-- Prereqs pass but the view module is still loading. -->
     <UCard v-else>
       <template #header>
         <div class="flex items-center gap-3">
@@ -177,8 +221,7 @@ watchEffect(async () => {
           </h1>
         </div>
       </template>
-      <component :is="desktopView" v-if="desktopView" />
-      <div v-else class="text-muted py-12 text-center text-sm">
+      <div class="text-muted py-12 text-center text-sm">
         Loading…
       </div>
     </UCard>
