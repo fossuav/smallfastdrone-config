@@ -66,14 +66,31 @@ export interface FrameGeometry {
   frameType: number
   // Operator-facing frame name, e.g. "Quad X".
   label: string
+  // Short layout-family name for fix microcopy, e.g. "Betaflight". The
+  // layouts differ by motor order / direction; this is what we tell the
+  // operator we're switching their drone to.
+  layoutName: string
+  // Propeller orientation: false = props-in (ArduPilot default), true =
+  // props-out (Betaflight default). Equivalent to every motor's spin being
+  // flipped relative to the props-in variant of the same order.
+  propsOut: boolean
   // Motors in test order.
   motors: FrameMotor[]
 }
 
-// FRAME_CLASS / FRAME_TYPE values we map (from AP_Motors enums).
+// FRAME_CLASS / FRAME_TYPE values we map. Transcribed from the
+// motor_frame_type enum in AP_Motors_Class.h — the integer values are NOT
+// sequential by family, so each is taken from the firmware directly
+// (getting one wrong sets the wrong frame, which flips a drone).
 const FRAME_CLASS_QUAD = 1
 const FRAME_TYPE_PLUS = 0
 const FRAME_TYPE_X = 1
+const FRAME_TYPE_H = 3 // X order, props-out
+const FRAME_TYPE_PLUSREV = 6 // plus, props-out
+const FRAME_TYPE_BF_X = 12 // Betaflight order
+const FRAME_TYPE_DJI_X = 13 // DJI order
+const FRAME_TYPE_CW_X = 14 // clockwise-from-front-right order
+const FRAME_TYPE_BF_X_REV = 18 // Betaflight order, props-out
 
 // Map an airframe angle to an operator-facing position label. The quad
 // frames only ever use the eight cardinal/intercardinal angles below.
@@ -123,13 +140,45 @@ function motor(testOrder: number, motorIndex: number, angleDeg: number, spin: Sp
   return { testOrder, motorIndex, angleDeg, position: positionForAngle(angleDeg), spin }
 }
 
-// Quad X — AP_MotorsMatrix.cpp MOTOR_FRAME_TYPE_X. Motor order matches
-// the firmware add order (index 0..3); diagonals share a direction
-// (FR+RL CCW, FL+RR CW), the canonical quad-X layout.
+// Canonical props-IN spin for each airframe position, read off the
+// firmware's default X and PLUS tables. Every props-in quad variant (X,
+// BF_X, DJI_X, CW_X) shares this position→spin map; props-out is every
+// entry flipped. The wizard uses this so "which way should it turn?"
+// follows the props-in/out choice rather than a specific frame type.
+const SPIN_IN: Record<MotorPosition, Spin> = {
+  'front': 'cw',
+  'front-right': 'ccw',
+  'right': 'ccw',
+  'rear-right': 'cw',
+  'rear': 'cw',
+  'rear-left': 'ccw',
+  'left': 'ccw',
+  'front-left': 'cw',
+}
+
+// Expected spin for a position given the propeller orientation. props-out
+// is simply the mirror of props-in.
+export function spinForPosition(position: MotorPosition, propsOut: boolean): Spin {
+  const inSpin = SPIN_IN[position]
+  if (!propsOut)
+    return inSpin
+  return inSpin === 'cw' ? 'ccw' : 'cw'
+}
+
+// All quad layouts we recognise, transcribed in test order from the
+// MotorDef tables in AP_MotorsMatrix.cpp setup_quad_matrix(). Each is a
+// distinct motor order and/or props orientation; the wizard matches an
+// operator's observed wiring against these to offer "switch to a standard
+// layout" before falling back to a custom output remap.
+//
+// props-in family (X / Betaflight / DJI / clockwise) and their props-out
+// counterparts (H / Betaflight-rev), plus the cardinal + frames.
 const QUAD_X: FrameGeometry = {
   frameClass: FRAME_CLASS_QUAD,
   frameType: FRAME_TYPE_X,
   label: 'Quad X',
+  layoutName: 'ArduPilot standard',
+  propsOut: false,
   motors: [
     motor(1, 0, 45, 'ccw'), // front-right
     motor(2, 3, 135, 'cw'), // rear-right
@@ -138,12 +187,88 @@ const QUAD_X: FrameGeometry = {
   ],
 }
 
-// Quad Plus — AP_MotorsMatrix.cpp MOTOR_FRAME_TYPE_PLUS. Arms aligned to
-// the cardinal axes.
+// X order with every motor reversed — the props-out counterpart of X.
+const QUAD_H: FrameGeometry = {
+  frameClass: FRAME_CLASS_QUAD,
+  frameType: FRAME_TYPE_H,
+  label: 'Quad X (props out)',
+  layoutName: 'ArduPilot, props out',
+  propsOut: true,
+  motors: [
+    motor(1, 0, 45, 'cw'),
+    motor(2, 3, 135, 'ccw'),
+    motor(3, 1, -135, 'cw'),
+    motor(4, 2, -45, 'ccw'),
+  ],
+}
+
+// Betaflight motor order (props in).
+const QUAD_BF_X: FrameGeometry = {
+  frameClass: FRAME_CLASS_QUAD,
+  frameType: FRAME_TYPE_BF_X,
+  label: 'Quad X (Betaflight order)',
+  layoutName: 'Betaflight',
+  propsOut: false,
+  motors: [
+    motor(1, 1, 45, 'ccw'),
+    motor(2, 0, 135, 'cw'),
+    motor(3, 2, -135, 'ccw'),
+    motor(4, 3, -45, 'cw'),
+  ],
+}
+
+// Betaflight order, motors reversed — Betaflight's own default (props out).
+const QUAD_BF_X_REV: FrameGeometry = {
+  frameClass: FRAME_CLASS_QUAD,
+  frameType: FRAME_TYPE_BF_X_REV,
+  label: 'Quad X (Betaflight, props out)',
+  layoutName: 'Betaflight, props out',
+  propsOut: true,
+  motors: [
+    motor(1, 1, 45, 'cw'),
+    motor(2, 0, 135, 'ccw'),
+    motor(3, 2, -135, 'cw'),
+    motor(4, 3, -45, 'ccw'),
+  ],
+}
+
+// DJI motor order (props in).
+const QUAD_DJI_X: FrameGeometry = {
+  frameClass: FRAME_CLASS_QUAD,
+  frameType: FRAME_TYPE_DJI_X,
+  label: 'Quad X (DJI order)',
+  layoutName: 'DJI',
+  propsOut: false,
+  motors: [
+    motor(1, 0, 45, 'ccw'),
+    motor(2, 3, 135, 'cw'),
+    motor(3, 2, -135, 'ccw'),
+    motor(4, 1, -45, 'cw'),
+  ],
+}
+
+// Clockwise-from-front-right order (motor numbers follow test order).
+const QUAD_CW_X: FrameGeometry = {
+  frameClass: FRAME_CLASS_QUAD,
+  frameType: FRAME_TYPE_CW_X,
+  label: 'Quad X (clockwise order)',
+  layoutName: 'Clockwise',
+  propsOut: false,
+  motors: [
+    motor(1, 0, 45, 'ccw'),
+    motor(2, 1, 135, 'cw'),
+    motor(3, 2, -135, 'ccw'),
+    motor(4, 3, -45, 'cw'),
+  ],
+}
+
+// Quad Plus — arms on the cardinal axes (props in).
 const QUAD_PLUS: FrameGeometry = {
   frameClass: FRAME_CLASS_QUAD,
   frameType: FRAME_TYPE_PLUS,
   label: 'Quad +',
+  layoutName: 'Plus',
+  propsOut: false,
   motors: [
     motor(1, 2, 0, 'cw'), // front
     motor(2, 0, 90, 'ccw'), // right
@@ -152,11 +277,41 @@ const QUAD_PLUS: FrameGeometry = {
   ],
 }
 
-const GEOMETRIES: FrameGeometry[] = [QUAD_X, QUAD_PLUS]
+// Quad Plus, motors reversed (props out).
+const QUAD_PLUSREV: FrameGeometry = {
+  frameClass: FRAME_CLASS_QUAD,
+  frameType: FRAME_TYPE_PLUSREV,
+  label: 'Quad + (props out)',
+  layoutName: 'Plus, props out',
+  propsOut: true,
+  motors: [
+    motor(1, 2, 0, 'ccw'),
+    motor(2, 0, 90, 'cw'),
+    motor(3, 3, 180, 'ccw'),
+    motor(4, 1, -90, 'cw'),
+  ],
+}
+
+const GEOMETRIES: FrameGeometry[] = [
+  QUAD_X,
+  QUAD_H,
+  QUAD_BF_X,
+  QUAD_BF_X_REV,
+  QUAD_DJI_X,
+  QUAD_CW_X,
+  QUAD_PLUS,
+  QUAD_PLUSREV,
+]
 
 // Look up the geometry for a connected FC's FRAME_CLASS / FRAME_TYPE.
 // Returns null for frames we don't have a transcribed table for yet, so
 // the wizard can say so rather than guess.
 export function frameGeometry(frameClass: number, frameType: number): FrameGeometry | null {
   return GEOMETRIES.find(g => g.frameClass === frameClass && g.frameType === frameType) ?? null
+}
+
+// Every standard layout for a frame class — the candidate set the
+// correction planner matches an operator's observed wiring against.
+export function frameVariants(frameClass: number): FrameGeometry[] {
+  return GEOMETRIES.filter(g => g.frameClass === frameClass)
 }

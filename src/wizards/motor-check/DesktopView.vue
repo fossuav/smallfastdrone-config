@@ -22,9 +22,14 @@
 // it turned. Observations are compared against the firmware frame
 // geometry and reported per motor.
 //
-// This slice detects + reports. Auto-correction (output remap via
-// SERVOn_FUNCTION + direction reverse via SERVO_BLH_RVMASK, with a
-// reboot) lands in a follow-up; see docs/WIZARDS.md.
+// When something's wrong the review screen turns from report into fix:
+// computeCorrections() works out the SERVOn_FUNCTION remap (motor order)
+// and the SERVO_BLH_RVMASK toggle (spin direction); "Fix this for me"
+// writes them, restarts the drone (both are reboot-required), reconnects
+// automatically, and drops the operator back to re-run the check.
+// Direction correction needs the reverse-mask param, which only exists on
+// builds with BLHeli support (absent in SITL) — so it's gated on the live
+// FC exposing it; order remap always works. See docs/WIZARDS.md.
 //
 // Spinning goes through MAV_CMD_DO_MOTOR_TEST (props off, landed, safety
 // off). An emergency Stop is always one tap away while a motor is live,
@@ -33,7 +38,8 @@
 
 import type { CommandAck } from 'mavlink-mappings/dist/lib/common'
 import type { MotorVisual } from '../../ui/visuals/MotorCheck3D.vue'
-import type { FrameMotor, MotorPosition, Spin } from '../../workflow/motor-geometry'
+import type { CorrectionPlan } from '../../workflow/motor-check'
+import type { FrameGeometry, FrameMotor, MotorPosition, Spin } from '../../workflow/motor-geometry'
 import { PerspectiveCamera, Vector3 } from 'three'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -42,7 +48,16 @@ import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import MotorCheck3D from '../../ui/visuals/MotorCheck3D.vue'
-import { frameGeometry, motorTopdownXY, positionLabel, spinLabel } from '../../workflow/motor-geometry'
+import {
+  applyReverseMask,
+  collectMotorChannels,
+  planCorrection,
+  remapParamEdits,
+  REVERSE_MASK_PARAM,
+  servoFunctionParam,
+} from '../../workflow/motor-check'
+import { frameGeometry, frameVariants, motorTopdownXY, positionLabel, spinForPosition, spinLabel } from '../../workflow/motor-geometry'
+import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../../workflow/reconnect'
 
 const WIZARD_ID = 'motor-check'
 const COMP_ID_AUTOPILOT = 1
@@ -60,10 +75,13 @@ const params = useParamsStore()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
+const { autoReconnect } = useReconnect()
 
 const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
 
-type Phase = 'loading' | 'unsupported' | 'safety' | 'testing' | 'review' | 'error'
+type Phase
+  = | 'loading' | 'unsupported' | 'safety' | 'testing' | 'review'
+    | 'correcting' | 'restarting' | 'reconnect-failed' | 'error'
 const phase = ref<Phase>('loading')
 const errorMessage = ref<string | null>(null)
 
@@ -74,8 +92,19 @@ const motors = ref<FrameMotor[]>([])
 const frameLabel = ref('')
 // X-frame model rotated 45° for a Plus frame so its arms meet the rings.
 const bodyYawDeg = ref(0)
+// Full geometry kept so the review step can compute corrections.
+const geometry = ref<FrameGeometry | null>(null)
 
 const propsOff = ref(false)
+// Propeller orientation the operator is building for. Default props-in
+// (ArduPilot standard); the toggle switches to props-out (Betaflight
+// standard), which flips every motor's expected spin and targets a
+// props-out frame type.
+const propsOut = ref(false)
+// The fix plan for a failed check (null while all-clear / before review).
+const plan = ref<CorrectionPlan | null>(null)
+// Set after a fix + restart so the re-run safety screen says so.
+const justFixed = ref(false)
 
 // What the operator reported, keyed by test order.
 interface Observation { position: MotorPosition, spin: Spin }
@@ -116,6 +145,7 @@ onMounted(async () => {
       return
     }
     // geo.motors is already in test order (clockwise from front-right).
+    geometry.value = geo
     motors.value = geo.motors
     frameLabel.value = geo.label
     bodyYawDeg.value = frameType === FRAME_TYPE_PLUS ? 45 : 0
@@ -177,6 +207,7 @@ async function stopActiveMotor() {
 function start() {
   observations.value = new Map()
   stepIndex.value = 0
+  justFixed.value = false
   phase.value = 'testing'
   void enterStep()
 }
@@ -192,7 +223,9 @@ async function enterStep() {
   // way; the operator only changes them if reality differs.
   const prior = observations.value.get(m.testOrder)
   selPosition.value = prior?.position ?? m.position
-  selSpin.value = prior?.spin ?? m.spin
+  // Expected spin follows the props-in/out choice, not the FC's current
+  // frame — so toggling props-out flips what "correct" looks like.
+  selSpin.value = prior?.spin ?? spinForPosition(m.position, propsOut.value)
   await spinCurrent()
 }
 
@@ -253,6 +286,8 @@ async function emergencyStop() {
   spinning.value = false
 }
 
+// Per-motor report shown in the review. Position is judged against the
+// current frame; spin against the chosen props orientation.
 interface Result { motor: FrameMotor, observed: Observation | undefined, positionOk: boolean, spinOk: boolean }
 const results = computed<Result[]>(() =>
   motors.value.map((motor) => {
@@ -261,16 +296,31 @@ const results = computed<Result[]>(() =>
       motor,
       observed,
       positionOk: observed?.position === motor.position,
-      spinOk: observed?.spin === motor.spin,
+      spinOk: observed?.spin === spinForPosition(motor.position, propsOut.value),
     }
   }),
 )
-const allOk = computed(() => results.value.every(r => r.positionOk && r.spinOk))
 
 function finish() {
   spinning.value = false
   phase.value = 'review'
-  if (allOk.value) {
+  // Work out the fix: read each motor channel's current output function and
+  // plan against the standard layouts for this frame class, in the chosen
+  // props orientation. Prefers a single FRAME_TYPE change over a remap.
+  const geo = geometry.value
+  plan.value = geo
+    ? planCorrection(
+        geo,
+        observations.value,
+        collectMotorChannels((channel) => {
+          const p = params.params.get(servoFunctionParam(channel))
+          return p ? Math.trunc(p.value) : undefined
+        }),
+        propsOut.value,
+        frameVariants(geo.frameClass),
+      )
+    : null
+  if (plan.value?.kind === 'none') {
     wizardProgress.markComplete(
       session.fcUid,
       WIZARD_ID,
@@ -279,10 +329,128 @@ function finish() {
   }
 }
 
+const allOk = computed(() => plan.value?.kind === 'none')
+const isInconsistent = computed(() => plan.value?.kind === 'inconsistent')
+const isFrameTypeFix = computed(() => plan.value?.kind === 'frame-type')
+const isRemapFix = computed(() => plan.value?.kind === 'remap')
+
+// Does the FC expose the reverse-mask param (BLHeli builds only)? Gates
+// whether we can auto-correct an individual motor's spin direction.
+const rvmaskPresent = computed(() => params.params.has(REVERSE_MASK_PARAM))
+
+// The plan's per-motor reverse list (a frame-type fix's residual, or the
+// direction half of a remap fix).
+const reverseChannels = computed<number[]>(() =>
+  plan.value && (plan.value.kind === 'frame-type' || plan.value.kind === 'remap')
+    ? plan.value.reverseChannels
+    : [],
+)
+// A frame-type fix that actually switches layout (vs one whose only change
+// is reversing a motor).
+const changesFrame = computed(() =>
+  plan.value?.kind === 'frame-type' && plan.value.frameType !== geometry.value?.frameType,
+)
+const remapsOutputs = computed(() =>
+  plan.value?.kind === 'remap' && plan.value.remap.length > 0,
+)
+// Reverses we can't apply because the FC has no reverse-mask param.
+const directionUnfixable = computed(() => reverseChannels.value.length > 0 && !rvmaskPresent.value)
+// Anything we can actually write?
+const canAutoFix = computed(() =>
+  changesFrame.value
+  || remapsOutputs.value
+  || (reverseChannels.value.length > 0 && rvmaskPresent.value),
+)
+
+// Operator-facing description of the fix.
+const fixSummary = computed(() => {
+  const p = plan.value
+  if (!p)
+    return ''
+  const reverses = rvmaskPresent.value ? reverseChannels.value.length : 0
+  if (p.kind === 'frame-type') {
+    const base = changesFrame.value
+      ? `Your motors match the ${p.layoutName} layout — we'll switch your drone to it`
+      : 'We\'ll correct your motors'
+    const extra = reverses > 0 ? ` and reverse ${reverses} ${reverses === 1 ? 'motor' : 'motors'}` : ''
+    return `${base}${extra}, then restart your drone.`
+  }
+  const parts: string[] = []
+  if (remapsOutputs.value && p.kind === 'remap')
+    parts.push(`${p.remap.length} ${p.remap.length === 1 ? 'motor is' : 'motors are'} wired to the wrong spot`)
+  if (reverses > 0)
+    parts.push(`${reverses} ${reverses === 1 ? 'motor is' : 'motors are'} spinning the wrong way`)
+  if (parts.length === 0)
+    return 'We found something to correct.'
+  const list = parts.join(' and ')
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)}. We'll correct it and restart your drone.`
+})
+
+// Apply the computed fix: write the order remap (and, where supported, the
+// direction reverse), then restart the drone — both params take effect
+// only after a reboot — reconnect, and drop back to re-run the check. We
+// clear any stray pending edits first so only the motor fix gets written.
+async function applyCorrections() {
+  const p = plan.value
+  if (!p || p.kind === 'none' || p.kind === 'inconsistent' || phase.value === 'correcting')
+    return
+  params.discardAll()
+  if (p.kind === 'frame-type' && changesFrame.value)
+    params.setEdit('FRAME_TYPE', p.frameType)
+  if (p.kind === 'remap') {
+    for (const edit of remapParamEdits(p.remap))
+      params.setEdit(edit.name, edit.value)
+  }
+  if (rvmaskPresent.value && reverseChannels.value.length > 0) {
+    const current = Math.trunc(params.params.get(REVERSE_MASK_PARAM)!.value)
+    params.setEdit(REVERSE_MASK_PARAM, applyReverseMask(current, reverseChannels.value))
+  }
+  if (params.dirtyCount === 0)
+    return
+
+  phase.value = 'correcting'
+  errorMessage.value = null
+  await params.apply()
+  if (params.lastApplyFailed > 0) {
+    params.discardAll()
+    phase.value = 'review'
+    errorMessage.value = 'We couldn\'t save the fix to your drone. Check the connection and try again.'
+    return
+  }
+
+  phase.value = 'restarting'
+  await sleep(STORAGE_SETTLE_MS)
+  await session.reboot()
+  await reconnectThenReverify()
+}
+
+// Manual fallback from reconnect-failed — re-run the reconnect loop.
+function retryReconnect() {
+  void reconnectThenReverify()
+}
+
+// Wait for the drone back, reload its params, and return to the safety
+// gate so the operator confirms the fix worked. Falls to reconnect-failed
+// if it doesn't come back in time.
+async function reconnectThenReverify() {
+  phase.value = 'restarting'
+  const back = await autoReconnect()
+  if (!back) {
+    phase.value = 'reconnect-failed'
+    errorMessage.value = 'Your drone restarted but we couldn\'t reconnect. Make sure it\'s powered, then try again.'
+    return
+  }
+  params.clear()
+  await params.load()
+  justFixed.value = true
+  runAgain()
+}
+
 function runAgain() {
   observations.value = new Map()
   stepIndex.value = 0
   spinning.value = false
+  plan.value = null
   phase.value = 'safety'
 }
 
@@ -296,8 +464,9 @@ function leave() {
 const displaySpin = computed<Spin>(() => {
   if (selSpin.value)
     return selSpin.value
-  const sel = motors.value.find(m => m.position === selPosition.value)
-  return sel?.spin ?? currentMotor.value?.spin ?? 'cw'
+  if (selPosition.value)
+    return spinForPosition(selPosition.value, propsOut.value)
+  return 'cw'
 })
 
 // 3D states. While testing, the graphic mirrors the operator's answer:
@@ -307,7 +476,7 @@ const displaySpin = computed<Spin>(() => {
 const motorVisuals = computed<MotorVisual[]>(() =>
   motors.value.map((m) => {
     let state: MotorVisual['state'] = 'idle'
-    let spin = m.spin
+    let spin = spinForPosition(m.position, propsOut.value)
     if (phase.value === 'testing') {
       if (m.position === selPosition.value) {
         state = 'active'
@@ -367,6 +536,13 @@ function labelStyle(angleDeg: number): Record<string, string> {
     <!-- safety gate -->
     <div v-else-if="phase === 'safety'" class="space-y-4">
       <UAlert
+        v-if="justFixed"
+        color="success"
+        icon="i-lucide-circle-check"
+        title="Fix applied — let's check again"
+        description="We corrected the wiring and restarted your drone. Run the check once more to confirm everything's right."
+      />
+      <UAlert
         color="error"
         icon="i-lucide-triangle-alert"
         title="Remove all propellers first"
@@ -382,6 +558,16 @@ function labelStyle(angleDeg: number): Record<string, string> {
         <span class="text-default text-sm">
           I've removed all propellers.
         </span>
+      </div>
+      <div class="border-default flex items-center justify-between gap-3 rounded-lg border p-3">
+        <div>
+          <span class="text-default text-sm font-medium">Props-out build</span>
+          <p class="text-muted text-xs">
+            Turn on if your propellers spin outward at the front — the Betaflight
+            default. Most builds are props-in; leave this off if you're not sure.
+          </p>
+        </div>
+        <USwitch v-model="propsOut" color="primary" aria-label="Props-out build" />
       </div>
       <div class="flex justify-end gap-2">
         <UButton color="neutral" variant="ghost" @click="leave">
@@ -516,47 +702,120 @@ function labelStyle(angleDeg: number): Record<string, string> {
       </div>
 
       <div v-else class="space-y-3">
+        <!-- answers don't form a valid layout — no safe fix to offer -->
         <UAlert
+          v-if="isInconsistent"
           color="warning"
           icon="i-lucide-triangle-alert"
-          title="Some motors need attention"
-          description="Here's what doesn't match how your drone is set up. Auto-fixing this lands in the next update; for now, check the wiring and prop direction for the motors below."
+          title="Those answers don't add up"
+          description="A couple of motors were reported in the same spot, so we can't work out a safe fix. Give it another go, watching each motor carefully."
         />
-        <ul class="space-y-2">
-          <li
-            v-for="r in results"
-            :key="r.motor.testOrder"
-            class="border-default flex items-start gap-2 rounded-lg border p-2 text-sm"
-          >
-            <UIcon
-              :name="r.positionOk && r.spinOk ? 'i-lucide-check' : 'i-lucide-x'"
-              :class="r.positionOk && r.spinOk ? 'text-success' : 'text-error'"
-              class="mt-0.5 size-4 shrink-0"
-            />
-            <div>
-              <span class="text-highlighted font-medium">Motor {{ r.motor.motorIndex + 1 }}</span>
-              <span class="text-muted"> ({{ positionLabel(r.motor.position) }})</span>
-              <span v-if="r.positionOk && r.spinOk" class="text-muted"> — correct</span>
-              <template v-else>
-                <span v-if="!r.positionOk" class="text-error">
-                  — you saw it move at {{ r.observed ? positionLabel(r.observed.position) : 'nowhere' }}
-                </span>
-                <span v-else-if="!r.spinOk" class="text-error">
-                  — turning {{ r.observed ? spinLabel(r.observed.spin) : '?' }},
-                  should be {{ spinLabel(r.motor.spin) }}
-                </span>
-              </template>
-            </div>
-          </li>
-        </ul>
+
+        <!-- observed wiring matches a standard layout — switch to it -->
+        <template v-else-if="isFrameTypeFix">
+          <UAlert
+            color="primary"
+            icon="i-lucide-wand-2"
+            title="Your motors match a standard layout"
+            :description="fixSummary"
+          />
+          <UAlert
+            v-if="directionUnfixable"
+            color="info"
+            icon="i-lucide-info"
+            title="One motor can't be reversed automatically here"
+            description="This drone can't reverse a motor from software. To flip a motor's spin, swap any two of its three wires (or change it in your ESC setup), then run this check again."
+          />
+        </template>
+
+        <!-- non-standard wiring — remap individual outputs + report -->
+        <template v-else-if="isRemapFix">
+          <UAlert
+            color="warning"
+            icon="i-lucide-wrench"
+            title="Some motors need attention"
+            :description="fixSummary"
+          />
+          <UAlert
+            v-if="directionUnfixable"
+            color="info"
+            icon="i-lucide-info"
+            title="Direction can't be fixed automatically here"
+            description="This drone can't reverse a motor from software. To flip a motor's spin, swap any two of its three wires (or change it in your ESC setup), then run this check again."
+          />
+          <ul class="space-y-2">
+            <li
+              v-for="r in results"
+              :key="r.motor.testOrder"
+              class="border-default flex items-start gap-2 rounded-lg border p-2 text-sm"
+            >
+              <UIcon
+                :name="r.positionOk && r.spinOk ? 'i-lucide-check' : 'i-lucide-x'"
+                :class="r.positionOk && r.spinOk ? 'text-success' : 'text-error'"
+                class="mt-0.5 size-4 shrink-0"
+              />
+              <div>
+                <span class="text-highlighted font-medium">Motor {{ r.motor.motorIndex + 1 }}</span>
+                <span class="text-muted"> ({{ positionLabel(r.motor.position) }})</span>
+                <span v-if="r.positionOk && r.spinOk" class="text-muted"> — correct</span>
+                <template v-else>
+                  <span v-if="!r.positionOk" class="text-error">
+                    — you saw it move at {{ r.observed ? positionLabel(r.observed.position) : 'nowhere' }}
+                  </span>
+                  <span v-else-if="!r.spinOk" class="text-error">
+                    — turning {{ r.observed ? spinLabel(r.observed.spin) : '?' }},
+                    should be {{ spinLabel(spinForPosition(r.motor.position, propsOut)) }}
+                  </span>
+                </template>
+              </div>
+            </li>
+          </ul>
+        </template>
       </div>
+
+      <UAlert v-if="errorMessage" color="error" :description="errorMessage" />
 
       <div class="flex justify-end gap-2">
         <UButton color="neutral" variant="ghost" @click="runAgain">
           Run again
         </UButton>
-        <UButton color="primary" @click="leave">
+        <UButton v-if="canAutoFix" color="primary" icon="i-lucide-wand-2" @click="applyCorrections">
+          Fix this for me
+        </UButton>
+        <UButton v-else color="primary" @click="leave">
           Back to library
+        </UButton>
+      </div>
+    </div>
+
+    <!-- correcting: writing the fix -->
+    <div v-else-if="phase === 'correcting'" class="py-8 text-center text-muted">
+      <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin" />
+      <p class="mt-2 text-sm">
+        Saving the fix to your drone…
+      </p>
+    </div>
+
+    <!-- restarting: reboot + automatic reconnect -->
+    <div v-else-if="phase === 'restarting'">
+      <UAlert
+        color="info"
+        icon="i-lucide-loader-circle"
+        title="Restarting your drone…"
+        description="The connection will drop for a few seconds while it restarts. We'll reconnect automatically and check the motors again — no need to do anything."
+      />
+    </div>
+
+    <!-- reconnect-failed: auto-reconnect gave up, manual fallback -->
+    <div v-else-if="phase === 'reconnect-failed'" class="space-y-3">
+      <UAlert color="warning" title="Couldn't reconnect automatically">
+        <template #description>
+          {{ errorMessage }}
+        </template>
+      </UAlert>
+      <div class="flex justify-end">
+        <UButton color="primary" @click="retryReconnect">
+          Reconnect
         </UButton>
       </div>
     </div>

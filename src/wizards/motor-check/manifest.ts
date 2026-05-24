@@ -16,8 +16,10 @@
 // Manifest for the motor-check wizard (bringup phase 04, see
 // docs/BRINGUP.md). Spins each motor in turn and has the operator confirm
 // it's in the right place and turning the right way — the classic
-// "props off, which one moved?" check. This slice detects and reports;
-// auto-correction (output remap + DShot reverse) lands in a follow-up.
+// "props off, which one moved?" check — then offers to fix what's wrong:
+// a SERVOn_FUNCTION remap for motor order, and a SERVO_BLH_RVMASK toggle
+// for spin direction (where the FC supports it), both applied with a
+// restart + re-check.
 //
 // requires_props_off is the load-bearing flag here: this is the one
 // bringup wizard that physically spins motors.
@@ -32,10 +34,10 @@ export const manifest: WizardManifest = {
   hero: 'i-lucide-fan',
   outcome: 'Every motor is in the right place and spinning the right way.',
   engines: [{ kind: 'desktop' }],
-  // Reads the frame layout to know the motor map; the detection slice
-  // writes nothing. The correction slice adds SERVOn_FUNCTION +
-  // SERVO_BLH_RVMASK here.
-  owns_params: ['FRAME_CLASS', 'FRAME_TYPE'],
+  // Reads the frame layout to know the motor map; the fix step writes the
+  // affected SERVOn_FUNCTION channels (which ones depends on the wiring
+  // error, so they aren't listed literally) plus SERVO_BLH_RVMASK.
+  owns_params: ['FRAME_CLASS', 'FRAME_TYPE', 'SERVO_BLH_RVMASK'],
   prerequisites: [
     { kind: 'connected', message: 'Your drone needs to be connected.' },
     { kind: 'heartbeat', message: 'Waiting to hear from your drone — give it a moment after plugging in.' },

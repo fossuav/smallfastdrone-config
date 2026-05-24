@@ -97,6 +97,14 @@ The **only** reboot in the Lua flow is the one-time **enable** of `SCR_ENABLE` w
 
 The "scripting isn't enabled" fallback path is still covered separately (`test/e2e/imu-noise-wizard.spec.ts`, against stock SITL with `SCR_ENABLE=0`). Because the shared SITL instance carries scripting state across specs, the live spec is named to sort *after* the specs that assert scripting is off, and tolerates scripting being already on.
 
+## BLHeli params in SITL
+
+Stock SITL doesn't compile AP_BLHeli (`HAVE_AP_BLHELI_SUPPORT = HAL_SUPPORT_RCOUT_SERIAL`, 0 for the sim), so the `SERVO_BLH_*` parameters — including `SERVO_BLH_RVMASK`, which the motor-check wizard uses to reverse a motor's spin direction — don't exist there. The motor-check direction-reverse fix therefore can't be exercised on the pinned submodule.
+
+The **`blheli-sitl` SFD branch** (in `vendor/smallfastdrone/`) turns it on: it defines `HAL_SUPPORT_RCOUT_SERIAL` for SITL and makes AP_BLHeli compile off-hardware (guarding `UDID_START`, fixing a non-portable `%08lx`). Build SITL from that branch and `SERVO_BLH_RVMASK` appears. The branch is **unpushed and the submodule pointer is not bumped to it** — so CI and fresh clones build stock SITL without the params. Until the branch is pushed and the submodule bumped, the direction-reverse fix is only verified locally.
+
+Tests are written to tolerate both: the motor-check direction spec (`wizard-motor-check.spec.ts`) asserts *either* the software-reverse fix is offered (BLHeli build) *or* the manual-fix guidance is shown (stock). Props-out correction is a plain `FRAME_TYPE` change needing no reverse mask, so that path is testable on stock SITL.
+
 ## SITL bridge
 
 SITL exposes MAVLink over TCP. The browser PWA speaks WebSerial in production. For E2E, we use a small bridge:

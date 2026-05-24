@@ -149,8 +149,13 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
   - `first-flight-failsafes`
 - First **Lua-engine** wizard end-to-end: exercises the install / arm / run / uninstall lifecycle in [docs/WIZARDS.md](docs/WIZARDS.md). Candidate: a between-flights `throw-readiness-check` that monitors throw-detect thresholds during a test toss without taking off.
 - Lua lifecycle plumbing in the runtime: MAVLink FTP upload of `applet.lua`, `SCR_ENABLE` orchestration (with single operator confirm + reboot if currently off), `WIZ_<ID>_ACTIVE` control param, applet-file removal on completion, orphan detection at reconnect.
+- **Bringup sub-wizard build-out.** The bringup meta (Phase 2) grows as each sub-wizard lands. In this phase:
+  - `motor-check` (BRINGUP phase 04) — desktop-engine, props-off motor test that catches mis-wires:
+    - slice 1 / 2a (done): blind detect → per-motor report against the firmware mixer geometry; correction maths computed + unit-tested.
+    - slice 2b (done): `planCorrection` turns the report into a fix — **prefer switching `FRAME_TYPE`** to a standard layout (X/H, Betaflight, DJI, clockwise, +/+rev) that matches the observed wiring + the operator's **props-in/out** choice; fall back to a custom `SERVOn_FUNCTION` remap; reverse residual individual motors via `SERVO_BLH_RVMASK`. Then reboot + auto-reconnect (`useReconnect`) + re-check. Props-out is a one-param FRAME_TYPE change (no reverse mask); RVMASK direction-reverse needs BLHeli, enabled in SITL via the `blheli-sitl` branch.
+    - then: hex/octo geometry in `motor-geometry.ts`, then chain `motor-check` into the bringup meta (`SUB_WIZARD_IDS`).
 
-**Done when:** Operator can run any of the desktop wizards through to commit, and the Lua-engine wizard runs end-to-end against SITL with scripting enabled — applet uploaded, runs, completes, uninstalls cleanly. SITL log shows no orphan script after completion.
+**Done when:** Operator can run any of the desktop wizards through to commit; the Lua-engine wizard runs end-to-end against SITL with scripting enabled — applet uploaded, runs, completes, uninstalls cleanly (SITL log shows no orphan script after completion); and `motor-check` turns its per-motor report into a committed fix (order remap re-verified against SITL).
 
 ### Phase 4 — Log handling + first log-engine wizard
 - Pull .bin via `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`.
@@ -197,7 +202,7 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
 **Open:**
 - **WebSerial UX.** Browsers re-prompt for USB permission per origin per session; document for operators. (Transport landed; real-hardware verification pending.)
 - **MAVLink dialect drift.** Smallfastdrone may add custom messages; keep dialect XML a build-time import, not vendored TS.
-- **Motor-check correction is partly hardware-only.** Order remap (`SERVOn_FUNCTION`) is SITL-testable; direction reverse (`SERVO_BLH_RVMASK`) is **not** — AP_BLHeli isn't compiled into SITL (`HAVE_AP_BLHELI_SUPPORT = HAL_SUPPORT_RCOUT_SERIAL`), so the param is absent in SITL. Slice 2b gates direction-fix on the param's presence; hardware-verified.
+- **Motor-check correction — props-out via FRAME_TYPE, direction-reverse via BLHeli.** The planner prefers a single `FRAME_TYPE` change to a standard layout (X/H, Betaflight, DJI, clockwise, +/+rev) that matches the observed wiring + the operator's props-in/out choice; it falls back to a custom `SERVOn_FUNCTION` remap, and uses `SERVO_BLH_RVMASK` only to reverse residual individual motors. Order remap + props-out (FRAME_TYPE) are SITL-testable on stock SITL. Direction reverse (RVMASK) needs BLHeli, which stock SITL doesn't compile (`HAVE_AP_BLHELI_SUPPORT = HAL_SUPPORT_RCOUT_SERIAL`) — the **`blheli-sitl` SFD branch** turns it on (see SITL test environment). The wizard gates the reverse path on the param's presence, so it degrades to manual guidance on builds without it.
 - **WebUSB device-claim conflicts (Phase 5).** FC enumerates as CDC-ACM (WebSerial) vs DFU (WebUSB) at different times; permission state may not transfer. Document the disconnect/reconnect dance.
 - **Protocol mode switching on a single port (Phase 6).** MAVLink → MSP → 4-way → MAVLink mid-session; need clean transitions + a guaranteed exit path so a half-finished BLHeli session doesn't strand the FC.
 - **ESC firmware blob source + provenance (Phase 6).** Bundle, fetch on demand, or operator-supplied? Decide at Phase 6 entry.
@@ -205,6 +210,7 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
 ## SITL test environment (quick reference for the next session)
 
 - `bun run sitl:start` boots ArduCopter SITL on TCP 5760 as a **quad X** (FRAME_CLASS=1, FRAME_TYPE=1 via a defaults overlay; `--model X` physics), in a temp workdir, wrapped so `PREFLIGHT_REBOOT_SHUTDOWN` restarts it (for reboot flows). It symlinks `./scripts → APM/scripts` so Lua FTP uploads load.
+- **`blheli-sitl` SFD branch** (in `vendor/smallfastdrone/`, 2 commits, unpushed): enables `HAL_SUPPORT_RCOUT_SERIAL` for SITL + makes AP_BLHeli compile off-hardware, so SITL exposes the `SERVO_BLH_*` params (the motor-check direction-reverse fix needs `SERVO_BLH_RVMASK`). The submodule pointer in this repo is **not** bumped to it — build SITL from the branch locally to test direction-fix; CI uses the pinned stock commit until the branch is pushed + the submodule bumped. Push it to turn into a PR.
 - Playwright auto-starts SITL + the WebSocket bridge (`scripts/test-sitl-bridge.sh`) and Vite; one shared SITL, serial execution — **specs leak FC state** (frame, scripting, params), so ordering matters (see notes in the spec headers).
 - `pymavlink` is available at `/home/andy/venv-ardupilot/` for ad-hoc probing against SITL.
 
