@@ -16,8 +16,8 @@
 
 // Wizard phase progress rail — the "where am I in this flow" indicator
 // docs/UX.md asks every multi-phase wizard to carry. A horizontal row of
-// numbered steps: completed steps go gold with a tick (brand "done"
-// colour), the current step is primary, upcoming steps are muted. Labels
+// numbered steps: completed steps go green with a tick (matching the "Done"
+// badges across the app), the current step is primary, upcoming steps muted. Labels
 // hide on narrow screens, leaving the numbered dots. Purely presentational
 // — the owning wizard maps its internal phase to a step index and passes
 // it in, so this component knows nothing about any particular wizard.
@@ -46,7 +46,7 @@ function stateOf(i: number): State {
 // picks up every class.
 function circleClass(i: number): string {
   switch (stateOf(i)) {
-    case 'done': return 'border-secondary/40 bg-secondary/10 text-secondary'
+    case 'done': return 'border-success/50 bg-success/15 text-success'
     case 'active': return 'border-primary bg-primary/10 text-primary'
     default: return 'border-default text-muted'
   }
@@ -56,9 +56,9 @@ function labelClass(i: number): string {
   return stateOf(i) === 'active' ? 'text-highlighted font-medium' : 'text-muted'
 }
 
-// Connector to the right of a step: gold once that step is done.
+// Connector to the right of a step: green once that step is done.
 function lineClass(i: number): string {
-  return i < props.current ? 'bg-secondary/40' : 'bg-muted'
+  return i < props.current ? 'bg-success/40' : 'bg-muted'
 }
 
 const lastIndex = computed(() => props.steps.length - 1)

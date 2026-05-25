@@ -20,14 +20,19 @@
 // a done-state, selecting one shows that area's CURRENT CONFIG pulled live
 // from the FC plus the area's wizard full-width beneath. Buys back the
 // horizontal real estate the narrow centered runner card wastes, and turns
-// the journey into a live config dashboard. Reachable from the wizard
-// library's "preview" link; not yet wired into the real bringup flow —
-// staged so we can react to it before committing (docs: demonstrate then
-// iterate). If it sticks, it folds into wizards/bringup.
+// the journey into a live config dashboard.
+//
+// Tab selection is route-backed (/bringup?area=<id>) so each tab is a real,
+// directly-clickable, deep-linkable destination and browser back/forward
+// works between areas. The route also carries returnTo=/bringup so the
+// inline wizards' own back/cancel/done paths return here rather than dumping
+// the operator at the library. Not yet wired into the real bringup flow —
+// staged behind the library's preview link; folds into wizards/bringup if it
+// sticks (docs: demonstrate then iterate).
 
 import type { Component } from 'vue'
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onMounted, shallowRef, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
 import { useWizardProgressStore } from '../stores/wizardProgress'
@@ -39,41 +44,69 @@ import { getWizard } from '../workflow/wizard-runtime'
 const session = useSessionStore()
 const params = useParamsStore()
 const progress = useWizardProgressStore()
+const route = useRoute()
+const router = useRouter()
 
-// The bringup areas, in order — same chain as the real meta-wizard.
+// The bringup areas, in order — same chain as the real meta-wizard. NOTE:
+// pre-arm readiness is deliberately NOT surfaced here — that's a pre-first-
+// flight gate, not an opening-step concern (a fresh drone can't be arm-ready
+// before it's configured). The opening pre-flight area reports hardware
+// sanity (sensors present + healthy); a future "Ready for first flight" area
+// owns the arm checks. See docs/BRINGUP.md.
 const AREA_IDS = ['preflight', 'frame-select', 'motor-check'] as const
+
+// Core sensors the opening pre-flight check cares about (operator labels).
+const SENSOR_LABELS: Record<string, string> = {
+  gyro: 'Gyro',
+  accel: 'Accelerometer',
+  mag: 'Compass',
+  baro: 'Barometer',
+}
 
 function val(name: string): number | undefined {
   return params.effectiveValue(name)
 }
 
-// One-line "current config" per area, read live from the FC. This is the
-// headline of the ribbon: the operator sees the state of each area at a
-// glance, in plain language, without opening the wizard.
-const summaries = computed<Record<string, string>>(() => {
-  // Pre-flight: overall sensor readiness.
-  let preflight = 'Waiting for sensor status…'
-  if (session.subsystems.length > 0)
-    preflight = session.readyToArm ? 'All checks passing — ready to arm' : 'Some checks not passing yet'
+interface ConfigField { label: string, value: string }
 
-  // Frame: the configured layout name.
-  let frame = 'Not set yet'
+// Structured "current config" per area, read live from the FC — the headline
+// of the ribbon: the operator sees the state of each area at a glance, in
+// plain language, without opening the wizard.
+const config = computed<Record<string, ConfigField[]>>(() => {
+  // Pre-flight: core-sensor health (not arm readiness — see note above).
+  let sensors = 'Waiting for status…'
+  if (session.subsystems.length > 0) {
+    const bad = session.subsystems
+      .filter(s => s.key in SENSOR_LABELS && s.state === 'unhealthy')
+      .map(s => SENSOR_LABELS[s.key])
+    sensors = bad.length === 0 ? 'All healthy' : `${bad.join(', ')} need attention`
+  }
+  const preflight: ConfigField[] = [
+    { label: 'Vehicle', value: session.vehicleLabel ?? '—' },
+    { label: 'Sensors', value: sensors },
+  ]
+
+  // Frame: configured layout + motor count.
+  const frame: ConfigField[] = []
   const cls = val('FRAME_CLASS')
   const typ = val('FRAME_TYPE')
-  if (cls !== undefined && typ !== undefined)
-    frame = frameGeometry(Math.trunc(cls), Math.trunc(typ))?.label ?? `Frame ${Math.trunc(cls)} / ${Math.trunc(typ)}`
+  const geo = cls !== undefined && typ !== undefined ? frameGeometry(Math.trunc(cls), Math.trunc(typ)) : null
+  frame.push({ label: 'Layout', value: geo?.label ?? (cls === undefined ? 'Not set yet' : `Frame ${Math.trunc(cls)} / ${Math.trunc(typ ?? 0)}`) })
+  if (geo)
+    frame.push({ label: 'Motors', value: String(geo.motors.length) })
 
-  // Motors: ESC protocol + telemetry, plus the check result if we have one.
-  let motors = 'Not set up yet'
+  // Motors: ESC protocol + telemetry + the order/direction check result.
+  const motors: ConfigField[] = []
   const pwm = val(MOT_PWM_TYPE_PARAM)
-  if (pwm !== undefined) {
-    const proto = protocolLabel(Math.trunc(pwm))
-    const rpm = isDshot(Math.trunc(pwm)) && Math.trunc(val(BIDIR_MASK_PARAM) ?? 0) > 0
-    motors = rpm ? `${proto} · RPM telemetry on` : proto
+  if (pwm === undefined) {
+    motors.push({ label: 'ESCs', value: 'Not set up yet' })
   }
-  const motorCheck = progress.getCompletion(session.fcUid, 'motor-check')
-  if (motorCheck)
-    motors += ' · all check out'
+  else {
+    motors.push({ label: 'Protocol', value: protocolLabel(Math.trunc(pwm)) })
+    if (isDshot(Math.trunc(pwm)))
+      motors.push({ label: 'Telemetry', value: Math.trunc(val(BIDIR_MASK_PARAM) ?? 0) > 0 ? 'RPM on' : 'off' })
+  }
+  motors.push({ label: 'Check', value: progress.getCompletion(session.fcUid, 'motor-check') ? 'all passing' : 'not run yet' })
 
   return { 'preflight': preflight, 'frame-select': frame, 'motor-check': motors }
 })
@@ -87,14 +120,42 @@ const areas = computed(() =>
       label: reg?.manifest.title ?? id,
       hero: reg?.manifest.hero ?? 'i-lucide-wand-2',
       done: Boolean(progress.getCompletion(session.fcUid, id)),
-      summary: summaries.value[id] ?? '—',
+      fields: config.value[id] ?? [],
     }
   }),
 )
 
 const tabs = computed(() => areas.value.map(a => ({ id: a.id, label: a.label, done: a.done })))
-const selected = ref<string>(AREA_IDS[0])
+
+// The selected area comes from the URL so tabs are deep-linkable and
+// browser back/forward steps between them.
+function isAreaId(v: unknown): v is typeof AREA_IDS[number] {
+  return typeof v === 'string' && (AREA_IDS as readonly string[]).includes(v)
+}
+const selected = computed(() =>
+  isAreaId(route.query.area)
+    ? route.query.area
+    : (areas.value.find(a => !a.done)?.id ?? AREA_IDS[0]),
+)
 const selectedArea = computed(() => areas.value.find(a => a.id === selected.value))
+
+// Navigate to a tab. Carries returnTo=/bringup so the inline wizard's own
+// back/cancel/done paths return to the ribbon.
+function selectArea(id: string) {
+  void router.push({ name: 'bringup-ribbon', query: { area: id, returnTo: '/bringup' } })
+}
+
+// Keep the URL canonical: land on /bringup (or return from an inline wizard
+// to a bare /bringup) → replace with the resolved area + returnTo so the
+// state is always deep-linkable and returnTo is always set.
+watch(
+  () => route.query.area,
+  () => {
+    if (route.name === 'bringup-ribbon' && !isAreaId(route.query.area))
+      void router.replace({ name: 'bringup-ribbon', query: { area: selected.value, returnTo: '/bringup' } })
+  },
+  { immediate: true },
+)
 
 // Lazy-load + mount the selected area's real wizard view full-width below
 // the ribbon — same registry path the runner uses.
@@ -107,11 +168,6 @@ watch(selected, async (id) => {
 onMounted(() => {
   if (session.connected && params.count === 0)
     void params.load()
-  // Open on the first area that isn't done yet — where the operator's
-  // attention belongs.
-  const next = areas.value.find(a => !a.done)
-  if (next)
-    selected.value = next.id
 })
 </script>
 
@@ -148,8 +204,8 @@ onMounted(() => {
     </UCard>
 
     <UCard v-else>
-      <!-- The ribbon. -->
-      <WizardRibbon v-model="selected" :tabs="tabs" />
+      <!-- The ribbon — route-backed tab navigation. -->
+      <WizardRibbon :model-value="selected" :tabs="tabs" @update:model-value="selectArea" />
 
       <!-- Current-config panel for the selected tab. -->
       <div v-if="selectedArea" class="mt-4 flex items-start justify-between gap-3">
@@ -161,9 +217,12 @@ onMounted(() => {
             <h2 class="text-highlighted font-semibold">
               {{ selectedArea.label }}
             </h2>
-            <p class="text-muted text-sm">
-              <span class="text-default font-medium">Now:</span> {{ selectedArea.summary }}
-            </p>
+            <div class="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+              <span v-for="f in selectedArea.fields" :key="f.label">
+                <span class="text-muted">{{ f.label }}:</span>
+                <span class="text-default ml-1 font-medium">{{ f.value }}</span>
+              </span>
+            </div>
           </div>
         </div>
         <RouterLink

@@ -17,7 +17,7 @@
 // Horizontal tab ribbon for a wizard's areas — the interactive sibling of
 // WizardSteps. Where the rail passively shows position within one wizard,
 // the ribbon is clickable navigation across a journey's areas, each with a
-// done-state (gold tick) and an active underline. The owning view supplies
+// done-state (green tick) and an active underline. The owning view supplies
 // the tabs + binds the selection via v-model and renders the selected
 // area's config + content beneath. Same tint idiom as WizardSteps /
 // SystemStatus so it needs no contrasting-foreground token.
@@ -40,8 +40,9 @@ function select(id: string) {
 }
 
 function markClass(t: RibbonTab): string {
+  // Done = green (success), matching the "Done" badges elsewhere in the app.
   if (t.done)
-    return 'border-secondary/40 bg-secondary/10 text-secondary'
+    return 'border-success/50 bg-success/15 text-success'
   return t.id === props.modelValue ? 'border-primary text-primary' : 'border-default text-muted'
 }
 </script>
