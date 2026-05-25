@@ -47,6 +47,7 @@ import { buildMotorTest, buildMotorTestStop, MOTOR_TEST_PWM_SPIN } from '../../p
 import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
+import WizardSteps from '../../ui/components/WizardSteps.vue'
 import MotorCheck3D from '../../ui/visuals/MotorCheck3D.vue'
 import { useLuaEngine } from '../../workflow/lua-engine'
 import {
@@ -91,6 +92,24 @@ type Phase
     | 'correcting' | 'restarting' | 'reconnect-failed' | 'error'
 const phase = ref<Phase>('loading')
 const errorMessage = ref<string | null>(null)
+
+// Operator-facing phase rail (docs/UX.md): the four steps of "Set up
+// motors". Transient sub-states (applying a fix, restarting, reconnecting)
+// map onto the step they belong to; off-flow states (loading / unsupported
+// / error) hide the rail entirely.
+const WIZARD_STEPS = ['ESC setup', 'Safety', 'Check motors', 'Results']
+const flowStep = computed(() => {
+  switch (phase.value) {
+    case 'esc-setup': return 0
+    case 'safety': return 1
+    case 'testing': return 2
+    case 'review':
+    case 'correcting':
+    case 'restarting':
+    case 'reconnect-failed': return 3
+    default: return -1
+  }
+})
 
 // The connected frame's motors, in the firmware's test order — a
 // clockwise sweep from the front-right, which is the order operators
@@ -658,6 +677,9 @@ function labelStyle(angleDeg: number): Record<string, string> {
 
 <template>
   <div class="space-y-4">
+    <!-- Phase rail — shown for the main flow, hidden for off-flow states. -->
+    <WizardSteps v-if="flowStep >= 0" :steps="WIZARD_STEPS" :current="flowStep" class="pb-1" />
+
     <!-- loading -->
     <div v-if="phase === 'loading'" class="py-8 text-center text-muted">
       <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin" />
