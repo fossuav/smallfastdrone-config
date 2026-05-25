@@ -44,6 +44,14 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('./views/BringupRibbonView.vue'),
   },
   {
+    // Field tools catalogue. No nav label — reached via the header's
+    // radio-icon entry point (it's a cross-cutting capability, not a
+    // primary destination).
+    path: '/field',
+    name: 'field',
+    component: () => import('./views/FieldToolsView.vue'),
+  },
+  {
     // Per-wizard runner. No `meta.label` so it doesn't appear in the
     // nav; the library is the entry point and links into here.
     path: '/wizard/:id',

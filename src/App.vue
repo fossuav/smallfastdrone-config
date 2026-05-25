@@ -62,6 +62,19 @@ const navItems = computed(() =>
 
           <div class="flex items-center gap-3">
             <MessageBell />
+            <!-- Entry point to the field-tools catalogue (run wizards from the
+                 radio). Cross-cutting, so it lives in the chrome; the page
+                 holds the catalogue. -->
+            <UTooltip text="Field tools — run from your radio">
+              <UButton
+                to="/field"
+                icon="i-lucide-radio"
+                variant="ghost"
+                color="neutral"
+                size="sm"
+                aria-label="Field tools"
+              />
+            </UTooltip>
             <label class="flex cursor-pointer items-center gap-2 text-sm">
               <span class="text-muted select-none">Expert</span>
               <USwitch v-model="ui.expert" color="secondary" />
