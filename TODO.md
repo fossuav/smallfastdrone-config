@@ -50,6 +50,21 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   tuned (etc.) — across the bringup sequence, not just per-step.
 - `[wizard] [infra]` **UART auto-config.** Detect and assign serial-port
   protocols automatically instead of making the operator hand-map UARTs.
+- `[wizard]` **CAN bus toggle.** A drone-settings feature toggle to bring up
+  the CAN bus (DroneCAN peripherals — GPS, compass, ESCs…), in the same
+  write-param + reboot + reconnect pattern as the scripting toggle.
+- `[wizard]` **Bidirectional DShot toggle.** Enable bidirectional DShot so ESCs
+  report RPM back over the signal wire (feeds RPM-based filtering / the harmonic
+  notch). Pairs with the ESC setup item below.
+- `[wizard]` **Proper ESC setup (incl. DShot rate).** A real ESC setup flow:
+  choose the motor output protocol + DShot rate (150/300/600) and bidirectional
+  DShot. The ArduPilot side is params; ESC-firmware settings (BLHeli) arrive via
+  the 4-way passthrough planned in [PLAN.md](PLAN.md) Phase 6 — fold these
+  together when that lands.
+- `[wizard]` **Force-cal for compass + accel.** Offer a "redo calibration"
+  option for compass and accelerometer, shown only when the relevant cal params
+  are present on the FC (so it appears only where it can actually act).
+  Operator-first copy ("Recalibrate compass"), never param names.
 
 ## Shell / UX
 
