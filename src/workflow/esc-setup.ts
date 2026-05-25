@@ -22,10 +22,11 @@
 // (DShot150/300/600/1200), so there's no separate "DShot rate" knob at the
 // operator level — picking the protocol picks the rate. Bidirectional
 // DShot (RPM telemetry, feeds the harmonic notch later) is SERVO_BLH_BDMASK
-// + SERVO_BLH_POLES. SERVO_BLH_BDMASK is #if HAL_WITH_BIDIR_DSHOT (a
-// hardware timer/DMA feature), so it's absent in SITL even on a BLHeli
-// build — bidir is hardware-only. Callers gate on the param's presence
-// (bidirSupported); when it's missing, DShot alone is the recommended state.
+// + SERVO_BLH_POLES, gated by HAL_WITH_BIDIR_DSHOT. Our SITL branch defines
+// that, so the param + config path are exercisable in the sim (the
+// telemetry itself is a no-op there); firmware/boards without bidir DShot
+// won't expose it. Callers gate on the param's presence (bidirSupported);
+// when it's missing, DShot alone is the recommended state.
 
 // Params this phase owns.
 export const MOT_PWM_TYPE_PARAM = 'MOT_PWM_TYPE'

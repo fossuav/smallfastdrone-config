@@ -253,6 +253,9 @@ test('ESC setup: changing the protocol applies, restarts, and reconnects (SITL)'
   // build — MOT_PWM_TYPE always exists, unlike the BLHeli telemetry param).
   await expect(page.getByText('Your ESCs are set up well')).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: 'Choose myself' }).click()
+  // Bidir DShot is configurable in SITL now (HAL_WITH_BIDIR_DSHOT on the
+  // blheli-sitl branch) — the telemetry toggle is enabled, not greyed out.
+  await expect(page.getByRole('switch', { name: 'RPM telemetry' })).toBeEnabled()
   await page.getByRole('button', { name: 'DShot300', exact: true }).click()
   await page.getByRole('button', { name: 'Apply & continue' }).click()
 
