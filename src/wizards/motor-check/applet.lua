@@ -1,14 +1,22 @@
--- In-field motor-order / direction check, driven from the radio's CRSF
--- menu — the no-laptop version of the motor-check wizard.
+-- In-field "Set up motors", driven from the radio's CRSF menu — the
+-- no-laptop version of the motor-check wizard, at parity with the desktop.
 --
--- Flow (props OFF): for each motor the operator opens "Spin motor", watches
--- which physical motor turns and which way, and records it via two
--- selections; "Record + next" advances. "Apply fix" works out the
--- correction (a SERVOn_FUNCTION remap for motor order + a SERVO_BLH_RVMASK
--- toggle for direction), and after a confirm step writes it and reboots.
+-- ESC setup (matches the desktop's first phase): an "ESC setup" submenu
+-- picks the output protocol + RPM telemetry and, on "Apply ESCs", writes
+-- only the differing params (MOT_PWM_TYPE, and SERVO_BLH_BDMASK/POLES where
+-- the build exposes bidir DShot) behind a confirm, then reboots.
 --
--- The correction maths mirrors the tool's unit-tested computeCorrections
--- (src/workflow/motor-check.ts) — keep the two in step. Spinning reuses the
+-- Order/direction check (props OFF): for each motor the operator opens
+-- "Spin motor", watches which physical motor turns and which way, and
+-- records it via two selections; "Record + next" advances. "Apply fix"
+-- plans the correction and, after a confirm step, writes it and reboots.
+--
+-- The correction maths mirrors the tool's unit-tested planCorrection /
+-- escParamEdits (src/workflow/{motor-check,esc-setup}.ts) — keep the two in
+-- step. plan_correction prefers a single FRAME_TYPE switch to a standard
+-- layout that matches the observed wiring + chosen props orientation
+-- (Props In/Out), falling back to a custom SERVOn_FUNCTION remap, with
+-- SERVO_BLH_RVMASK reversing residual individual motors. Spinning reuses the
 -- firmware MAV_CMD_DO_MOTOR_TEST path via gcs:run_command_int, the same
 -- command the desktop wizard sends, so the landed/safety/disarmed gating is
 -- the firmware's. Applying is gated on the vehicle being disarmed, behind a
@@ -51,37 +59,67 @@ local function is_dshot(t) return t >= 4 and t <= 7 end
 -- from AP_MotorsMatrix.cpp). Each motor: t = test order, mi = mixer index,
 -- pos = short operator-facing position, spin = expected direction.
 -- Position codes are unique within a frame — the operator picks one.
+-- Each entry: out = props-out orientation, layout = operator-facing layout
+-- name (for "switch to a standard layout"). The quad set has all eight
+-- order/orientation variants the planner matches against (X / H / Betaflight
+-- / DJI / clockwise / +, props-in and -out); hexa/octa carry X + Plus.
+-- Positions are by airframe angle so they're consistent across a class's
+-- variants (45deg = FR in every quad-X-family layout).
 local FRAMES = {
   [1] = { -- QUAD
-    [1] = { name = 'Quad X', motors = { -- X
+    [1] = { name = 'Quad X', layout = 'ArduPilot', out = false, motors = {
       { t = 1, mi = 0, pos = 'FR', spin = 'ccw' }, { t = 2, mi = 3, pos = 'RR', spin = 'cw' },
       { t = 3, mi = 1, pos = 'RL', spin = 'ccw' }, { t = 4, mi = 2, pos = 'FL', spin = 'cw' },
     } },
-    [0] = { name = 'Quad +', motors = { -- Plus
+    [3] = { name = 'Quad X out', layout = 'ArduPilot out', out = true, motors = {
+      { t = 1, mi = 0, pos = 'FR', spin = 'cw' }, { t = 2, mi = 3, pos = 'RR', spin = 'ccw' },
+      { t = 3, mi = 1, pos = 'RL', spin = 'cw' }, { t = 4, mi = 2, pos = 'FL', spin = 'ccw' },
+    } },
+    [12] = { name = 'Quad BF', layout = 'Betaflight', out = false, motors = {
+      { t = 1, mi = 1, pos = 'FR', spin = 'ccw' }, { t = 2, mi = 0, pos = 'RR', spin = 'cw' },
+      { t = 3, mi = 2, pos = 'RL', spin = 'ccw' }, { t = 4, mi = 3, pos = 'FL', spin = 'cw' },
+    } },
+    [18] = { name = 'Quad BF out', layout = 'Betaflight out', out = true, motors = {
+      { t = 1, mi = 1, pos = 'FR', spin = 'cw' }, { t = 2, mi = 0, pos = 'RR', spin = 'ccw' },
+      { t = 3, mi = 2, pos = 'RL', spin = 'cw' }, { t = 4, mi = 3, pos = 'FL', spin = 'ccw' },
+    } },
+    [13] = { name = 'Quad DJI', layout = 'DJI', out = false, motors = {
+      { t = 1, mi = 0, pos = 'FR', spin = 'ccw' }, { t = 2, mi = 3, pos = 'RR', spin = 'cw' },
+      { t = 3, mi = 2, pos = 'RL', spin = 'ccw' }, { t = 4, mi = 1, pos = 'FL', spin = 'cw' },
+    } },
+    [14] = { name = 'Quad CW', layout = 'Clockwise', out = false, motors = {
+      { t = 1, mi = 0, pos = 'FR', spin = 'ccw' }, { t = 2, mi = 1, pos = 'RR', spin = 'cw' },
+      { t = 3, mi = 2, pos = 'RL', spin = 'ccw' }, { t = 4, mi = 3, pos = 'FL', spin = 'cw' },
+    } },
+    [0] = { name = 'Quad +', layout = 'Plus', out = false, motors = {
       { t = 1, mi = 2, pos = 'Fwd', spin = 'cw' }, { t = 2, mi = 0, pos = 'Rt', spin = 'ccw' },
       { t = 3, mi = 3, pos = 'Aft', spin = 'cw' }, { t = 4, mi = 1, pos = 'Lt', spin = 'ccw' },
     } },
+    [6] = { name = 'Quad + out', layout = 'Plus out', out = true, motors = {
+      { t = 1, mi = 2, pos = 'Fwd', spin = 'ccw' }, { t = 2, mi = 0, pos = 'Rt', spin = 'cw' },
+      { t = 3, mi = 3, pos = 'Aft', spin = 'ccw' }, { t = 4, mi = 1, pos = 'Lt', spin = 'cw' },
+    } },
   },
   [2] = { -- HEXA
-    [1] = { name = 'Hexa X', motors = {
+    [1] = { name = 'Hexa X', layout = 'X', out = false, motors = {
       { t = 1, mi = 4, pos = 'FR', spin = 'ccw' }, { t = 2, mi = 0, pos = 'Rt', spin = 'cw' },
       { t = 3, mi = 3, pos = 'RR', spin = 'ccw' }, { t = 4, mi = 5, pos = 'RL', spin = 'cw' },
       { t = 5, mi = 1, pos = 'Lt', spin = 'ccw' }, { t = 6, mi = 2, pos = 'FL', spin = 'cw' },
     } },
-    [0] = { name = 'Hexa +', motors = {
+    [0] = { name = 'Hexa +', layout = 'Plus', out = false, motors = {
       { t = 1, mi = 0, pos = 'Fwd', spin = 'cw' }, { t = 2, mi = 3, pos = 'FR', spin = 'ccw' },
       { t = 3, mi = 5, pos = 'RR', spin = 'cw' }, { t = 4, mi = 1, pos = 'Aft', spin = 'ccw' },
       { t = 5, mi = 2, pos = 'RL', spin = 'cw' }, { t = 6, mi = 4, pos = 'FL', spin = 'ccw' },
     } },
   },
   [3] = { -- OCTA
-    [1] = { name = 'Octa X', motors = {
+    [1] = { name = 'Octa X', layout = 'X', out = false, motors = {
       { t = 1, mi = 0, pos = 'FR', spin = 'cw' }, { t = 2, mi = 2, pos = 'RtF', spin = 'ccw' },
       { t = 3, mi = 7, pos = 'RtR', spin = 'cw' }, { t = 4, mi = 3, pos = 'RR', spin = 'ccw' },
       { t = 5, mi = 1, pos = 'RL', spin = 'cw' }, { t = 6, mi = 5, pos = 'LtR', spin = 'ccw' },
       { t = 7, mi = 6, pos = 'LtF', spin = 'cw' }, { t = 8, mi = 4, pos = 'FL', spin = 'ccw' },
     } },
-    [0] = { name = 'Octa +', motors = {
+    [0] = { name = 'Octa +', layout = 'Plus', out = false, motors = {
       { t = 1, mi = 0, pos = 'Fwd', spin = 'cw' }, { t = 2, mi = 2, pos = 'FR', spin = 'ccw' },
       { t = 3, mi = 7, pos = 'Rt', spin = 'cw' }, { t = 4, mi = 3, pos = 'RR', spin = 'ccw' },
       { t = 5, mi = 1, pos = 'Aft', spin = 'cw' }, { t = 6, mi = 5, pos = 'RL', spin = 'ccw' },
@@ -90,14 +128,21 @@ local FRAMES = {
   },
 }
 
--- Resolve the connected frame once at start.
+-- Flip a spin direction. Mirrors flipSpin in motor-geometry.ts.
+local function flip_spin(s) return s == 'cw' and 'ccw' or 'cw' end
+
+-- Resolve the connected frame once at start; remember its class + type so
+-- the planner can offer the other standard layouts in the class.
+local frame_class, frame_type = nil, nil
 local function load_frame()
   local cls = param:get('FRAME_CLASS')
   local typ = param:get('FRAME_TYPE')
   if cls == nil or typ == nil then return nil end
-  local by_type = FRAMES[math.floor(cls + 0.5)]
+  frame_class = math.floor(cls + 0.5)
+  frame_type = math.floor(typ + 0.5)
+  local by_type = FRAMES[frame_class]
   if by_type == nil then return nil end
-  return by_type[math.floor(typ + 0.5)]
+  return by_type[frame_type]
 end
 
 -- channel (1-based) -> current SERVOn_FUNCTION, for motor channels only.
@@ -113,20 +158,13 @@ local function read_channel_functions()
   return map
 end
 
--- Turn observations into the fix. Mirrors computeCorrections: recover the
--- physical motor on each output channel, then a remap (channel ->
--- SERVOn_FUNCTION) for order + a list of channels to reverse for direction.
-local function compute_corrections(frame, obs, chan_fns)
-  local pos_by_fn, spin_by_pos, fn_by_pos = {}, {}, {}
-  for _, m in ipairs(frame.motors) do
-    local fn = motor_function_id(m.mi)
-    pos_by_fn[fn] = m.pos
-    spin_by_pos[m.pos] = m.spin
-    fn_by_pos[m.pos] = fn
-  end
+-- Recover the physical motor on each output channel from the operator's
+-- observations: spin test t drives the channel currently wired to that
+-- motor's function, so the reported position/spin belong to that channel.
+-- Mirrors recoverPhysical in motor-check.ts.
+local function recover_physical(frame, obs, chan_fns)
   local chan_by_fn = {}
   for ch, fn in pairs(chan_fns) do chan_by_fn[fn] = ch end
-
   local phys_pos, phys_spin, count = {}, {}, 0
   for _, m in ipairs(frame.motors) do
     local ch = chan_by_fn[motor_function_id(m.mi)]
@@ -136,44 +174,111 @@ local function compute_corrections(frame, obs, chan_fns)
     phys_spin[ch] = o.spin
     count = count + 1
   end
-  -- reported positions must be a permutation of the frame's positions
-  local seen = {}
+  local seen = {} -- reported positions must be a permutation of the frame's
   for _, p in pairs(phys_pos) do
     if seen[p] then return { inconsistent = true } end
     seen[p] = true
   end
   if count ~= #frame.motors then return { inconsistent = true } end
+  return { inconsistent = false, phys_pos = phys_pos, phys_spin = phys_spin }
+end
 
+-- Is the output wiring the default 1:1 mapping (SERVOn drives Motor n)? A
+-- standard FRAME_TYPE switch only makes sense on default wiring. Mirrors
+-- wiringIsDefault in motor-check.ts.
+local function wiring_is_default(chan_fns)
+  local any = false
+  for ch, fn in pairs(chan_fns) do
+    any = true
+    if fn ~= motor_function_id(ch - 1) then return false end
+  end
+  return any
+end
+
+-- Plan the fix, preferring a single FRAME_TYPE switch to a standard layout
+-- over a custom output remap. Mirrors planCorrection in motor-check.ts.
+-- Returns: { kind = 'none' } | { kind = 'inconsistent' }
+--   | { kind = 'frametype', frame_type, layout, reverse = {ch..} }
+--   | { kind = 'remap', remap = {{channel,to}..}, reverse = {ch..} }
+local function plan_correction(frame, obs, chan_fns, props_out)
+  local b = recover_physical(frame, obs, chan_fns)
+  if b.inconsistent then return { kind = 'inconsistent' } end
+
+  -- Prefer a standard layout in the chosen orientation whose motor order
+  -- matches the observed wiring (default wiring only).
+  if wiring_is_default(chan_fns) then
+    for ft, v in pairs(FRAMES[frame_class] or {}) do
+      if v.out == props_out and #v.motors == #frame.motors then
+        local pos_by_index, spin_by_index = {}, {}
+        for _, m in ipairs(v.motors) do
+          pos_by_index[m.mi] = m.pos
+          spin_by_index[m.mi] = m.spin
+        end
+        local order_match = true
+        for ch, pos in pairs(b.phys_pos) do
+          if pos_by_index[ch - 1] ~= pos then
+            order_match = false
+            break
+          end
+        end
+        if order_match then
+          local reverse = {}
+          for ch, sp in pairs(b.phys_spin) do
+            if sp ~= spin_by_index[ch - 1] then reverse[#reverse + 1] = ch end
+          end
+          table.sort(reverse)
+          if ft == frame_type then
+            if #reverse == 0 then return { kind = 'none' } end
+            return { kind = 'remap', remap = {}, reverse = reverse }
+          end
+          return { kind = 'frametype', frame_type = ft, layout = v.layout, reverse = reverse }
+        end
+      end
+    end
+  end
+
+  -- Fallback: remap outputs to the current frame + reverse any motor not
+  -- turning the chosen-orientation way (the current frame's spin, flipped if
+  -- the operator's props orientation differs from the frame's).
+  local fn_by_pos, spin_by_pos = {}, {}
+  for _, m in ipairs(frame.motors) do
+    fn_by_pos[m.pos] = motor_function_id(m.mi)
+    spin_by_pos[m.pos] = m.spin
+  end
   local remap, reverse = {}, {}
-  for ch, p in pairs(phys_pos) do
-    local desired = fn_by_pos[p]
+  for ch, pos in pairs(b.phys_pos) do
+    local desired = fn_by_pos[pos]
     if desired ~= nil and chan_fns[ch] ~= nil and desired ~= chan_fns[ch] then
       remap[#remap + 1] = { channel = ch, to = desired }
     end
-    if phys_spin[ch] ~= spin_by_pos[p] then
-      reverse[#reverse + 1] = ch
-    end
+    local base = spin_by_pos[pos]
+    local want = (props_out == frame.out) and base or flip_spin(base)
+    if b.phys_spin[ch] ~= want then reverse[#reverse + 1] = ch end
   end
-  return { inconsistent = false, remap = remap, reverse = reverse }
+  table.sort(reverse)
+  if #remap == 0 and #reverse == 0 then return { kind = 'none' } end
+  return { kind = 'remap', remap = remap, reverse = reverse }
 end
 
--- Write the fix: SERVOn_FUNCTION remap, then XOR the reverse bits into
--- SERVO_BLH_RVMASK if the FC exposes it. Returns how many reverses we
--- couldn't apply (no reverse-mask param).
-local function apply_corrections(c)
-  for _, r in ipairs(c.remap) do
-    param:set_and_save('SERVO' .. r.channel .. '_FUNCTION', r.to)
+-- Apply a plan: a FRAME_TYPE switch or a SERVOn_FUNCTION remap, then XOR the
+-- reverse bits into SERVO_BLH_RVMASK if the FC exposes it. Returns how many
+-- reverses we couldn't apply (no reverse-mask param). Mirrors applyCorrections.
+local function apply_plan(p)
+  if p.kind == 'frametype' then
+    param:set_and_save('FRAME_TYPE', p.frame_type)
+  elseif p.kind == 'remap' then
+    for _, r in ipairs(p.remap) do
+      param:set_and_save('SERVO' .. r.channel .. '_FUNCTION', r.to)
+    end
   end
   local unfixable = 0
-  if #c.reverse > 0 then
+  if p.reverse and #p.reverse > 0 then
     local cur = param:get('SERVO_BLH_RVMASK')
     if cur == nil then
-      unfixable = #c.reverse
+      unfixable = #p.reverse
     else
       local mask = math.floor(cur + 0.5)
-      for _, ch in ipairs(c.reverse) do
-        mask = mask ~ (1 << (ch - 1))
-      end
+      for _, ch in ipairs(p.reverse) do mask = mask ~ (1 << (ch - 1)) end
       param:set_and_save('SERVO_BLH_RVMASK', mask)
     end
   end
@@ -193,6 +298,9 @@ local status_item -- forward ref to the dynamic INFO item
 local esc_proto = 6 -- default DShot600
 local esc_bidir = true
 local esc_pending = nil
+-- Propeller orientation the operator is building for (props-in default).
+-- Selects which standard layouts the planner considers + expected spins.
+local props_out = false
 
 local function motor_count() return frame and #frame.motors or 0 end
 
@@ -225,6 +333,8 @@ end
 -- SELECTION callbacks just record the operator's current pick.
 local function on_where(value) sel_pos = value end
 local function on_dir(value) sel_dir = (value == 'CW') and 'cw' or 'ccw' end
+-- Props orientation: 'In' (ArduPilot default) or 'Out' (Betaflight).
+local function on_props(value) props_out = (value == 'Out') end
 
 -- COMMAND: record this motor's answer and advance.
 local function on_next(action)
@@ -239,22 +349,26 @@ local function on_next(action)
   return STATUS.READY, 'Motor ' .. (current_motor().mi + 1)
 end
 
--- COMMAND: compute + confirm + apply + reboot.
+-- COMMAND: compute (frame-type-first) + confirm + apply + reboot.
 local function on_apply(action)
   if action == STATUS.START then
     if not frame then return STATUS.READY, 'No frame' end
-    pending = compute_corrections(frame, obs, read_channel_functions())
-    if pending.inconsistent then return STATUS.READY, 'Unclear - redo' end
-    local nr, nv = #pending.remap, #pending.reverse
-    if nr == 0 and nv == 0 then return STATUS.READY, 'All good!' end
-    return STATUS.CONFIRMATION_NEEDED, 'Fix ' .. nr .. 'mv ' .. nv .. 'rev?'
+    pending = plan_correction(frame, obs, read_channel_functions(), props_out)
+    if pending.kind == 'inconsistent' then return STATUS.READY, 'Unclear - redo' end
+    if pending.kind == 'none' then return STATUS.READY, 'All good!' end
+    if pending.kind == 'frametype' then
+      return STATUS.CONFIRMATION_NEEDED, 'Set ' .. pending.layout .. '?'
+    end
+    return STATUS.CONFIRMATION_NEEDED, 'Fix ' .. #pending.remap .. 'mv ' .. #pending.reverse .. 'rev?'
   elseif action == STATUS.CONFIRM then
-    if pending == nil or pending.inconsistent then return STATUS.READY, 'Redo' end
+    if pending == nil or pending.kind == 'inconsistent' or pending.kind == 'none' then
+      return STATUS.READY, 'Redo'
+    end
     if arming:is_armed() then return STATUS.READY, 'Disarm first!' end
-    local unfixable = apply_corrections(pending)
+    local unfixable = apply_plan(pending)
     pending = nil
     reboot_at = millis():tofloat() + REBOOT_DELAY_MS
-    if unfixable > 0 then return STATUS.READY, 'Order set;dir manual' end
+    if unfixable > 0 then return STATUS.READY, 'Set;dir manual' end
     return STATUS.READY, 'Fixed - rebooting'
   elseif action == STATUS.CANCEL then
     pending = nil
@@ -347,6 +461,12 @@ for i, p in ipairs(ESC_PROTOS) do
 end
 local esc_telem_default = esc_bidir and 1 or 2 -- options { 'On', 'Off' }
 
+-- Seed props orientation from the loaded frame so the planner's default
+-- matches what the FC is currently configured as (props-out frame types set
+-- it true). Operator can override before applying.
+props_out = frame and frame.out or false
+local props_default = props_out and 2 or 1 -- options { 'In', 'Out' }
+
 local menu_definition = {
   name = 'Motor check',
   items = {
@@ -363,6 +483,7 @@ local menu_definition = {
     { type = 'SELECTION', name = 'Moved at', options = position_options(), default = 1, callback = on_where },
     { type = 'SELECTION', name = 'Spins', options = { 'CW', 'CCW' }, default = 1, callback = on_dir },
     { type = 'COMMAND', name = 'Record + next', info = 'Next', callback = on_next },
+    { type = 'SELECTION', name = 'Props', options = { 'In', 'Out' }, default = props_default, callback = on_props },
     { type = 'COMMAND', name = 'Apply fix', info = 'Apply', callback = on_apply },
   },
 }
