@@ -16,18 +16,43 @@
 
 // Bell icon + popover in the nav. Lists every STATUSTEXT the session
 // store has seen this session, newest first, with a severity-coloured
-// left rule + icon. Count badge on the bell trigger shows the unread
-// total. Toasts for error / warning are emitted by the session store
-// directly — this component is the audit trail, not the alert path.
+// left rule + icon. This component is the audit trail, not the alert path
+// (toasts for error / warning are emitted by the session store directly).
+//
+// The trigger badge deliberately does NOT count every message: a normal
+// boot streams dozens of routine INFO lines, and a badge climbing into the
+// dozens reads as a pile of unread alarms (docs/UX.md: routine INFO must not
+// read as alarming). So the badge shows only *unread, important* messages —
+// warning-or-worse that arrived since the operator last opened the bell —
+// and clears on open. The popover still lists the full history.
 
 import { computed } from 'vue'
+import { MAV_SEVERITY_WARNING } from '../../protocol/mavlink'
 import { useSessionStore } from '../../stores/session'
 
 const session = useSessionStore()
 
 // Reversed so the most recent message is at the top of the popover.
 const messages = computed(() => [...session.recentStatusTexts].reverse())
+// Total in the buffer — shown in the popover header, not on the badge.
 const count = computed(() => session.recentStatusTexts.length)
+
+// Unread important messages: warning-or-worse, newer than the last bell open.
+const importantUnread = computed(() =>
+  session.recentStatusTexts.filter(
+    m => m.severity <= MAV_SEVERITY_WARNING && m.receivedAt > session.statusReadAt,
+  ),
+)
+// Worst (lowest-numbered) unread severity → badge colour: error vs warning.
+const badgeColor = computed<'error' | 'warning'>(() =>
+  importantUnread.value.some(m => m.severity <= 3) ? 'error' : 'warning',
+)
+
+// Clear the unread badge when the operator opens the bell.
+function onOpenChange(open: boolean) {
+  if (open)
+    session.markStatusTextsRead()
+}
 
 // Severity → (icon, icon color, row left-border color). MAVLink severities:
 // 0=EMERGENCY 1=ALERT 2=CRITICAL 3=ERROR 4=WARNING 5=NOTICE 6=INFO 7=DEBUG.
@@ -63,7 +88,7 @@ function timeAgo(ms: number): string {
 </script>
 
 <template>
-  <UPopover :ui="{ content: 'w-96 max-w-[95vw]' }">
+  <UPopover :ui="{ content: 'w-96 max-w-[95vw]' }" @update:open="onOpenChange">
     <UButton
       icon="i-lucide-bell"
       variant="ghost"
@@ -71,10 +96,15 @@ function timeAgo(ms: number): string {
       size="sm"
       aria-label="Recent messages from your drone"
     >
-      <template v-if="count > 0" #trailing>
-        <span class="bg-secondary text-secondary-foreground inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-medium">
-          {{ count > 99 ? '99+' : count }}
-        </span>
+      <template v-if="importantUnread.length > 0" #trailing>
+        <UBadge
+          :color="badgeColor"
+          variant="solid"
+          size="sm"
+          class="justify-center rounded-full px-1 text-[10px] leading-none"
+        >
+          {{ importantUnread.length > 99 ? '99+' : importantUnread.length }}
+        </UBadge>
       </template>
     </UButton>
 

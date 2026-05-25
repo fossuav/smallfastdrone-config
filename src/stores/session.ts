@@ -102,6 +102,11 @@ export const useSessionStore = defineStore('session', () => {
   // pane; toasts for the WARNING-or-worse subset happen as they arrive.
   const recentStatusTexts = ref<StatusTextEntry[]>([])
   const STATUSTEXT_HISTORY = 50
+  // When the operator last opened the message bell. Messages newer than this
+  // are "unread" — the bell badge counts only the unread *important* ones
+  // (warning-or-worse) so a normal boot's stream of routine INFO lines
+  // doesn't read as a pile of unread alerts. Reset to 0 on each connect.
+  const statusReadAt = ref(0)
 
   // Per-subsystem present/enabled/healthy status from SYS_STATUS. Drives
   // the operator-facing status panel on the Connect view.
@@ -165,6 +170,12 @@ export const useSessionStore = defineStore('session', () => {
     else if (severity === MAV_SEVERITY_WARNING) {
       toast.add({ title: text, color: 'warning', icon: 'i-lucide-triangle-alert' })
     }
+  }
+
+  // Mark the current messages as seen — called when the operator opens the
+  // bell, so its unread badge clears.
+  function markStatusTextsRead() {
+    statusReadAt.value = Date.now()
   }
 
   session.on(async (msg) => {
@@ -241,6 +252,7 @@ export const useSessionStore = defineStore('session', () => {
     isSfd.value = false
     rebooting.value = false
     recentStatusTexts.value = []
+    statusReadAt.value = 0
     subsystems.value = []
     bytesReceived.value = 0
     versionRequested = false
@@ -339,6 +351,7 @@ export const useSessionStore = defineStore('session', () => {
     fcUid,
     isSfd,
     recentStatusTexts,
+    statusReadAt,
     subsystems,
     readyToArm,
     rebooting,
@@ -349,6 +362,7 @@ export const useSessionStore = defineStore('session', () => {
     connect,
     disconnect,
     reboot,
+    markStatusTextsRead,
     sendMessage,
     subscribeMessages,
   }
