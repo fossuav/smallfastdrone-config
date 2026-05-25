@@ -45,6 +45,20 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 - `[wizard] [ux]` **Stronger bringup ordering + graphic.** Vertical tabbed
   layout with each step's name + done-state in the tab header; the UI responds
   to solid green completion ticks so progress through the sequence is obvious.
+- `[wizard] [ux]` **In-field CRSF menu UX (motor-check).** The radio menu works
+  on real hardware — logic validated end-to-end — but the operator flow needs
+  polish. From the hardware review: (a) *too much scrolling* — Spin / Moved at /
+  Spins / Record+next live in one flat list, so each motor is a scroll
+  up-and-down; want a tighter per-motor flow. (b) *status & progress* — the
+  single "Now" line isn't enough; show which motor and how far through (e.g.
+  3 of 6). (c) *apply & confirm* — the compute → confirm → reboot step needs
+  clearer confirmation that the fix landed. Bounded by what CRSF menus can
+  render — see [docs/lua/CLAUDE_CRSF_MENU.md](docs/lua/CLAUDE_CRSF_MENU.md).
+  (Labels/wording were fine on the TX.) **Agreed direction:** make the "Now"
+  line *the workspace* — it shows the live state (e.g. "Motor 3/6 — spin?") and
+  the selections update it in place, collapsing the per-motor loop so the
+  operator isn't hunting between separate rows (fixes scrolling + progress
+  together).
 - `[wizard] [ux]` **"You are here" milestone track.** Show the operator where
   they are in the overall journey — configured drone → ready to fly → flying →
   tuned (etc.) — across the bringup sequence, not just per-step.
