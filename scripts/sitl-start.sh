@@ -43,11 +43,16 @@ cd "$WORK"
 mkdir -p "$WORK/APM/scripts"
 ln -s APM/scripts "$WORK/scripts"
 
-# Boot as a quad X (the common real-world layout) rather than SITL's
-# built-in Plus, so the motor-check wizard shows X positions (front-left,
-# front-right, …) matching the X airframe model. Applied as a defaults
-# overlay layered on copter.parm.
-printf 'FRAME_CLASS 1\nFRAME_TYPE 1\n' >"$WORK/frame.parm"
+# Boot as a quad X with DShot600 (the common SFD layout) rather than SITL's
+# built-in Plus/PWM, so the "Set up motors" wizard shows X positions and the
+# ESC-setup phase lands already-configured (DShot is the recommended path).
+# Applied as a defaults overlay layered on copter.parm.
+#
+# We deliberately don't set bidirectional DShot here: SERVO_BLH_BDMASK is
+# #if HAL_WITH_BIDIR_DSHOT (a hardware timer/DMA feature), so it's compiled
+# out of SITL even on the blheli-sitl build — bidir config is hardware-only.
+# SERVO_BLH_RVMASK (direction reverse) has no such guard and IS in SITL.
+printf 'FRAME_CLASS 1\nFRAME_TYPE 1\nMOT_PWM_TYPE 6\n' >"$WORK/frame.parm"
 
 echo "Starting SITL in $WORK"
 # Wrapper subshell: loops arducopter on exit so PREFLIGHT_REBOOT_SHUTDOWN

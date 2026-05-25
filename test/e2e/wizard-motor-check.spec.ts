@@ -13,11 +13,16 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// End-to-end tests for the motor-check wizard against SITL.
+// End-to-end tests for the "Set up motors" wizard against SITL.
 // scripts/sitl-start.sh boots SITL as a quad X (FRAME_CLASS=1,
-// FRAME_TYPE=1), correctly "wired", so an operator who confirms each motor
-// where/how the firmware expects gets an all-clear. Drives real
-// MAV_CMD_DO_MOTOR_TEST spins.
+// FRAME_TYPE=1) with DShot600 + telemetry (MOT_PWM_TYPE=6, SERVO_BLH_BDMASK),
+// correctly "wired", so the ESC-setup phase lands already-configured
+// (Continue) and an operator who confirms each motor where/how the firmware
+// expects gets an all-clear. Drives real MAV_CMD_DO_MOTOR_TEST spins.
+//
+// The wizard's first phase is ESC setup; openMotorCheck() clicks through it
+// (Continue) to reach the motor-check safety gate. A final test exercises
+// the ESC apply path (change protocol → restart → reconnect).
 //
 // Four flows (in run order, so the only mutating one is last):
 //  1. happy path — confirm every motor correct → review pass → Done badge.
@@ -85,16 +90,26 @@ const X_PROPS_OUT_SEQUENCE = [
   { position: 'Front left', direction: 'Counter-clockwise' }, // was cw
 ]
 
-// Connect to SITL and open the motor-check wizard, stopping at the safety
-// gate (frame loaded).
+// Connect to SITL and open the "Set up motors" wizard, clicking through the
+// ESC-setup phase (SITL boots DShot600 + telemetry, so it's already
+// configured — Continue) and stopping at the motor-check safety gate.
 async function openMotorCheck(page: Page) {
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
   await page.getByRole('link', { name: 'Bringup' }).click()
-  await page.getByRole('link', { name: /Open the Check motor spin wizard/ }).click()
-  await expect(page.getByRole('heading', { name: 'Check motor spin' })).toBeVisible()
-  await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('link', { name: /Open the Set up motors wizard/ }).click()
+  await expect(page.getByRole('heading', { name: 'Set up motors' })).toBeVisible()
+  // ESC setup runs first. SITL boots DShot600, so it's usually already-good
+  // ("Continue"); but if a sluggish post-reboot param load shows the
+  // recommend path instead, "Set up & continue" gets us there too (it
+  // applies DShot600 + reboots — harmless). Accept either.
+  const continueBtn = page.getByRole('button', { name: 'Continue', exact: true })
+  const setupBtn = page.getByRole('button', { name: 'Set up & continue' })
+  await expect(continueBtn.or(setupBtn)).toBeVisible({ timeout: 30_000 })
+  await (await continueBtn.isVisible() ? continueBtn : setupBtn).click()
+  // 90s budget covers the (rare) reboot the setup path would trigger.
+  await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 90_000 })
 }
 
 // Walk every motor, reporting the given position + direction for each, and
@@ -106,7 +121,16 @@ async function walkMotors(
   for (let i = 0; i < sequence.length; i++) {
     const step = sequence[i]!
     const posButton = page.getByRole('button', { name: step.position, exact: true })
-    await expect(posButton).toBeVisible({ timeout: 10_000 })
+    // A motor test is occasionally rejected by SITL (EKF still settling /
+    // arming state) — the wizard then shows its spin-error + "Spin again"
+    // instead of the answer buttons. Wait for whichever appears and retry
+    // the spin once so the walk is robust to that flake.
+    const spinError = page.getByText('wouldn\'t spin that motor')
+    await expect(posButton.or(spinError)).toBeVisible({ timeout: 10_000 })
+    if (await spinError.isVisible()) {
+      await page.getByRole('button', { name: 'Spin again' }).click()
+      await expect(posButton).toBeVisible({ timeout: 10_000 })
+    }
     await posButton.click()
     await page.getByRole('button', { name: step.direction, exact: true }).click()
     const advance = i === sequence.length - 1 ? 'Finish' : 'Next motor'
@@ -115,37 +139,20 @@ async function walkMotors(
 }
 
 test('Motor check passes when every motor is confirmed correct (SITL quad X)', async ({ page }) => {
-  await page.goto(SITL_URL)
-  await page.getByRole('button', { name: 'Connect drone' }).click()
-  await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
-
-  await page.getByRole('link', { name: 'Bringup' }).click()
-  await page.getByRole('link', { name: /Open the Check motor spin wizard/ }).click()
-  await expect(page.getByRole('heading', { name: 'Check motor spin' })).toBeVisible()
-
-  // Safety gate (frame loads from params first).
-  await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 30_000 })
+  await openMotorCheck(page)
   await expect(page.getByText(/Quad X/)).toBeVisible()
   await page.getByRole('switch', { name: 'Propellers are removed' }).click()
   await page.getByRole('button', { name: 'Start motor check' }).click()
 
   // Walk all four motors. Each auto-spins; position + direction are
   // pre-selected to the expected values — we confirm them.
-  for (let i = 0; i < X_SEQUENCE.length; i++) {
-    const step = X_SEQUENCE[i]!
-    const posButton = page.getByRole('button', { name: step.position, exact: true })
-    await expect(posButton).toBeVisible({ timeout: 10_000 })
-    await posButton.click()
-    await page.getByRole('button', { name: step.direction, exact: true }).click()
-    const advance = i === X_SEQUENCE.length - 1 ? 'Finish' : 'Next motor'
-    await page.getByRole('button', { name: advance }).click()
-  }
+  await walkMotors(page, X_SEQUENCE)
 
   // Review: all correct → Done badge on the library card.
   await expect(page.getByRole('heading', { name: 'Motors all check out' })).toBeVisible({ timeout: 10_000 })
   await page.getByRole('button', { name: 'Back to library' }).click()
   await expect(page.getByRole('heading', { name: 'Bringup wizards' })).toBeVisible()
-  const card = page.getByRole('link', { name: /Open the Check motor spin wizard/ })
+  const card = page.getByRole('link', { name: /Open the Set up motors wizard/ })
   await expect(card.getByText('Done')).toBeVisible()
 })
 
@@ -230,4 +237,28 @@ test('Motor check installs the field version, detects it on reopen, and removes 
   await expect(page.getByRole('button', { name: 'Install on radio' })).toBeVisible({ timeout: 30_000 })
   await openMotorCheck(page)
   await expect(page.getByRole('button', { name: 'Install on radio' })).toBeVisible({ timeout: 30_000 })
+})
+
+test('ESC setup: changing the protocol applies, restarts, and reconnects (SITL)', async ({ page }) => {
+  // One reboot/reconnect cycle. Runs last — it changes MOT_PWM_TYPE.
+  test.setTimeout(120_000)
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: /Open the Set up motors wizard/ }).click()
+
+  // ESC setup is already-good (booted DShot600); go expert and pick a
+  // different protocol so there's a real change to apply (works on any
+  // build — MOT_PWM_TYPE always exists, unlike the BLHeli telemetry param).
+  await expect(page.getByText('Your ESCs are set up well')).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Choose myself' }).click()
+  await page.getByRole('button', { name: 'DShot300', exact: true }).click()
+  await page.getByRole('button', { name: 'Apply & continue' }).click()
+
+  // Apply writes MOT_PWM_TYPE → restart → auto-reconnect → motor-check
+  // safety gate. Reaching it proves SITL acked the write + the wizard
+  // survived its own reboot.
+  await expect(page.getByText('Restarting your drone…')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 90_000 })
 })

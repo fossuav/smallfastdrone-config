@@ -62,6 +62,7 @@ import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../../workflow/reconnect
 import { storageProblemFromError } from '../../workflow/script-storage'
 import appletSource from './applet.lua?raw'
 import helperSource from './crsf_helper.lua?raw'
+import EscSetup from './EscSetup.vue'
 
 const WIZARD_ID = 'motor-check'
 const COMP_ID_AUTOPILOT = 1
@@ -86,7 +87,7 @@ const lua = useLuaEngine()
 const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
 
 type Phase
-  = | 'loading' | 'unsupported' | 'safety' | 'testing' | 'review'
+  = | 'loading' | 'unsupported' | 'esc-setup' | 'safety' | 'testing' | 'review'
     | 'correcting' | 'restarting' | 'reconnect-failed' | 'error'
 const phase = ref<Phase>('loading')
 const errorMessage = ref<string | null>(null)
@@ -291,9 +292,11 @@ onMounted(async () => {
     geometry.value = geo
     motors.value = geo.motors
     frameLabel.value = geo.label
-    phase.value = 'safety'
+    // ESC setup runs first (it determines whether DShot direction-fix is
+    // available); it advances to the safety gate when done.
+    phase.value = 'esc-setup'
     // Probe the field-install status in the background; the safety screen
-    // shows its panel as soon as this resolves.
+    // (after ESC setup) shows its panel as soon as this resolves.
     void checkFieldStatus()
   }
   catch (e) {
@@ -676,6 +679,9 @@ function labelStyle(angleDeg: number): Record<string, string> {
         </UButton>
       </div>
     </div>
+
+    <!-- ESC setup — first phase; advances to the safety gate when done -->
+    <EscSetup v-else-if="phase === 'esc-setup'" @done="phase = 'safety'" />
 
     <!-- safety gate -->
     <div v-else-if="phase === 'safety'" class="space-y-4">

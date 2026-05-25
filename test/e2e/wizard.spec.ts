@@ -149,10 +149,13 @@ test('Bringup meta-wizard chains preflight + frame-select + motor-check and mark
   // that live (it rebuilds the mixer + reassigns motor outputs while
   // disarmed), so this exercises the hexa geometry end-to-end — six
   // motors, no reboot needed.
-  const motorRow = page.locator('li').filter({ hasText: 'Check motor spin' })
+  const motorRow = page.locator('li').filter({ hasText: 'Set up motors' })
   await motorRow.getByRole('link', { name: 'Start' }).click()
-  await expect(page.getByRole('heading', { name: 'Check motor spin' })).toBeVisible()
-  await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Set up motors' })).toBeVisible()
+  // ESC setup runs first (booted DShot600 → already good) → continue.
+  await expect(page.getByText('Your ESCs are set up well')).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(/Hexa \+/)).toBeVisible()
   await page.getByRole('switch', { name: 'Propellers are removed' }).click()
   await page.getByRole('button', { name: 'Start motor check' }).click()
