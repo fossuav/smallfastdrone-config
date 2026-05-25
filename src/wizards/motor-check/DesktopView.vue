@@ -39,6 +39,7 @@ import type { CommandAck } from 'mavlink-mappings/dist/lib/common'
 import type { MotorVisual } from '../../ui/visuals/MotorCheck3D.vue'
 import type { CorrectionPlan } from '../../workflow/motor-check'
 import type { FrameGeometry, FrameMotor, MotorPosition, Spin } from '../../workflow/motor-geometry'
+import type { ScriptStorageStatus } from '../../workflow/script-storage'
 import { PerspectiveCamera, Vector3 } from 'three'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -58,6 +59,7 @@ import {
 } from '../../workflow/motor-check'
 import { expectedSpin, frameGeometry, frameVariants, motorTopdownXY, positionLabel, spinLabel } from '../../workflow/motor-geometry'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../../workflow/reconnect'
+import { storageProblemFromError } from '../../workflow/script-storage'
 import appletSource from './applet.lua?raw'
 import helperSource from './crsf_helper.lua?raw'
 
@@ -126,7 +128,8 @@ function motorExpectedSpin(m: FrameMotor): Spin {
 // helper and restarts scripting to load it; it stays until removed.
 type FieldStatus
   = | 'checking' | 'unavailable' | 'scripting-off' | 'enabling'
-    | 'not-installed' | 'installing' | 'installed' | 'removing' | 'error'
+    | 'not-installed' | 'installing' | 'installed' | 'removing'
+    | 'no-storage' | 'error'
 const fieldStatus = ref<FieldStatus>('checking')
 const fieldError = ref<string | null>(null)
 
@@ -151,22 +154,55 @@ async function checkFieldStatus() {
   }
 }
 
+// Operator-facing copy for a script-storage problem. Scripts live on the
+// SD card, so the common case on first bringup is simply "no card".
+function storageHint(status: ScriptStorageStatus): string {
+  switch (status) {
+    case 'no-card':
+      return 'Your flight controller has no SD card, so there\'s nowhere to keep the field check. Insert a formatted SD card, reconnect, and try again.'
+    case 'unformatted':
+      return 'Your flight controller can\'t read its SD card. Format it as FAT32, reconnect, and try again.'
+    case 'readonly':
+      return 'The SD card is locked. Slide its write-protect switch off, reconnect, and try again.'
+    default:
+      return 'Your flight controller can\'t store the field check right now. Check its SD card, reconnect, and try again.'
+  }
+}
+
 // Turn scripting on (write + reboot + reconnect), then install. Lets the
 // operator install the field version without a detour through settings.
+// Checks for writable storage *first* — enabling scripting reboots the FC,
+// and there's no point putting the operator through that if there's no SD
+// card to install onto.
 async function enableAndInstall() {
-  fieldStatus.value = 'enabling'
   fieldError.value = null
-  const ok = await lua.enableScripting()
-  if (!ok) {
-    fieldStatus.value = 'error'
-    fieldError.value = 'Couldn\'t turn on scripting and reconnect. Try the Drone settings page.'
-    return
+  try {
+    fieldStatus.value = 'checking'
+    const storage = await lua.checkScriptStorage()
+    if (storage !== 'ok') {
+      fieldStatus.value = 'no-storage'
+      fieldError.value = storageHint(storage)
+      return
+    }
+    fieldStatus.value = 'enabling'
+    const ok = await lua.enableScripting()
+    if (!ok) {
+      fieldStatus.value = 'error'
+      fieldError.value = 'Couldn\'t turn on scripting and reconnect. Try the Drone settings page.'
+      return
+    }
+    await installField()
   }
-  await installField()
+  catch (e) {
+    fieldStatus.value = 'error'
+    fieldError.value = e instanceof Error ? e.message : String(e)
+  }
 }
 
 // Upload the applet + helper and load them (no reboot — scripting restart
-// rescans). Leaves them installed for field use.
+// rescans). Leaves them installed for field use. A storage failure here
+// (e.g. the card was pulled mid-flow) gets the same SD-card guidance as
+// the up-front check rather than a raw FTP errno.
 async function installField() {
   fieldStatus.value = 'installing'
   fieldError.value = null
@@ -177,8 +213,15 @@ async function installField() {
     fieldStatus.value = 'installed'
   }
   catch (e) {
-    fieldStatus.value = 'error'
-    fieldError.value = e instanceof Error ? e.message : String(e)
+    const problem = storageProblemFromError(e)
+    if (problem) {
+      fieldStatus.value = 'no-storage'
+      fieldError.value = storageHint(problem)
+    }
+    else {
+      fieldStatus.value = 'error'
+      fieldError.value = e instanceof Error ? e.message : String(e)
+    }
   }
 }
 
@@ -737,6 +780,19 @@ function labelStyle(angleDeg: number): Record<string, string> {
         </div>
         <div v-else-if="fieldStatus === 'removing'" class="text-muted flex items-center gap-2 text-xs">
           <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Removing…
+        </div>
+        <div v-else-if="fieldStatus === 'no-storage'" class="space-y-2">
+          <UAlert
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-hard-drive"
+            :description="fieldError ?? 'Your flight controller has no SD card to store the field check.'"
+          />
+          <div class="flex justify-end">
+            <UButton size="sm" color="info" icon="i-lucide-rotate-cw" @click="checkFieldStatus">
+              Try again
+            </UButton>
+          </div>
         </div>
         <UAlert
           v-else-if="fieldStatus === 'error'"

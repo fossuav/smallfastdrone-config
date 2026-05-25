@@ -41,12 +41,14 @@
 //     to leave orphans behind, premature.
 
 import type { CommandAck, NamedValueFloat, ParamValue } from 'mavlink-mappings/dist/lib/common'
+import type { ScriptStorageStatus } from './script-storage'
 import { MavFtp, MavFtpError } from '../protocol/ftp'
 import { buildScriptingRestart } from '../protocol/mavlink'
 import { buildParamRequestRead, buildParamSet } from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from './reconnect'
+import { storageProblemFromError } from './script-storage'
 
 // MAV_COMP_ID_AUTOPILOT1 — the FC's component id, which is what PARAM_SET
 // and REQUEST_MESSAGE must target.
@@ -156,6 +158,26 @@ export function useLuaEngine() {
     if (!scrEnable)
       return { available: false, enabled: false }
     return { available: true, enabled: scrEnable.value > 0 }
+  }
+
+  // Probe whether the FC has writable storage for scripts — call this
+  // before offering to install, and before the scripting-enable reboot, so
+  // the operator isn't put through a restart only to fail at the upload.
+  // Creating APM/ is harmless: it's the standard root and usually already
+  // exists, which comes back as FileExists (errCode 8) and confirms the
+  // volume is writable. A FailErrno means there's nowhere to write;
+  // storageProblemFromError names why (almost always a missing SD card).
+  async function checkScriptStorage(): Promise<ScriptStorageStatus> {
+    const ftp = getFtp()
+    try {
+      await ftp.createDirectory('APM')
+      return 'ok'
+    }
+    catch (e) {
+      if (e instanceof MavFtpError && e.errCode === 8)
+        return 'ok'
+      return storageProblemFromError(e) ?? 'unknown'
+    }
   }
 
   // Turn scripting on: write SCR_ENABLE=1, settle, reboot, auto-reconnect,
@@ -397,6 +419,7 @@ export function useLuaEngine() {
     appletPath,
     modulePath,
     checkScripting,
+    checkScriptStorage,
     enableScripting,
     uploadApplet,
     removeApplet,

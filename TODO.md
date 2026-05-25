@@ -58,6 +58,14 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 - `[ux]` **Less wordy displays.** Trim inline copy; move help / explanatory
   text into popovers or tooltips rather than paragraphs on the page. Reinforces
   the [docs/UX.md](docs/UX.md) microcopy rules.
+- `[ux]` **Notifications: less invasive + actionable.** The bottom-right error
+  toasts (FC status warnings + app errors) feel intrusive. Two directions to
+  explore: (a) *less invasive* — shorter dwell, quieter styling, or route
+  lower-severity messages straight to the nav bell instead of popping a toast;
+  (b) *"click to fix"* — when a message has a known remedy, give the toast an
+  action that takes the operator to the fix (e.g. a failsafe warning → the
+  relevant wizard; "no SD card" → guidance). Builds on the existing
+  bell/popover notification surface.
 
 ## Tooling
 
