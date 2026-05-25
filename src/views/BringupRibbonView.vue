@@ -36,8 +36,8 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
 import { useWizardProgressStore } from '../stores/wizardProgress'
+import EscQuickControls from '../ui/components/EscQuickControls.vue'
 import WizardRibbon from '../ui/components/WizardRibbon.vue'
-import { BIDIR_MASK_PARAM, isDshot, MOT_PWM_TYPE_PARAM, protocolLabel } from '../workflow/esc-setup'
 import { frameGeometry } from '../workflow/motor-geometry'
 import { getWizard } from '../workflow/wizard-runtime'
 
@@ -95,20 +95,9 @@ const config = computed<Record<string, ConfigField[]>>(() => {
   if (geo)
     frame.push({ label: 'Motors', value: String(geo.motors.length) })
 
-  // Motors: ESC protocol + telemetry + the order/direction check result.
-  const motors: ConfigField[] = []
-  const pwm = val(MOT_PWM_TYPE_PARAM)
-  if (pwm === undefined) {
-    motors.push({ label: 'ESCs', value: 'Not set up yet' })
-  }
-  else {
-    motors.push({ label: 'Protocol', value: protocolLabel(Math.trunc(pwm)) })
-    if (isDshot(Math.trunc(pwm)))
-      motors.push({ label: 'Telemetry', value: Math.trunc(val(BIDIR_MASK_PARAM) ?? 0) > 0 ? 'RPM on' : 'off' })
-  }
-  motors.push({ label: 'Check', value: progress.getCompletion(session.fcUid, 'motor-check') ? 'all passing' : 'not run yet' })
-
-  return { 'preflight': preflight, 'frame-select': frame, 'motor-check': motors }
+  // Motors has no read-only fields here — its panel hosts the ESC quick
+  // controls (EscQuickControls) + the direction-check status instead.
+  return { 'preflight': preflight, 'frame-select': frame }
 })
 
 // Project each area into its tab + panel data.
@@ -126,6 +115,12 @@ const areas = computed(() =>
 )
 
 const tabs = computed(() => areas.value.map(a => ({ id: a.id, label: a.label, done: a.done })))
+
+// Motor order/direction status for the Motors panel (the procedure part —
+// protocol + telemetry are the inline quick controls; this is the check).
+const motorDirectionStatus = computed(() =>
+  progress.getCompletion(session.fcUid, 'motor-check') ? 'checked — all passing' : 'not checked yet',
+)
 
 // The selected area comes from the URL so tabs are deep-linkable and
 // browser back/forward steps between them.
@@ -190,8 +185,11 @@ onMounted(() => {
       </UBadge>
     </div>
 
-    <!-- Not connected — the config + wizards need a live FC. -->
-    <UCard v-if="!session.connected || !session.hasHeartbeat">
+    <!-- Not connected — the config + wizards need a live FC. Suppressed while
+         a reboot is in flight (a quick-toggle on the panel restarts the FC):
+         the ribbon stays put and the inline control shows its own "restarting"
+         state, rather than the whole ribbon collapsing to a connect prompt. -->
+    <UCard v-if="!session.rebooting && (!session.connected || !session.hasHeartbeat)">
       <div class="text-muted py-8 text-center text-sm">
         <UIcon name="i-lucide-plug" class="mx-auto size-6" />
         <p class="mt-2">
@@ -208,36 +206,50 @@ onMounted(() => {
       <WizardRibbon :model-value="selected" :tabs="tabs" @update:model-value="selectArea" />
 
       <!-- Current-config panel for the selected tab. -->
-      <div v-if="selectedArea" class="mt-4 flex items-start justify-between gap-3">
-        <div class="flex items-start gap-3">
-          <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-md">
-            <UIcon :name="selectedArea.hero" class="size-6" />
-          </div>
-          <div>
+      <div v-if="selectedArea" class="mt-4 space-y-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-md">
+              <UIcon :name="selectedArea.hero" class="size-6" />
+            </div>
             <h2 class="text-highlighted font-semibold">
               {{ selectedArea.label }}
             </h2>
-            <div class="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-              <span v-for="f in selectedArea.fields" :key="f.label">
-                <span class="text-muted">{{ f.label }}:</span>
-                <span class="text-default ml-1 font-medium">{{ f.value }}</span>
-              </span>
-            </div>
           </div>
+          <RouterLink
+            :to="`/wizard/${selected}?returnTo=/bringup`"
+            class="text-muted hover:text-primary inline-flex shrink-0 items-center gap-1 text-sm"
+          >
+            Open on its own
+            <UIcon name="i-lucide-arrow-up-right" class="size-4" />
+          </RouterLink>
         </div>
-        <RouterLink
-          :to="`/wizard/${selected}?returnTo=/bringup`"
-          class="text-muted hover:text-primary inline-flex shrink-0 items-center gap-1 text-sm"
-        >
-          Open on its own
-          <UIcon name="i-lucide-arrow-up-right" class="size-4" />
-        </RouterLink>
+
+        <!-- Motors: ESC settings are simple + reversible, so they're inline
+             quick controls here; the order/direction CHECK is the guided
+             procedure below. -->
+        <template v-if="selected === 'motor-check'">
+          <EscQuickControls />
+          <div class="text-sm">
+            <span class="text-muted">Motor direction:</span>
+            <span class="text-default ml-1 font-medium">{{ motorDirectionStatus }}</span>
+          </div>
+        </template>
+
+        <!-- Other areas: read-only current-config fields. -->
+        <div v-else class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <span v-for="f in selectedArea.fields" :key="f.label">
+            <span class="text-muted">{{ f.label }}:</span>
+            <span class="text-default ml-1 font-medium">{{ f.value }}</span>
+          </span>
+        </div>
       </div>
 
       <hr class="border-default my-4">
 
-      <!-- The selected area's wizard, full width. -->
-      <component :is="contentView" v-if="contentView" :key="selected" />
+      <!-- The selected area's wizard, full width. For Motors the ESC config
+           lives in the panel above, so the embedded check skips ESC setup. -->
+      <component :is="contentView" v-if="contentView" :key="selected" :skip-esc="selected === 'motor-check'" />
       <div v-else class="text-muted py-12 text-center text-sm">
         Loading…
       </div>

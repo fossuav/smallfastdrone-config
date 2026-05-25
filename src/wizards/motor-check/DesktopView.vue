@@ -65,6 +65,12 @@ import appletSource from './applet.lua?raw'
 import helperSource from './crsf_helper.lua?raw'
 import EscSetup from './EscSetup.vue'
 
+// Skip the ESC-setup phase and open straight on the safety gate. Used when
+// the wizard is embedded somewhere that already owns the ESC config — the
+// bringup ribbon surfaces protocol + RPM telemetry as inline quick controls
+// on its Motors panel, so the embedded check is just the order/direction
+// procedure. Standalone (route-mounted) the prop is absent → ESC-setup first.
+const props = withDefaults(defineProps<{ skipEsc?: boolean }>(), { skipEsc: false })
 const WIZARD_ID = 'motor-check'
 const COMP_ID_AUTOPILOT = 1
 const MSGID_COMMAND_ACK = 77
@@ -97,16 +103,22 @@ const errorMessage = ref<string | null>(null)
 // motors". Transient sub-states (applying a fix, restarting, reconnecting)
 // map onto the step they belong to; off-flow states (loading / unsupported
 // / error) hide the rail entirely.
-const WIZARD_STEPS = ['ESC setup', 'Safety', 'Check motors', 'Results']
+// ESC setup drops out of the rail when the host owns it (skipEsc).
+const WIZARD_STEPS = computed(() =>
+  props.skipEsc
+    ? ['Safety', 'Check motors', 'Results']
+    : ['ESC setup', 'Safety', 'Check motors', 'Results'],
+)
 const flowStep = computed(() => {
+  const offset = props.skipEsc ? 1 : 0
   switch (phase.value) {
     case 'esc-setup': return 0
-    case 'safety': return 1
-    case 'testing': return 2
+    case 'safety': return 1 - offset
+    case 'testing': return 2 - offset
     case 'review':
     case 'correcting':
     case 'restarting':
-    case 'reconnect-failed': return 3
+    case 'reconnect-failed': return 3 - offset
     default: return -1
   }
 })
@@ -312,8 +324,9 @@ onMounted(async () => {
     motors.value = geo.motors
     frameLabel.value = geo.label
     // ESC setup runs first (it determines whether DShot direction-fix is
-    // available); it advances to the safety gate when done.
-    phase.value = 'esc-setup'
+    // available); it advances to the safety gate when done. When the host
+    // already owns ESC config (the ribbon), skip straight to the safety gate.
+    phase.value = props.skipEsc ? 'safety' : 'esc-setup'
     // Probe the field-install status in the background; the safety screen
     // (after ESC setup) shows its panel as soon as this resolves.
     void checkFieldStatus()
