@@ -23,7 +23,7 @@ Each phase is a sub-wizard (see [WIZARDS.md](WIZARDS.md) for the manifest shape)
 | 01 | **Frame** | Frame class/type, motor count, prop direction | Operator confirms frame against UI render | 3D drone in frame-class variant; operator can rotate to compare with their actual drone |
 | 02 | **Sensors** | Accel cal, compass cal, baro check | Auto: cal status flags clear | 3D drone with animated tilt arrows showing the next required orientation |
 | 03 | **RC** | RC protocol, channel mapping, throttle/yaw/pitch/roll trim, RC failsafe | Operator stick-test pass | SVG sticks animating live with operator's transmitter input |
-| 04 | **Motors / ESCs** | Motor order, direction, ESC calibration; **optionally** flash BLHeli ESC firmware via 4-way passthrough (Phase 6 capability) | Operator visual motor-test pass — **props off** | 3D drone top-down with active motor highlighted + prop-direction arrows |
+| 04 | **Motors / ESCs** ("Set up motors" wizard) | ESC output protocol + bidirectional DShot + DShot rate (opinionated default DShot600 + bidir on), **then** motor order + direction, **then** ESC throttle calibration for analog ESCs; **optionally** flash BLHeli ESC firmware via 4-way passthrough (Phase 6 capability) | Operator visual motor-test pass — **props off** | 3D drone top-down with active motor highlighted + prop-direction arrows |
 | 05 | **First-hover prep** | Battery / RC / GCS / EKF failsafes, arming checks, max angle/throttle | Auto: arming check passes | SVG illustration of failsafe tree with each branch lighting up green as configured |
 | 06 | **First hover** | Operator hovers; tool collects 30–60 s stable hover log | Operator confirms stable hover | Live vibration sparkline + altitude trace + link-quality indicator |
 | 07 | **Filters** | Notch filter from hover-log gyro spectrum, harmonic notch config | Auto: post-tune log shows clean spectrum | Live gyro spectrum plot showing peak detection and notch placement preview |
@@ -32,6 +32,16 @@ Each phase is a sub-wizard (see [WIZARDS.md](WIZARDS.md) for the manifest shape)
 | 10 | **Verify** | Final audit: failsafes wired, RTL alt sane, geofence (if requested), throw config sanity | Operator review checklist | Checklist with per-item green-check / illustration; final celebratory drone fly-by |
 
 Phases are advisory; an experienced operator can skip ahead but the gate must be acknowledged ("I've done this elsewhere") rather than silently bypassed.
+
+### Phase 04 detail — the "Set up motors" wizard
+
+Motors and ESCs are one operator task, so phase 04 is a single multi-phase wizard (grown from the original motor-check), in **dependency order**:
+
+1. **ESC setup** — output protocol + telemetry. Opinionated SFD default: **DShot600 + bidirectional DShot** (RPM telemetry, which later feeds the phase-07 harmonic notch). Owns `MOT_PWM_TYPE`, `SERVO_DSHOT_RATE`, `SERVO_BLH_BDMASK` (+`SERVO_BLH_POLES`). Reboot-required.
+2. **Motor order + direction** — spin each motor, operator identifies position + spin; the planner fixes order (`FRAME_TYPE` / `SERVOn_FUNCTION`) and direction (`SERVO_BLH_RVMASK`).
+3. **ESC throttle calibration** — only for analog (PWM/OneShot) ESCs; skipped on DShot. Interactive (spins motors at max) so it gets its own props-off safety gate.
+
+ESC setup comes **first** because the direction auto-fix (`SERVO_BLH_RVMASK`) only works on DShot ESCs — choosing the protocol up front makes the fix reliably available rather than silently absent. The in-field CRSF version covers only the order/direction check (ESC config isn't a radio-menu task). ESC *firmware* (BLHeli) settings are deferred to Phase 6 (4-way passthrough).
 
 ### Phase contract
 
