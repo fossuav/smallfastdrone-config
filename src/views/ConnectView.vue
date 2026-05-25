@@ -22,10 +22,12 @@
 
 import { computed } from 'vue'
 import { useSessionStore } from '../stores/session'
+import { useUiStore } from '../stores/ui'
 import SystemStatus from '../ui/components/SystemStatus.vue'
 import Drone3D from '../ui/visuals/Drone3D.vue'
 
 const session = useSessionStore()
+const ui = useUiStore()
 
 const buttonLabel = computed(() => {
   if (session.connecting)
@@ -37,11 +39,18 @@ const buttonLabel = computed(() => {
 
 // Combine in JS rather than via a Vue `<template>` between interpolations —
 // the latter drops the separating whitespace once the linter reformats it.
+// The firmware string carries a trailing git hash ("4.7.0-beta (210fe947)")
+// — useful to a developer, noise to an operator — so strip the parenthetical
+// outside expert mode.
 const autopilotLine = computed(() => {
   const base = session.autopilotLabelText
   if (!base)
     return ''
-  return session.firmwareVersion ? `${base} ${session.firmwareVersion}` : base
+  const version = session.firmwareVersion
+  if (!version)
+    return base
+  const shown = ui.expert ? version : version.replace(/\s*\([^)]*\)\s*$/, '')
+  return `${base} ${shown}`
 })
 
 // Click handler for the single Connect / Disconnect button — the
@@ -79,15 +88,19 @@ function toggle() {
             <dt>Autopilot:</dt><dd class="text-default">
               {{ autopilotLine }}
             </dd>
-            <dt>System ID:</dt><dd class="text-default">
-              {{ session.sysid }}
-            </dd>
             <dt>State:</dt><dd class="text-default">
               {{ session.systemStatusText }}
             </dd>
-            <dt>Link:</dt><dd class="text-default">
-              {{ session.bytesReceived.toLocaleString() }} bytes
-            </dd>
+            <!-- System ID + raw link byte count are developer detail — only
+                 surfaced in expert mode, per docs/UX.md operator-first copy. -->
+            <template v-if="ui.expert">
+              <dt>System ID:</dt><dd class="text-default">
+                {{ session.sysid }}
+              </dd>
+              <dt>Link:</dt><dd class="text-default">
+                {{ session.bytesReceived.toLocaleString() }} bytes
+              </dd>
+            </template>
           </dl>
         </div>
         <div class="border-default border-t pt-3">
@@ -100,7 +113,7 @@ function toggle() {
         <p class="text-default">
           Connected. Waiting for your drone to say hello…
         </p>
-        <p class="text-muted">
+        <p v-if="ui.expert" class="text-muted">
           {{ session.bytesReceived.toLocaleString() }} bytes received
         </p>
       </div>
@@ -110,18 +123,44 @@ function toggle() {
       </div>
 
       <template #footer>
-        <UButton
-          color="primary"
-          block
-          :loading="session.connecting"
-          @click="toggle"
-        >
-          {{ buttonLabel }}
-        </UButton>
-        <p class="text-muted mt-2 text-center text-xs">
-          Plug your drone in via USB and click <em>Connect drone</em>. For SITL testing, load this page with
-          <code class="bg-muted rounded px-1 py-0.5">?transport=websocket&amp;host=localhost:5761</code> instead.
-        </p>
+        <!-- Connected and the drone has said hello: the operator's next step
+             is to start setup, so that's the primary action; Disconnect drops
+             to a quiet secondary. -->
+        <template v-if="session.connected && session.hasHeartbeat">
+          <UButton
+            color="primary"
+            block
+            trailing-icon="i-lucide-arrow-right"
+            to="/wizard"
+          >
+            Set up your drone
+          </UButton>
+          <div class="mt-2 text-center">
+            <UButton color="neutral" variant="ghost" size="sm" @click="toggle">
+              Disconnect
+            </UButton>
+          </div>
+        </template>
+
+        <!-- Not yet connected (or connecting / waiting for heartbeat): the
+             connect toggle is the primary action. -->
+        <template v-else>
+          <UButton
+            color="primary"
+            block
+            :loading="session.connecting"
+            @click="toggle"
+          >
+            {{ buttonLabel }}
+          </UButton>
+          <p class="text-muted mt-2 text-center text-xs">
+            Plug your drone in via USB and click <em>Connect drone</em>.
+          </p>
+          <p v-if="ui.expert" class="text-muted mt-1 text-center text-xs">
+            For SITL testing, load this page with
+            <code class="bg-muted rounded px-1 py-0.5">?transport=websocket&amp;host=localhost:5761</code> instead.
+          </p>
+        </template>
       </template>
     </UCard>
   </div>

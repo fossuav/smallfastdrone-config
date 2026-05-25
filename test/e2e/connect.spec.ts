@@ -40,14 +40,18 @@ test('Connect view talks to SITL, decodes heartbeat + AUTOPILOT_VERSION', async 
   // AUTOPILOT_VERSION arrives and the firmware string is rendered, plus
   // the boot banner (requested via DO_SEND_BANNER) flips the autopilot
   // label from "ArduPilot" to "SmallFastDrone" via the SFD detector.
-  // Loose-match the version number + git hash so submodule bumps don't
-  // break the test.
+  // Loose-match the version number so submodule bumps don't break the test.
   await expect(
-    page.getByText(/SmallFastDrone 4\.\d+\.\d+(?:-alpha|-beta|-rc|-dev)? \([0-9a-f]{6,}\)/),
+    page.getByText(/SmallFastDrone 4\.\d+\.\d+(?:-alpha|-beta|-rc|-dev)?/),
   ).toBeVisible({ timeout: 10_000 })
 
-  // Sysid 1 is the SITL default
-  await expect(page.getByText('System ID:')).toBeVisible()
+  // Operator-first by default (docs/UX.md): developer detail — System ID,
+  // raw link bytes, and the firmware git hash — is gated behind expert mode,
+  // so none of it shows on the default Connect card.
+  await expect(page.getByText('System ID:')).toHaveCount(0)
+  await expect(
+    page.getByText(/SmallFastDrone 4\.\d+\.\d+(?:-alpha|-beta|-rc|-dev)? \([0-9a-f]{6,}\)/),
+  ).toHaveCount(0)
 
   // System status panel: SYS_STATUS arrives within a heartbeat or two.
   // SITL on a fresh boot reports the IMU bits healthy; we just check
@@ -66,7 +70,15 @@ test('Connect view talks to SITL, decodes heartbeat + AUTOPILOT_VERSION', async 
   // Close the popover by clicking the bell again (or pressing Escape).
   await page.keyboard.press('Escape')
 
-  // Disconnect works without throwing
+  // Flipping expert mode on reveals the developer detail it had hidden —
+  // System ID and the firmware git hash both appear on the card.
+  await page.getByText('Expert', { exact: true }).click()
+  await expect(page.getByText('System ID:')).toBeVisible()
+  await expect(
+    page.getByText(/SmallFastDrone 4\.\d+\.\d+(?:-alpha|-beta|-rc|-dev)? \([0-9a-f]{6,}\)/),
+  ).toBeVisible()
+
+  // Disconnect works without throwing (a quiet secondary once connected).
   await page.getByRole('button', { name: 'Disconnect' }).click()
   await expect(page.getByRole('button', { name: 'Connect drone' })).toBeVisible()
 })
