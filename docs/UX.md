@@ -44,7 +44,7 @@ Expert mode is **off by default** and **per-session** — re-enable each session
 ### Brand palette
 
 - **Purple** (FOSS UAV): anchor `#4A1E80`, scaled into a `foss-50…950` Tailwind palette. Used as Nuxt UI's `primary` slot — the dominant action colour (buttons, active nav, links, icons that signal "you can act here").
-- **Gold** (FOSS UAV): anchor `#C9A35F`, scaled into a `gold-50…950` palette. Used as Nuxt UI's `secondary` slot — accent for completion / success states, highlighted labels, decorative emphasis. Sparing use: gold draws attention; it isn't a wallpaper.
+- **Gold** (FOSS UAV): anchor `#C9A35F`, scaled into a `gold-50…950` palette. Used as Nuxt UI's `secondary` slot — accent for highlighted labels and decorative emphasis. Sparing use: gold draws attention; it isn't a wallpaper. **Not** the completion signal — done/complete states use green (Nuxt UI's `success`), consistently across the app (library "Done" badges, the wizard phase rail + bringup ribbon ticks, review screens). A green tick reads unambiguously as "this is finished and good"; gold is reserved for "look here," not "this passed."
 - **Neutral** (SFD black/white minimalism): Tailwind's `neutral` palette — true grayscale for text, backgrounds, and structural surfaces. Most of the screen is neutral; brand colour appears where the operator needs to look.
 
 Definitions live in `src/assets/css/main.css` (`@theme` block) and are wired into Nuxt UI via the `ui()` Vite plugin options in `vite.config.ts`. Standard Nuxt UI components pick the right intensities automatically (light mode pulls `-500/-600`, dark mode pulls `-400`).

@@ -94,6 +94,13 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   expert-gating: keep the firmware *version* (useful pre-flight), hide the hash
   + FC ID outside expert mode. Surfaced when the ribbon prototype mounted
   preflight inline.
+- `[wizard] [ux]` **Pre-arm readiness shows in phase 00.** The pre-flight
+  view's SystemStatus panel surfaces the pre-arm-checks subsystem + "Not ready
+  to arm yet", but arm-readiness is a phase-05 (pre-first-flight) gate, not an
+  opening-step concern — a fresh drone can't be arm-ready before it's
+  configured (see docs/BRINGUP.md). The opening pre-flight should report
+  hardware sanity only; move arm-readiness to the future First-hover-prep
+  wizard. (The bringup ribbon's Pre-flight summary already does this.)
 - `[wizard] [ux]` **Field-install panel competes with the primary action.** On
   the motor-check safety gate the "Run this at the field (no laptop)" install
   panel sits below — and visually competes with — the primary "Start motor

@@ -33,6 +33,8 @@ Each phase is a sub-wizard (see [WIZARDS.md](WIZARDS.md) for the manifest shape)
 
 Phases are advisory; an experienced operator can skip ahead but the gate must be acknowledged ("I've done this elsewhere") rather than silently bypassed.
 
+**Pre-arm readiness is a phase-05 gate, not a phase-00 one.** The opening Pre-flight phase reports *hardware sanity* — sensors present + healthy, correct firmware — because that's what's knowable and actionable before any configuration. Whether the drone will actually *arm* depends on configuration that hasn't happened yet (frame, RC, failsafes), so the arm checks belong in phase 05 (First-hover prep), prior to first flight. UI surfaces follow this: the bringup ribbon's Pre-flight tab summarises sensor health, not arm-readiness, and arm-readiness shouldn't be presented as an opening-step concern.
+
 ### Phase 04 detail — the "Set up motors" wizard
 
 Motors and ESCs are one operator task, so phase 04 is a single multi-phase wizard (grown from the original motor-check), in **dependency order**:
