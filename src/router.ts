@@ -37,6 +37,13 @@ export const routes: RouteRecordRaw[] = [
     meta: { label: 'Bringup', icon: 'i-lucide-wand-2' },
   },
   {
+    // PROTOTYPE — ribbon layout for the bringup journey. No nav label
+    // (kept out of the main menu); reached via the library's preview link.
+    path: '/bringup',
+    name: 'bringup-ribbon',
+    component: () => import('./views/BringupRibbonView.vue'),
+  },
+  {
     // Per-wizard runner. No `meta.label` so it doesn't appear in the
     // nav; the library is the entry point and links into here.
     path: '/wizard/:id',
