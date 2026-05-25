@@ -192,7 +192,7 @@ function skip() {
         icon="i-lucide-wand-2"
         title="We'll set your ESCs to DShot600"
         :description="bidirSupported
-          ? 'DShot600 with RPM telemetry — the recommended setup for small fast drones. It also feeds smoother filter tuning later. Your drone restarts briefly.'
+          ? 'DShot600 with RPM telemetry — the recommended setup for small fast drones. The RPM readings help smooth out vibration in flight. Your drone restarts briefly.'
           : 'DShot600 — the recommended setup for small fast drones. Your drone restarts briefly.'"
       />
 
@@ -220,9 +220,9 @@ function skip() {
         </div>
         <div class="flex items-center justify-between gap-3">
           <div>
-            <span class="text-default text-sm font-medium">RPM telemetry (bidirectional DShot)</span>
+            <span class="text-default text-sm font-medium">RPM telemetry</span>
             <p class="text-muted text-xs">
-              ESCs report motor RPM back — feeds the harmonic-notch filter.
+              ESCs report motor RPM back — this helps the drone smooth out vibration in flight.
               {{ bidirSupported ? '' : 'Not available on this firmware build.' }}
             </p>
           </div>
