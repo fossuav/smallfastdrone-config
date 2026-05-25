@@ -115,6 +115,15 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 - `[ux]` **SFD logo as the favicon.** Use the SmallFastDrone logo as the
   browser-tab icon.
+- `[wizard] [ux]` **Embedded wizards' "Back to library" is a misnomer in the
+  ribbon.** Mounted in the bringup ribbon, the sub-wizards' own back/cancel/done
+  buttons (labelled "Back to library", "Cancel") return to the ribbon (correct
+  behaviour via returnTo) but read wrong. When the ribbon graduates from preview
+  to primary, give the embedded views context-aware labels (or have the ribbon
+  own the back affordance). Also: a post-reconnect SITL re-drop can briefly show
+  the ribbon's "connect your drone" prompt — the runner's keep-mounted-across-
+  transient-drops robustness would fully fix it (the reboot-in-flight case is
+  already handled).
 - `[ux]` **Nav exposes not-yet-built sections.** Recipes (and likely Logs /
   Firmware) are top-level nav items that lead to a "Coming soon" dead end.
   Badge them as coming-soon or hide them until they do something, so an
@@ -133,6 +142,13 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 ## Tooling
 
+- `[test]` **Bringup-meta E2E is flaky under SITL load.** `wizard.spec.ts`'s
+  "Bringup meta-wizard chains…" test (last + heaviest in the suite, after the
+  motor-check specs reboot SITL several times) intermittently times out with a
+  connection drop / unrendered sub-wizard — seen ~2 of 5 full runs, passes on
+  re-run. Not a product bug (SITL post-reboot instability). Options: give SITL a
+  settle/health-check between the reboot-heavy specs, split SITL instances, or
+  add a connection-retry guard in the test. Until then it needs a re-run.
 - `[tooling]` **Scaffold applet param-table key collisions.** `new-wizard.sh`'s
   `--lua` stub defaults `PARAM_TABLE_KEY = 0` / prefix `WIZ_`. Fine for a single
   applet, but two installed field applets would collide. Revisit when the
