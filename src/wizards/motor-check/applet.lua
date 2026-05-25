@@ -36,6 +36,17 @@ local function is_motor_function(fn)
   return (fn >= 33 and fn <= 40) or (fn >= 82 and fn <= 85)
 end
 
+-- ESC output protocols, short labels for the radio screen. Value is
+-- MOT_PWM_TYPE. Mirrors ESC_PROTOCOLS in esc-setup.ts (recommended first).
+local ESC_PROTOS = {
+  { label = 'DShot600', value = 6 },
+  { label = 'DShot300', value = 5 },
+  { label = 'DShot150', value = 4 },
+  { label = 'OneShot125', value = 2 },
+  { label = 'Normal PWM', value = 0 },
+}
+local function is_dshot(t) return t >= 4 and t <= 7 end
+
 -- Frame layouts in test order, transcribed from motor-geometry.ts (itself
 -- from AP_MotorsMatrix.cpp). Each motor: t = test order, mi = mixer index,
 -- pos = short operator-facing position, spin = expected direction.
@@ -178,6 +189,10 @@ local sel_dir = nil
 local pending = nil -- corrections awaiting confirm
 local reboot_at = nil
 local status_item -- forward ref to the dynamic INFO item
+-- ESC-setup state: chosen MOT_PWM_TYPE + bidir telemetry, + pending edits.
+local esc_proto = 6 -- default DShot600
+local esc_bidir = true
+local esc_pending = nil
 
 local function motor_count() return frame and #frame.motors or 0 end
 
@@ -248,6 +263,62 @@ local function on_apply(action)
   return STATUS.READY, 'Apply'
 end
 
+-- ESC setup (mirrors esc-setup.ts). The bidir-dshot param exists only on
+-- builds with HAL_WITH_BIDIR_DSHOT (incl. our SITL branch).
+local function bidir_supported() return param:get('SERVO_BLH_BDMASK') ~= nil end
+
+-- The param edits to realise the chosen ESC config — only what differs.
+local function esc_param_edits()
+  local edits = {}
+  local cur = param:get('MOT_PWM_TYPE')
+  if cur == nil or math.floor(cur + 0.5) ~= esc_proto then
+    edits[#edits + 1] = { 'MOT_PWM_TYPE', esc_proto }
+  end
+  if bidir_supported() and is_dshot(esc_proto) then
+    local want = 0
+    if esc_bidir then
+      for ch, _ in pairs(read_channel_functions()) do want = want | (1 << (ch - 1)) end
+    end
+    local curmask = math.floor((param:get('SERVO_BLH_BDMASK') or 0) + 0.5)
+    if curmask ~= want then edits[#edits + 1] = { 'SERVO_BLH_BDMASK', want } end
+    if esc_bidir then
+      local poles = param:get('SERVO_BLH_POLES')
+      if poles == nil or math.floor(poles + 0.5) == 0 then
+        edits[#edits + 1] = { 'SERVO_BLH_POLES', 14 }
+      end
+    end
+  end
+  return edits
+end
+
+-- SELECTION callbacks record the operator's ESC picks.
+local function on_esc_proto(value)
+  for _, p in ipairs(ESC_PROTOS) do
+    if p.label == value then esc_proto = p.value end
+  end
+end
+local function on_esc_telem(value) esc_bidir = (value == 'On') end
+
+-- COMMAND: compute + confirm + write ESC params + reboot (reboot-required).
+local function on_esc_apply(action)
+  if action == STATUS.START then
+    esc_pending = esc_param_edits()
+    if #esc_pending == 0 then return STATUS.READY, 'Already set' end
+    return STATUS.CONFIRMATION_NEEDED, 'Set + reboot?'
+  elseif action == STATUS.CONFIRM then
+    if esc_pending == nil then return STATUS.READY, 'Apply' end
+    if arming:is_armed() then return STATUS.READY, 'Disarm first!' end
+    for _, e in ipairs(esc_pending) do param:set_and_save(e[1], e[2]) end
+    esc_pending = nil
+    reboot_at = millis():tofloat() + REBOOT_DELAY_MS
+    return STATUS.READY, 'Set - rebooting'
+  elseif action == STATUS.CANCEL then
+    esc_pending = nil
+    return STATUS.READY, 'Cancelled'
+  end
+  return STATUS.READY, 'Apply'
+end
+
 -- Build the position picker options for this frame.
 local function position_options()
   local opts = {}
@@ -262,10 +333,31 @@ end
 status_item = { type = 'INFO', name = 'Now' }
 refresh_status()
 
+-- Seed the ESC selections from the FC's current config so the menu opens
+-- showing what's already set.
+do
+  local cur = param:get('MOT_PWM_TYPE')
+  if cur ~= nil and is_dshot(math.floor(cur + 0.5)) then esc_proto = math.floor(cur + 0.5) end
+  esc_bidir = math.floor((param:get('SERVO_BLH_BDMASK') or 0) + 0.5) > 0
+end
+local esc_proto_labels, esc_proto_default = {}, 1
+for i, p in ipairs(ESC_PROTOS) do
+  esc_proto_labels[i] = p.label
+  if p.value == esc_proto then esc_proto_default = i end
+end
+local esc_telem_default = esc_bidir and 1 or 2 -- options { 'On', 'Off' }
+
 local menu_definition = {
   name = 'Motor check',
   items = {
     { type = 'INFO', name = 'Safety', info = 'PROPS OFF first' },
+    -- ESC setup first (matches the desktop wizard order): protocol +
+    -- telemetry, then the order/direction check below.
+    { type = 'MENU', name = 'ESC setup', items = {
+      { type = 'SELECTION', name = 'Protocol', options = esc_proto_labels, default = esc_proto_default, callback = on_esc_proto },
+      { type = 'SELECTION', name = 'Telemetry', options = { 'On', 'Off' }, default = esc_telem_default, callback = on_esc_telem },
+      { type = 'COMMAND', name = 'Apply ESCs', info = 'Apply', callback = on_esc_apply },
+    } },
     status_item,
     { type = 'COMMAND', name = 'Spin motor', info = 'Spin', callback = on_spin },
     { type = 'SELECTION', name = 'Moved at', options = position_options(), default = 1, callback = on_where },
