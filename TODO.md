@@ -71,6 +71,28 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   (output protocol + DShot rate + bidirectional DShot) is now scheduled as the
   first phase of the **"Set up motors" wizard** (grown from motor-check). ESC
   *firmware* (BLHeli) settings stay Phase 6 (4-way passthrough).
+- `[wizard] [ux]` **Motor-check pre-defaults the expected answer (blind-check
+  tradeoff).** On the identify step both the position and direction default to
+  what the firmware expects (an operator request — one-click happy path), and
+  the 3D highlight follows the selection, so it pre-points at the expected
+  motor. The risk: a mis-wired drone is exactly when physical ≠ expected, yet a
+  rushing operator can click "Next motor" x4 and pass — the failure the blind
+  check existed to catch. Decide whether to keep pre-defaulting but leave the
+  *model* neutral until the operator picks, or require an explicit confirm.
+  (Surfaced in the 2026-05-25 screenshot UX audit.)
+- `[wizard] [ux]` **ESC good-state has two equivalent actions.** When the ESCs
+  are already set up well, the phase offers both "Leave as is" and "Continue",
+  which do the same thing — redundant. Collapse to one obvious action in the
+  already-good state. (UX audit.)
+- `[wizard] [ux]` **Frame-select doesn't show the current frame.** "Pick your
+  frame" gives no marker for the layout the drone is currently set to, so the
+  operator can't see what they already have. Highlight the active frame. (UX
+  audit.)
+- `[wizard] [ux]` **Field-install panel competes with the primary action.** On
+  the motor-check safety gate the "Run this at the field (no laptop)" install
+  panel sits below — and visually competes with — the primary "Start motor
+  check". Collapse it behind a disclosure so the primary action stands alone.
+  (UX audit.)
 - `[wizard]` **Force-cal for compass + accel.** Offer a "redo calibration"
   option for compass and accelerometer, shown only when the relevant cal params
   are present on the FC (so it appears only where it can actually act).
@@ -80,6 +102,10 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 - `[ux]` **SFD logo as the favicon.** Use the SmallFastDrone logo as the
   browser-tab icon.
+- `[ux]` **Nav exposes not-yet-built sections.** Recipes (and likely Logs /
+  Firmware) are top-level nav items that lead to a "Coming soon" dead end.
+  Badge them as coming-soon or hide them until they do something, so an
+  operator doesn't click into an empty page. (2026-05-25 UX audit.)
 - `[ux]` **Less wordy displays.** Trim inline copy; move help / explanatory
   text into popovers or tooltips rather than paragraphs on the page. Reinforces
   the [docs/UX.md](docs/UX.md) microcopy rules.
