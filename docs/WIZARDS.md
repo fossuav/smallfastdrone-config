@@ -189,7 +189,21 @@ The applet `require`s the firmware's `crsf_helper`, which isn't in SITL's ROMFS,
 
 The correction/decision maths in the applet must mirror the tool-side TS it duplicates (e.g. motor-check's `compute_corrections` ↔ `computeCorrections`). **Testability:** the spin/param/reboot mechanics and "applet loads + registers its menu" are SITL-verifiable; the menu interaction rides the CRSF radio link (no transmitter in SITL) so it's hardware-verified — call it out in the applet's `.md`.
 
-**Future — a scripting lifecycle manager.** As more field applets land, the tool should grow a single manager that shows every installed script and enables/disables each by **moving it between `APM/scripts` (active) and a disabled subdirectory** (e.g. `APM/scripts/disabled`) — presence in the active dir is what "enabled" means, so we never touch the firmware's scripting internals, only the filesystem via FTP. This generalises the per-wizard install/remove above (install = copy in + restart scripting; disable = move out + restart). The FTP `listDirectory` primitive added here is the first building block; the manager is the natural home for cross-script concerns (heap budgeting, version/update, orphan cleanup) once there's more than one.
+### Field tools catalogue
+
+Field-install is a **cross-cutting** capability, not a per-wizard one: the operator's question is "what can I run from the radio?", which spans wizards *and* (later) settings. So it's promoted out of the individual wizards to a dedicated **Field tools** page (`src/views/FieldToolsView.vue`, route `/field`), reached from a radio-icon **entry point in the app header**. The per-wizard "Run at the field" panels collapse into it.
+
+Two requirements shape it:
+
+- **Selective.** The operator installs only the tools they pick — never an all-or-nothing bundle. So it's a **catalogue** (`src/workflow/field-tools.ts`), not a single install. Each tool is an independent applet: install = upload its applet (+ shared modules) and `restartScripting()`; remove = delete + restart. Installing one never drags in another.
+- **Extensible after the fact (custom + paid).** The catalogue is **registry-driven**, so tools can be added without rebuilding around them:
+  - **Built-in** tools carry their Lua assets as `?raw` imports and are installable immediately.
+  - **Paid** tools are `locked: true` entries — they reuse the **same commercial gating seam as the wizard library** (Pro badge, greyed "Unlock", entitlement check). A locked entry advertises itself but ships no assets to a non-entitled build; entitlement is where the assets + install become available. v1 ships the seam, not a payment integration.
+  - **Custom** (operator-supplied Lua) comes in behind **expert mode**, the same posture as operator-supplied firmware DFU. The data-driven registry is what lets a custom or downloaded tool slot in.
+
+All asset uploads go through the lua-engine, which is the consumer of the **security uploader seam** (`src/security/uploader.ts`) — the same path DFU uses, and where signed/encrypted Lua for paid tools lands later. So a paid field tool = entitlement + (future) encrypted-Lua-over-the-seam.
+
+**Future:** a header badge (count of installed tools — needs a small shared store so the chrome and the page agree); enable/disable without removing, by **moving applets between `APM/scripts` (active) and `APM/scripts/disabled`** (presence = enabled, FTP-only, never touching the firmware's scripting internals — the `listDirectory` primitive is the building block); and cross-script concerns (heap budgeting, version/update, orphan cleanup) once the catalogue is busy.
 
 ## Capability detection
 

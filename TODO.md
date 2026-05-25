@@ -115,6 +115,27 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 - `[ux]` **SFD logo as the favicon.** Use the SmallFastDrone logo as the
   browser-tab icon.
+- `[wizard] [ux]` **Collapse per-wizard "Run at the field" panels into the Field
+  tools catalogue.** Field-install is now a dedicated page (`/field`, header
+  radio icon). The motor-check safety screen still has its own install panel —
+  collapse it to a breadcrumb ("manage in Field tools →") and migrate its E2E
+  (`wizard-motor-check.spec.ts` install/remove test) to drive the catalogue
+  instead. Left intact for now so the suite stays green.
+- `[ux]` **Field tools: header installed-count badge.** The header entry point
+  is just an icon; the preview had a badge showing how many tools are on the
+  radio. Needs a small shared store so the chrome + the page agree on install
+  state (also the building block for enable/disable-by-moving-dirs later).
+- `[ux] [security]` **Field tools: real entitlement + custom upload + secure
+  path.** The Pro rows (`locked`) and "Add your own applet" (expert) are seams —
+  wire the real entitlement check (payment integration) and the custom-applet
+  upload when they exist, and confirm paid/custom uploads route through the
+  security uploader seam (`src/security/uploader.ts`), where signed/encrypted
+  Lua belongs.
+- `[ux]` **Quieten the "Scripting: stopped" toast on restart.** Installing /
+  removing a field tool calls `restartScripting()`, which emits a STATUSTEXT
+  that surfaces as a red error toast — alarming for a normal, expected restart.
+  Suppress or down-rank expected scripting-lifecycle messages (pre-existing;
+  more visible now the catalogue installs from one place).
 - `[wizard] [ux]` **Embedded wizards' "Back to library" is a misnomer in the
   ribbon.** Mounted in the bringup ribbon, the sub-wizards' own back/cancel/done
   buttons (labelled "Back to library", "Cancel") return to the ribbon (correct
