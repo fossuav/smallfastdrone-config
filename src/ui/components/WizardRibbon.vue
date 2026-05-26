@@ -29,10 +29,16 @@ export interface RibbonTab {
   done: boolean
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   tabs: RibbonTab[]
   modelValue: string
-}>()
+  // When true (default), tabs render a numbered circle — the chain is a
+  // progression (e.g. bringup: 1 Pre-flight → 2 Frame → 3 Motors). Set
+  // false for a non-sequential ribbon (e.g. Recipes: free-pick across
+  // independent tuning recipes) — done state still shows a green tick,
+  // not-done tabs render the label without a number.
+  numbered?: boolean
+}>(), { numbered: true })
 const emit = defineEmits<{ 'update:modelValue': [string] }>()
 
 function select(id: string) {
@@ -61,7 +67,11 @@ function markClass(t: RibbonTab): string {
         : 'border-transparent text-muted hover:text-default'"
       @click="select(t.id)"
     >
+      <!-- Numbered chains (bringup): always show the circle, with a tick when
+           done and the step number otherwise. Non-sequential ribbons (recipes):
+           only show the circle for the done tick — not-done tabs are bare. -->
       <span
+        v-if="numbered || t.done"
         class="flex size-5 shrink-0 items-center justify-center rounded-full border text-xs"
         :class="markClass(t)"
       >
