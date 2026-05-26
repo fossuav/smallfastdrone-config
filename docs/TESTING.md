@@ -79,7 +79,9 @@ The leading `:` (true) is load-bearing — without it bash optimises away the su
 
 ## Lua wizards in SITL
 
-Lua-engine wizards **are** testable end-to-end against SITL. `test/e2e/wizard-imu-noise-live.spec.ts` drives the full live path — enable scripting, upload the applet, load it, arm it, read the result — against a real SITL. (An earlier note here claimed this was impossible due to `SCR_ENABLE`'s `AP_PARAM_FLAG_ENABLE` "landing too late"; that was a misdiagnosis. Scripting initialises fine after `SCR_ENABLE=1`, whether set via the boot defaults *or* via `PARAM_SET` + reboot.)
+Lua-engine wizards **are** testable end-to-end against SITL. The Field tools catalogue E2E (`test/e2e/wizard-motor-check.spec.ts` → "Field tools installs Motor check on the radio…") drives the full Lua flow against a real SITL — turn scripting on (write `SCR_ENABLE=1` + reboot + auto-reconnect), FTP the applet + its shared module to `APM/scripts`, restart scripting to rescan, verify the applet is on the FC. (An earlier note here claimed end-to-end Lua testing was impossible due to `SCR_ENABLE`'s `AP_PARAM_FLAG_ENABLE` "landing too late"; that was a misdiagnosis. Scripting initialises fine after `SCR_ENABLE=1`, whether set via the boot defaults *or* via `PARAM_SET` + reboot.)
+
+The first end-to-end Lua-engine wizard was `imu-noise` (a vibration-check demo that exercised the transient upload → arm → run → remove pattern). It's been retired — operator-useful only as a Lua-engine proof, which the motor-check field path now covers. The install-and-keep pattern (used by field tools) is the path that ships; the transient pattern's plumbing remains in `src/workflow/lua-engine.ts` ready for a future wizard that genuinely needs it.
 
 The thing that actually blocked it was a **path mismatch unique to SITL**:
 
@@ -95,7 +97,7 @@ Two facts about how applets load drive the wizard lifecycle (and the test):
 
 The **only** reboot in the Lua flow is the one-time **enable** of `SCR_ENABLE` when it's off — which the drone-settings page owns (write → reboot → auto-reconnect). Wizards treat scripting-on as a precondition and point the operator at Drone settings if it isn't.
 
-The "scripting isn't enabled" fallback path is still covered separately (`test/e2e/imu-noise-wizard.spec.ts`, against stock SITL with `SCR_ENABLE=0`). Because the shared SITL instance carries scripting state across specs, the live spec is named to sort *after* the specs that assert scripting is off, and tolerates scripting being already on.
+The "scripting isn't enabled" fallback path is covered inside the Field tools catalogue (the page renders a "Turn on scripting" affordance when `SCR_ENABLE=0`; the field-install spec exercises both branches via its `if (turnOn.isVisible())` guard). Because the shared SITL instance carries scripting state across specs, the field-install spec tolerates scripting being already on.
 
 ## BLHeli params in SITL
 

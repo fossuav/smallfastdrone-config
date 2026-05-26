@@ -31,7 +31,7 @@ export const routes: RouteRecordRaw[] = [
     meta: { label: 'Connect', icon: 'i-lucide-plug' },
   },
   {
-    // The wizard library is still hosted at /wizard (sensor noise, Pro PID,
+    // The wizard library is still hosted at /wizard (Pro PID stub +
     // standalone wizard access). But "Bringup" in the top nav now goes
     // straight to the ribbon — the library is reached via the "All wizards"
     // link in the bringup view (until Recipes carries the orphans). navTo

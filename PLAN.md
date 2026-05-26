@@ -148,7 +148,7 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
   - `indoor-cinewhoop-tune`
   - `throw-mode-setup` (incl. `THROW_NEXTMODE=ACRO` per smallfastdrone commit `5534d1f62b`, and `THROW_SRC_INI` audit for carrier-mounted vehicles)
   - `first-flight-failsafes`
-- First **Lua-engine** wizard end-to-end: exercises the install / arm / run / uninstall lifecycle in [docs/WIZARDS.md](docs/WIZARDS.md). Candidate: a between-flights `throw-readiness-check` that monitors throw-detect thresholds during a test toss without taking off.
+- First **Lua-engine** wizard end-to-end: exercises the lifecycle in [docs/WIZARDS.md](docs/WIZARDS.md). **Status:** the engine itself is proven (FTP upload + scripting restart + per-tool install state) — exercised end-to-end against SITL via the Field tools catalogue / motor-check field install (install-and-keep pattern). The transient upload→arm→run→remove pattern was first proven by an `imu-noise` demo wizard, since retired as not operator-useful (2026-05-26); its plumbing lives on in `lua-engine.ts` for a future wizard that genuinely needs the transient pattern. Candidate when one arises: a between-flights `throw-readiness-check` that monitors throw-detect thresholds during a test toss without taking off.
 - Lua lifecycle plumbing in the runtime: MAVLink FTP upload of `applet.lua`, `SCR_ENABLE` orchestration (with single operator confirm + reboot if currently off), `WIZ_<ID>_ACTIVE` control param, applet-file removal on completion, orphan detection at reconnect.
 - **Bringup sub-wizard build-out.** The bringup meta (Phase 2) grows as each sub-wizard lands. In this phase:
   - `motor-check` (BRINGUP phase 04) — desktop-engine, props-off motor test that catches mis-wires:

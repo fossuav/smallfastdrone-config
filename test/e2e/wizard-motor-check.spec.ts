@@ -224,9 +224,10 @@ test('Field tools installs Motor check on the radio; the wizard card reflects it
   test.setTimeout(150_000)
   // Field-install lives in the global Field tools catalogue now (header
   // radio icon), not per-wizard. The library card carries the live "On
-  // the radio" indicator that reads the shared field-tools store.
-  // Relies on scripting being enabled by an earlier spec (wizard-imu-noise-
-  // live, which runs before this one and leaves SCR_ENABLE=1).
+  // the radio" indicator that reads the shared field-tools store. The
+  // catalogue offers an inline "Turn on" if scripting is off (reboot +
+  // reconnect), so this spec is self-sufficient — no longer depends on
+  // an earlier spec having enabled scripting.
   await page.goto(`/${SITL_QUERY}`)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })

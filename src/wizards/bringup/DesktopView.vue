@@ -254,11 +254,10 @@ onMounted(() => {
       </div>
 
       <!-- Discoverability for wizards that don't live in the ribbon yet
-           (sensor noise, Pro PID, standalone access). Will retire once
-           those land in their proper homes (recipes / additional ribbon
-           tabs). -->
+           (Pro PID stub, standalone access). Will retire once Pro PID
+           moves into Recipes. -->
       <p class="text-muted border-default mt-6 border-t pt-3 text-center text-xs">
-        Looking for a specific check or a paid wizard?
+        Looking for a paid wizard or to run one on its own?
         <RouterLink to="/wizard" class="text-primary hover:underline">
           All wizards →
         </RouterLink>
