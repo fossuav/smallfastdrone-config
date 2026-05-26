@@ -41,7 +41,7 @@ import type { CorrectionPlan } from '../../workflow/motor-check'
 import type { FrameGeometry, FrameMotor, MotorPosition, Spin } from '../../workflow/motor-geometry'
 import { PerspectiveCamera, Vector3 } from 'three'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { buildMotorTest, buildMotorTestStop, MOTOR_TEST_PWM_SPIN } from '../../protocol/motors'
 import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
@@ -630,17 +630,6 @@ function labelStyle(angleDeg: number): Record<string, string> {
           Start motor check
         </UButton>
       </div>
-
-      <!-- Field-tools breadcrumb. Install/remove now lives in the global
-           Field tools page (header radio icon) — this just keeps it
-           discoverable from the wizard. -->
-      <p class="text-muted text-xs">
-        <UIcon name="i-lucide-radio" class="text-muted mr-1 inline size-3.5 align-text-top" />
-        Want to run this at the field (no laptop)?
-        <RouterLink to="/field" class="text-primary hover:underline">
-          Manage in Field tools →
-        </RouterLink>
-      </p>
     </div>
 
     <!-- testing -->

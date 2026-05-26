@@ -25,6 +25,7 @@ import type { Component } from 'vue'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useSessionStore } from '../stores/session'
+import FieldEnabledToggle from '../ui/components/FieldEnabledToggle.vue'
 import {
   checkPrereqs,
   getWizard,
@@ -168,11 +169,21 @@ watch(
          bouncing to "not ready". -->
     <UCard v-else-if="hasView">
       <template #header>
-        <div class="flex items-center gap-3">
-          <UIcon :name="wizard.manifest.hero" class="text-primary size-6" />
-          <h1 class="text-highlighted text-xl font-semibold">
-            {{ wizard.manifest.title }}
-          </h1>
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <UIcon :name="wizard.manifest.hero" class="text-primary size-6" />
+            <h1 class="text-highlighted text-xl font-semibold">
+              {{ wizard.manifest.title }}
+            </h1>
+          </div>
+          <!-- Per-wizard field-install toggle (info-blue, "On the radio"):
+               makes field-enabling a property of the wizard, not a separate
+               concern. Field tools (header radio icon) remains the central
+               manager for paid / custom tools + scripting. -->
+          <FieldEnabledToggle
+            v-if="wizard.manifest.field_capable"
+            :wizard-id="wizard.manifest.id"
+          />
         </div>
       </template>
       <component :is="desktopView" />
