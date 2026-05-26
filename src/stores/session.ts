@@ -43,6 +43,7 @@ import {
   autopilotLabel,
   buildDoSendBanner,
   buildPreflightReboot,
+  buildPreflightRebootToBootloader,
   buildRequestDataStream,
   buildRequestMessage,
   decodeFirmwareVersion,
@@ -325,6 +326,32 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  // Reboot the FC into its bootloader so the firmware-flash workflow
+  // can take over the serial port and run the bootloader protocol.
+  // Sends MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN with param1=3 (the
+  // documented bootloader-keep flag). Sets `rebooting` so the rest of
+  // the UI doesn't treat the imminent transport close as an error.
+  // After this returns, callers should:
+  //   1. Wait briefly so the FC has time to act on the command.
+  //   2. Call `transport.value.acquireRaw()` (WebSerial-only) to take
+  //      over the port at bootloader baud.
+  //   3. Drive the bootloader protocol via BootloaderClient.
+  //   4. After REBOOT, call `connect()` again to re-establish MAVLink.
+  async function rebootToBootloader() {
+    if (!connected.value || sysid.value === null) {
+      lastError.value = 'Not connected to a drone'
+      return
+    }
+    try {
+      const cmd = buildPreflightRebootToBootloader(sysid.value, COMP_ID_AUTOPILOT)
+      await sendMessage(cmd)
+      rebooting.value = true
+    }
+    catch (e) {
+      lastError.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
   // Tear the transport down. Subscriber unsubscribe runs first so we
   // don't get a final close-event echo bouncing around mid-teardown.
   async function disconnect() {
@@ -362,6 +389,7 @@ export const useSessionStore = defineStore('session', () => {
     connect,
     disconnect,
     reboot,
+    rebootToBootloader,
     markStatusTextsRead,
     sendMessage,
     subscribeMessages,

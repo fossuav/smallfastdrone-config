@@ -21,10 +21,19 @@
 // (HTTPS or http://localhost). `connect()` must be called inside a user
 // gesture handler — our Connect button click chain satisfies that.
 
+import type { RawSerial } from './raw-serial'
 import type { Transport, TransportEvent, TransportEventListener } from './types'
 
 const BAUD_RATE = 115_200 // ArduPilot USB-CDC default; doesn't actually matter
 //                          for CDC-ACM but the API requires a value.
+
+// Open-with-retry tuning for re-acquiring the port after the FC reboots
+// (firmware → bootloader and bootloader → firmware). The device briefly
+// disappears + re-enumerates; `port.open()` rejects until the OS sees it
+// again. ArduPilot bootloaders typically come up within ~1s; we give it
+// a generous window.
+const REOPEN_ATTEMPTS = 50
+const REOPEN_RETRY_DELAY_MS = 200
 
 interface SerialPortInfoLite {
   usbVendorId?: number
@@ -139,6 +148,76 @@ export class WebSerialTransport implements Transport {
     return () => bucket.delete(listener)
   }
 
+  // Take raw control of the serial port for a non-MAVLink protocol
+  // (firmware bootloader, future DFU-fallback-via-serial). Steps:
+  //   1. Cancel the MAVLink read loop + release its reader.
+  //   2. Close the port (caller's previous MAVLink session is done with it).
+  //   3. Reopen the port at the requested baud (the FC may have rebooted
+  //      into its bootloader, which can enumerate on a different USB device
+  //      momentarily — retry the open until the OS sees it again).
+  //   4. Hand back a `RawSerial` over the freshly-opened streams.
+  //
+  // The caller is responsible for `close()`-ing the returned RawSerial,
+  // then triggering session.connect() (a fresh `connect()` call) to
+  // re-acquire the port at MAVLink baud and restart the read loop.
+  //
+  // Throws if the port has never been opened (no port to reuse), or if
+  // the post-reboot reopen never succeeds within the retry budget.
+  async acquireRaw(opts: { baudRate?: number, settleDelayMs?: number } = {}): Promise<RawSerial> {
+    const port = this.port
+    if (!port)
+      throw new Error('No serial port to take over — connect first.')
+
+    // Stop the MAVLink pump.
+    if (this.reader) {
+      try {
+        await this.reader.cancel()
+      }
+      catch { /* already cancelled */ }
+    }
+    if (this.readerTask) {
+      await this.readerTask.catch(() => {})
+      this.readerTask = null
+    }
+
+    // Close the port — the bootloader is going to (or has already)
+    // come up; we'll reopen at the right baud below. Swallow errors
+    // because the device may already be gone.
+    try {
+      await port.close()
+    }
+    catch { /* already closed (the FC has rebooted) */ }
+
+    // Optional settle window so the FC's bootloader has time to
+    // enumerate before we hammer port.open().
+    if (opts.settleDelayMs && opts.settleDelayMs > 0)
+      await sleep(opts.settleDelayMs)
+
+    // Reopen — retry while the device is still re-enumerating.
+    const baud = opts.baudRate ?? BAUD_RATE
+    let lastErr: unknown = null
+    for (let i = 0; i < REOPEN_ATTEMPTS; i++) {
+      try {
+        await port.open({ baudRate: baud, dataBits: 8, parity: 'none', stopBits: 1, flowControl: 'none' })
+        lastErr = null
+        break
+      }
+      catch (e) {
+        lastErr = e
+        await sleep(REOPEN_RETRY_DELAY_MS)
+      }
+    }
+    if (lastErr !== null) {
+      const detail = lastErr instanceof Error ? lastErr.message : String(lastErr)
+      throw new Error(`Couldn't reopen the serial port for upload (${detail}). Try unplugging + plugging the USB cable.`)
+    }
+
+    // Hand back a RawSerial backed by this port's streams. The MAVLink
+    // listeners stay subscribed but get nothing — the read pump is
+    // gone — until the caller releases + reconnects.
+    return new PortRawSerial(port)
+  }
+
   // Background task that pulls chunks out of the port's readable stream
   // and dispatches them to data subscribers. Terminates when the reader is
   // cancelled (disconnect path) or the device disappears (errors fan out
@@ -171,6 +250,138 @@ export class WebSerialTransport implements Transport {
       }
       this.reader = null
       for (const cb of this.listeners.close) cb()
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// RawSerial implementation backed directly by a WebSerial `SerialPort`'s
+// reader + writer. Used during firmware upload — the MAVLink data pump
+// is gone, this owns the port's readable stream until `close()`.
+//
+// Buffers incoming bytes in a list of Uint8Arrays; `readExact` waits
+// (with a timeout) until enough are queued, splices them off, and
+// hands back a single contiguous Uint8Array.
+class PortRawSerial implements RawSerial {
+  private readonly chunks: Uint8Array[] = []
+  private bufferedBytes = 0
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+  private waiter: { need: number, resolve: (b: Uint8Array) => void, reject: (e: Error) => void, timer: ReturnType<typeof setTimeout> | null } | null = null
+  private closed = false
+
+  constructor(private readonly port: SerialPort) {
+    void this.pump()
+  }
+
+  async readExact(nBytes: number, timeoutMs: number): Promise<Uint8Array> {
+    if (this.closed)
+      throw new Error('RawSerial: closed')
+    if (this.waiter)
+      throw new Error('RawSerial.readExact: concurrent reads not supported')
+    if (this.bufferedBytes >= nBytes)
+      return this.takeFromBuffer(nBytes)
+    return await new Promise<Uint8Array>((resolve, reject) => {
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(() => {
+            this.waiter = null
+            reject(new Error(`RawSerial.readExact: timed out waiting for ${nBytes} bytes (had ${this.bufferedBytes})`))
+          }, timeoutMs)
+        : null
+      this.waiter = { need: nBytes, resolve, reject, timer }
+    })
+  }
+
+  drain(): void {
+    this.chunks.length = 0
+    this.bufferedBytes = 0
+  }
+
+  async write(bytes: Uint8Array): Promise<void> {
+    if (this.closed)
+      throw new Error('RawSerial: closed')
+    if (!this.port.writable)
+      throw new Error('RawSerial: port not writable')
+    const writer = this.port.writable.getWriter()
+    try {
+      await writer.write(bytes)
+    }
+    finally {
+      writer.releaseLock()
+    }
+  }
+
+  async close(): Promise<void> {
+    this.closed = true
+    if (this.waiter) {
+      if (this.waiter.timer)
+        clearTimeout(this.waiter.timer)
+      this.waiter.reject(new Error('RawSerial: closed during read'))
+      this.waiter = null
+    }
+    if (this.reader) {
+      try {
+        await this.reader.cancel()
+      }
+      catch { /* already cancelled */ }
+    }
+    try {
+      await this.port.close()
+    }
+    catch { /* already closed */ }
+  }
+
+  private takeFromBuffer(nBytes: number): Uint8Array {
+    const out = new Uint8Array(nBytes)
+    let written = 0
+    while (written < nBytes) {
+      const head = this.chunks[0]!
+      const take = Math.min(head.length, nBytes - written)
+      out.set(head.subarray(0, take), written)
+      written += take
+      if (take === head.length)
+        this.chunks.shift()
+      else
+        this.chunks[0] = head.subarray(take)
+    }
+    this.bufferedBytes -= nBytes
+    return out
+  }
+
+  private async pump(): Promise<void> {
+    if (!this.port.readable)
+      return
+    this.reader = this.port.readable.getReader()
+    try {
+      while (true) {
+        const { value, done } = await this.reader.read()
+        if (done)
+          break
+        if (value && value.length > 0) {
+          this.chunks.push(value)
+          this.bufferedBytes += value.length
+          if (this.waiter && this.bufferedBytes >= this.waiter.need) {
+            const w = this.waiter
+            this.waiter = null
+            if (w.timer)
+              clearTimeout(w.timer)
+            w.resolve(this.takeFromBuffer(w.need))
+          }
+        }
+      }
+    }
+    catch {
+      // Reader cancelled or device went away — close() handles the rejection
+      // of any pending waiter via its own path.
+    }
+    finally {
+      try {
+        this.reader?.releaseLock()
+      }
+      catch { /* already released */ }
+      this.reader = null
     }
   }
 }

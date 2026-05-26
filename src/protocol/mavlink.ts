@@ -252,6 +252,27 @@ export function buildPreflightReboot(targetSystem: number, targetComponent: numb
   return cmd
 }
 
+// Reboot the FC into its bootloader. Same MAV_CMD as the soft reboot,
+// param1 = 3 (the documented "reboot autopilot in bootloader mode"
+// value, per ArduPilot's GCS_Common reboot handler). Used by the
+// firmware-flash workflow; the bootloader then accepts the upload
+// over the same serial port the firmware was using.
+export function buildPreflightRebootToBootloader(targetSystem: number, targetComponent: number): common.CommandLong {
+  const cmd = new common.CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  cmd.command = 246 as common.MavCmd // MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN
+  cmd._param1 = 3
+  cmd._param2 = 0
+  cmd._param3 = 0
+  cmd._param4 = 0
+  cmd._param5 = 0
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
+}
+
 // Build a COMMAND_LONG that restarts the FC's Lua scripting engine
 // (MAV_CMD_SCRIPTING, command id 42701; param1 = SCRIPTING_CMD_STOP_AND_RESTART
 // = 3). The scripting thread tears down its Lua state and rescans the
