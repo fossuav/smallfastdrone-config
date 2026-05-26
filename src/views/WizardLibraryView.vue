@@ -57,9 +57,14 @@ const caps = computed(() => ({
   params_loaded: false, // slice A doesn't declare this prereq anywhere
 }))
 
-// Split the registry into unlocked vs locked so the library can render
+// The library is the bringup wizards' home; tuning-flavoured wizards
+// (category 'tune' / 'recipe') live in RecipesView instead. Split the
+// registry into unlocked vs locked so the library can render
 // "available now" cards above the "what's coming" Pro showcase.
-const wizards = computed(() => getWizards())
+const LIBRARY_CATEGORIES = ['bringup', 'diagnostic', 'safety'] as const
+const wizards = computed(() =>
+  getWizards().filter(w => (LIBRARY_CATEGORIES as readonly string[]).includes(w.manifest.category)),
+)
 const unlocked = computed(() => wizards.value.filter(w => !w.manifest.locked))
 const locked = computed(() => wizards.value.filter(w => w.manifest.locked))
 

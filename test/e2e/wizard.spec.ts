@@ -23,7 +23,7 @@ import { expect, test } from '@playwright/test'
 const SITL_URL = '/?transport=websocket&host=localhost:5761'
 const SITL_QUERY = '?transport=websocket&host=localhost:5761'
 
-test('Wizard library shows unlocked + locked cards, and frame-select writes FRAME_CLASS+TYPE to SITL', async ({ page }) => {
+test('Wizard library lists bringup wizards; frame-select writes FRAME_CLASS+TYPE to SITL', async ({ page }) => {
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText('Connected to your Quadcopter')).toBeVisible({ timeout: 15_000 })
@@ -35,10 +35,10 @@ test('Wizard library shows unlocked + locked cards, and frame-select writes FRAM
 
   // Unlocked card for frame-select is present.
   await expect(page.getByRole('link', { name: /Open the Pick your frame wizard/ })).toBeVisible()
-
-  // Locked Pro card is present with the "Coming soon" affordance.
-  await expect(page.getByText('Pro wizards — coming soon')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Coming soon' })).toBeDisabled()
+  // Pro PID tune lives in Recipes now, not the library — the library has
+  // no "Pro wizards" section.
+  await expect(page.getByText('Pro wizards — coming soon')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: /Open the Pro PID tune wizard/ })).toHaveCount(0)
 
   // Open frame-select.
   await page.getByRole('link', { name: /Open the Pick your frame wizard/ }).click()
@@ -88,6 +88,17 @@ test('Locked Pro wizard accessed by URL renders the gating page, not the runner'
   await page.goto(`/wizard/pid-autotune-pro${SITL_QUERY}`)
   await expect(page.getByRole('heading', { name: 'Pro PID tune' })).toBeVisible()
   await expect(page.getByText('Coming soon — a paid Pro wizard')).toBeVisible()
+})
+
+test('Recipes hosts Pro PID tune (the locked-gating seam on the recipes surface)', async ({ page }) => {
+  // No connection needed — Recipes renders from the static wizard registry
+  // and the locked card renders regardless of capability.
+  await page.goto(`/recipes${SITL_QUERY}`)
+  await expect(page.getByRole('heading', { name: 'Tuning recipes' })).toBeVisible()
+  await expect(page.getByText('Pro recipes — coming soon')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Pro PID tune' })).toBeVisible()
+  await expect(page.getByText('Coming soon — a paid Pro wizard')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Coming soon' })).toBeDisabled()
 })
 
 test('Bringup ribbon walks preflight + frame-select + motor-check and marks itself complete', async ({ page }) => {
