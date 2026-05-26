@@ -39,17 +39,15 @@ import type { CommandAck } from 'mavlink-mappings/dist/lib/common'
 import type { MotorVisual } from '../../ui/visuals/MotorCheck3D.vue'
 import type { CorrectionPlan } from '../../workflow/motor-check'
 import type { FrameGeometry, FrameMotor, MotorPosition, Spin } from '../../workflow/motor-geometry'
-import type { ScriptStorageStatus } from '../../workflow/script-storage'
 import { PerspectiveCamera, Vector3 } from 'three'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { buildMotorTest, buildMotorTestStop, MOTOR_TEST_PWM_SPIN } from '../../protocol/motors'
 import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import WizardSteps from '../../ui/components/WizardSteps.vue'
 import MotorCheck3D from '../../ui/visuals/MotorCheck3D.vue'
-import { useLuaEngine } from '../../workflow/lua-engine'
 import {
   applyReverseMask,
   collectMotorChannels,
@@ -60,9 +58,6 @@ import {
 } from '../../workflow/motor-check'
 import { expectedSpin, frameGeometry, frameVariants, motorTopdownXY, positionLabel, spinLabel } from '../../workflow/motor-geometry'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../../workflow/reconnect'
-import { storageProblemFromError } from '../../workflow/script-storage'
-import appletSource from './applet.lua?raw'
-import helperSource from './crsf_helper.lua?raw'
 import EscSetup from './EscSetup.vue'
 
 // Skip the ESC-setup phase and open straight on the safety gate. Used when
@@ -89,7 +84,6 @@ const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
 const { autoReconnect } = useReconnect()
-const lua = useLuaEngine()
 
 const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
 
@@ -154,129 +148,6 @@ function motorExpectedSpin(m: FrameMotor): Spin {
   return geo ? expectedSpin(m, propsOut.value, geo) : m.spin
 }
 
-// --- Field (radio / CRSF) version: install-and-keep lifecycle ---
-// The same check, installed on the FC so it can be run from the radio's
-// CRSF menu at the field with no laptop. Install uploads the applet + its
-// helper and restarts scripting to load it; it stays until removed.
-type FieldStatus
-  = | 'checking' | 'unavailable' | 'scripting-off' | 'enabling'
-    | 'not-installed' | 'installing' | 'installed' | 'removing'
-    | 'no-storage' | 'error'
-const fieldStatus = ref<FieldStatus>('checking')
-const fieldError = ref<string | null>(null)
-
-// Probe scripting + whether the applet is already on the FC. The
-// existence check uses a directory listing (session-less), so it doesn't
-// wedge the FTP session a subsequent install needs.
-async function checkFieldStatus() {
-  fieldStatus.value = 'checking'
-  fieldError.value = null
-  try {
-    const scr = await lua.checkScripting()
-    if (!scr.available)
-      fieldStatus.value = 'unavailable'
-    else if (!scr.enabled)
-      fieldStatus.value = 'scripting-off'
-    else
-      fieldStatus.value = (await lua.isAppletInstalled(WIZARD_ID)) ? 'installed' : 'not-installed'
-  }
-  catch (e) {
-    fieldStatus.value = 'error'
-    fieldError.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
-// Operator-facing copy for a script-storage problem. Scripts live on the
-// SD card, so the common case on first bringup is simply "no card".
-function storageHint(status: ScriptStorageStatus): string {
-  switch (status) {
-    case 'no-card':
-      return 'Your flight controller has no SD card, so there\'s nowhere to keep the field check. Insert a formatted SD card, reconnect, and try again.'
-    case 'unformatted':
-      return 'Your flight controller can\'t read its SD card. Format it as FAT32, reconnect, and try again.'
-    case 'readonly':
-      return 'The SD card is locked. Slide its write-protect switch off, reconnect, and try again.'
-    default:
-      return 'Your flight controller can\'t store the field check right now. Check its SD card, reconnect, and try again.'
-  }
-}
-
-// Turn scripting on (write + reboot + reconnect), then install. Lets the
-// operator install the field version without a detour through settings.
-// Checks for writable storage *first* — enabling scripting reboots the FC,
-// and there's no point putting the operator through that if there's no SD
-// card to install onto.
-async function enableAndInstall() {
-  fieldError.value = null
-  try {
-    fieldStatus.value = 'checking'
-    const storage = await lua.checkScriptStorage()
-    if (storage !== 'ok') {
-      fieldStatus.value = 'no-storage'
-      fieldError.value = storageHint(storage)
-      return
-    }
-    fieldStatus.value = 'enabling'
-    const ok = await lua.enableScripting()
-    if (!ok) {
-      fieldStatus.value = 'error'
-      fieldError.value = 'Couldn\'t turn on scripting and reconnect. Try the Drone settings page.'
-      return
-    }
-    await installField()
-  }
-  catch (e) {
-    fieldStatus.value = 'error'
-    fieldError.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
-// Upload the applet + helper and load them (no reboot — scripting restart
-// rescans). Leaves them installed for field use. A storage failure here
-// (e.g. the card was pulled mid-flow) gets the same SD-card guidance as
-// the up-front check rather than a raw FTP errno.
-async function installField() {
-  fieldStatus.value = 'installing'
-  fieldError.value = null
-  try {
-    await lua.uploadModule('crsf_helper.lua', helperSource)
-    await lua.uploadApplet(WIZARD_ID, appletSource)
-    await lua.restartScripting()
-    fieldStatus.value = 'installed'
-  }
-  catch (e) {
-    const problem = storageProblemFromError(e)
-    if (problem) {
-      fieldStatus.value = 'no-storage'
-      fieldError.value = storageHint(problem)
-    }
-    else {
-      fieldStatus.value = 'error'
-      fieldError.value = e instanceof Error ? e.message : String(e)
-    }
-  }
-}
-
-// Remove the applet and rescan so it leaves the radio menu. The shared
-// crsf_helper module is left in place (other field wizards may use it).
-async function removeField() {
-  fieldStatus.value = 'removing'
-  fieldError.value = null
-  try {
-    await lua.removeApplet(WIZARD_ID)
-    await lua.restartScripting()
-    fieldStatus.value = 'not-installed'
-  }
-  catch (e) {
-    fieldStatus.value = 'error'
-    fieldError.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
-function goToSettings() {
-  router.push('/settings')
-}
-
 // What the operator reported, keyed by test order.
 interface Observation { position: MotorPosition, spin: Spin }
 const observations = ref<Map<number, Observation>>(new Map())
@@ -327,9 +198,6 @@ onMounted(async () => {
     // available); it advances to the safety gate when done. When the host
     // already owns ESC config (the ribbon), skip straight to the safety gate.
     phase.value = props.skipEsc ? 'safety' : 'esc-setup'
-    // Probe the field-install status in the background; the safety screen
-    // (after ESC setup) shows its panel as soon as this resolves.
-    void checkFieldStatus()
   }
   catch (e) {
     phase.value = 'error'
@@ -763,84 +631,16 @@ function labelStyle(angleDeg: number): Record<string, string> {
         </UButton>
       </div>
 
-      <!-- Field version: install on the radio's menu for no-laptop use. -->
-      <div class="border-default mt-2 space-y-2 rounded-lg border border-dashed p-3">
-        <div class="flex items-center gap-2">
-          <UIcon name="i-lucide-radio" class="text-info size-4" />
-          <span class="text-default text-sm font-medium">Run this at the field (no laptop)</span>
-        </div>
-        <p class="text-muted text-xs">
-          Install this check on your radio so you can run it from the
-          transmitter's own menu — handy after a field repair or motor swap.
-        </p>
-
-        <div v-if="fieldStatus === 'checking'" class="text-muted flex items-center gap-2 text-xs">
-          <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Checking…
-        </div>
-        <UAlert
-          v-else-if="fieldStatus === 'unavailable'"
-          color="neutral"
-          variant="subtle"
-          description="This drone's firmware doesn't support scripting, so the field version isn't available."
-        />
-        <div v-else-if="fieldStatus === 'scripting-off'" class="space-y-2">
-          <p class="text-muted text-xs">
-            This needs Lua scripting on. We can turn it on for you — it restarts
-            your drone (a few seconds) and reconnects automatically.
-          </p>
-          <div class="flex items-center justify-between gap-2">
-            <UButton size="xs" color="neutral" variant="ghost" @click="goToSettings">
-              Drone settings
-            </UButton>
-            <UButton size="sm" color="info" icon="i-lucide-download" @click="enableAndInstall">
-              Enable scripting &amp; install
-            </UButton>
-          </div>
-        </div>
-        <div v-else-if="fieldStatus === 'enabling'" class="text-muted flex items-center gap-2 text-xs">
-          <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Turning on scripting + restarting…
-        </div>
-        <div v-else-if="fieldStatus === 'not-installed'" class="flex justify-end">
-          <UButton size="sm" color="info" icon="i-lucide-download" @click="installField">
-            Install on radio
-          </UButton>
-        </div>
-        <div v-else-if="fieldStatus === 'installing'" class="text-muted flex items-center gap-2 text-xs">
-          <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Installing…
-        </div>
-        <div v-else-if="fieldStatus === 'installed'" class="space-y-2">
-          <p class="text-success flex items-center gap-1.5 text-xs">
-            <UIcon name="i-lucide-circle-check" class="size-3.5 shrink-0" />
-            <span>Installed — find <strong>Motor check</strong> in your radio's menu.</span>
-          </p>
-          <div class="flex justify-end">
-            <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-trash-2" @click="removeField">
-              Remove from radio
-            </UButton>
-          </div>
-        </div>
-        <div v-else-if="fieldStatus === 'removing'" class="text-muted flex items-center gap-2 text-xs">
-          <UIcon name="i-lucide-loader-circle" class="size-3 animate-spin" /> Removing…
-        </div>
-        <div v-else-if="fieldStatus === 'no-storage'" class="space-y-2">
-          <UAlert
-            color="warning"
-            variant="subtle"
-            icon="i-lucide-hard-drive"
-            :description="fieldError ?? 'Your flight controller has no SD card to store the field check.'"
-          />
-          <div class="flex justify-end">
-            <UButton size="sm" color="info" icon="i-lucide-rotate-cw" @click="checkFieldStatus">
-              Try again
-            </UButton>
-          </div>
-        </div>
-        <UAlert
-          v-else-if="fieldStatus === 'error'"
-          color="warning"
-          :description="fieldError ?? 'Something went wrong with the field install.'"
-        />
-      </div>
+      <!-- Field-tools breadcrumb. Install/remove now lives in the global
+           Field tools page (header radio icon) — this just keeps it
+           discoverable from the wizard. -->
+      <p class="text-muted text-xs">
+        <UIcon name="i-lucide-radio" class="text-muted mr-1 inline size-3.5 align-text-top" />
+        Want to run this at the field (no laptop)?
+        <RouterLink to="/field" class="text-primary hover:underline">
+          Manage in Field tools →
+        </RouterLink>
+      </p>
     </div>
 
     <!-- testing -->

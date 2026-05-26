@@ -216,27 +216,48 @@ test('Motor check switches to the props-out layout, restarts, and reconnects (SI
   await expect(page.getByText('Fix applied — let\'s check again')).toBeVisible({ timeout: 90_000 })
 })
 
-test('Motor check installs the field version, detects it on reopen, and removes it', async ({ page }) => {
+test('Field tools installs Motor check on the radio; the wizard card reflects it', async ({ page }) => {
   test.setTimeout(150_000)
-  // Relies on scripting being enabled by an earlier spec
-  // (wizard-imu-noise-live, which runs before this one and leaves
-  // SCR_ENABLE=1) — same dependency style as that spec.
-  await openMotorCheck(page)
+  // Field-install lives in the global Field tools catalogue now (header
+  // radio icon), not per-wizard. The library card carries the live "On
+  // the radio" indicator that reads the shared field-tools store.
+  // Relies on scripting being enabled by an earlier spec (wizard-imu-noise-
+  // live, which runs before this one and leaves SCR_ENABLE=1).
+  await page.goto(`/${SITL_QUERY}`)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
 
-  // Not installed yet (directory listing found no applet) → install.
-  await page.getByRole('button', { name: 'Install on radio' }).click()
-  await expect(page.getByRole('button', { name: 'Remove from radio' })).toBeVisible({ timeout: 60_000 })
+  // Open Field tools from the header.
+  await page.getByRole('link', { name: 'Field tools' }).click()
+  await expect(page.getByRole('heading', { name: 'Field tools' })).toBeVisible()
+  // Catalogue settled: Install (scripting on) or Turn on (scripting off).
+  const installBtn = page.getByRole('button', { name: 'Install' }).first()
+  const turnOn = page.getByRole('button', { name: 'Turn on' })
+  await expect(installBtn.or(turnOn)).toBeVisible({ timeout: 30_000 })
+  // Belt-and-braces in case a prior spec left scripting off.
+  if (await turnOn.isVisible()) {
+    await turnOn.click()
+    await expect(installBtn).toBeVisible({ timeout: 90_000 })
+  }
 
-  // Reopen the wizard: the on-mount directory-listing check must detect the
-  // applet on the FC and show it as installed (not back to "Install").
-  await openMotorCheck(page)
-  await expect(page.getByRole('button', { name: 'Remove from radio' })).toBeVisible({ timeout: 30_000 })
+  // Install → catalogue flips to Remove.
+  await installBtn.click()
+  await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible({ timeout: 60_000 })
 
-  // Remove → reopen → detected as not installed again (clean for later specs).
-  await page.getByRole('button', { name: 'Remove from radio' }).click()
-  await expect(page.getByRole('button', { name: 'Install on radio' })).toBeVisible({ timeout: 30_000 })
-  await openMotorCheck(page)
-  await expect(page.getByRole('button', { name: 'Install on radio' })).toBeVisible({ timeout: 30_000 })
+  // The wizard-library card now reads "On the radio" (the per-wizard
+  // indicator) — proving the shared store wires catalogue → card.
+  await page.getByRole('link', { name: 'Bringup' }).click()
+  await expect(page.getByRole('heading', { name: 'Bringup wizards' })).toBeVisible()
+  const card = page.getByRole('link', { name: /Open the Set up motors wizard/ })
+  await expect(card.getByText('On the radio')).toBeVisible({ timeout: 15_000 })
+
+  // Remove via the catalogue → card reverts to "Field-capable" (clean state
+  // for later specs).
+  await page.getByRole('link', { name: 'Field tools' }).click()
+  await page.getByRole('button', { name: 'Remove' }).click()
+  await expect(page.getByRole('button', { name: 'Install' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('link', { name: 'Bringup' }).click()
+  await expect(card.getByText('Field-capable')).toBeVisible({ timeout: 15_000 })
 })
 
 test('ESC setup: changing the protocol applies, restarts, and reconnects (SITL)', async ({ page }) => {
