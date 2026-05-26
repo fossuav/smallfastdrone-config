@@ -25,11 +25,17 @@ The bootloader path is the front door. DFU is the safety net.
 |---|---|
 | `src/protocol/apj.ts` | Parse ArduPilot's `.apj` firmware artifact (JSON + base64-encoded gzipped image). |
 | `src/protocol/bootloader.ts` | The ArduPilot custom bootloader protocol — command framing, response parsing, CRC. |
-| `src/protocol/dfu.ts` *(Phase 5 follow-on)* | STM32 DFU class — descriptors, GET_STATUS / DNLOAD / UPLOAD, ST DFUSE extensions for sector erase + address pointer. |
-| `src/transport/webusb.ts` *(Phase 5 follow-on)* | WebUSB transport — device claim, interface select, endpoints. Production-only (test transport stays WebSocket). |
-| `src/security/uploader.ts` *(Phase 5)* | `SignedArtifactUploader` interface — **all firmware upload paths route through it** (CLAUDE.md rule). v1 is passthrough; real signing/encryption lands later. |
-| `src/workflow/firmware.ts` *(Phase 5)* | Orchestrator — picks bootloader vs DFU, runs the chosen path, drives the UI through progress states. |
-| `src/views/FirmwareView.vue` *(Phase 5)* | Operator surface — file picker, parsed firmware metadata (board id, description, version), confirm + flash + progress + result. |
+| `src/protocol/bootloader-client.ts` | The sync → board-id confirm → erase → program → verify → reboot sequence on top of the framing primitives. |
+| `src/protocol/intel-hex.ts` | Intel-HEX parser for `<vehicle>_with_bl.hex` — the bootloader-plus-firmware artefact used by the DFU fresh-chip path. |
+| `src/protocol/board-flash-map.ts` | Board-id → app-flash-offset table for the DFU recovery (.apj) path; the bootloader-path never needs it because the FC bootloader knows its own layout. |
+| `src/protocol/dfu.ts` | USB DFU 1.1 + DfuSe protocol primitives — request codes, state/status enums, DfuSe command payload builders (`SET_ADDRESS`, `ERASE_PAGE`, mass erase), descriptor parser, sector-erase planner. |
+| `src/protocol/dfu-client.ts` | DfuClient — the ensureIdle → erase sectors → set-address + DNLOAD chunks → manifest sequence on top of the framing primitives. |
+| `src/transport/raw-serial.ts` | The `RawSerial` duplex the bootloader client talks to. `MockRawSerial` for unit tests; `PortRawSerial` (via `WebSerialTransport.acquireRaw()`) for production. |
+| `src/transport/usb-control.ts` | The `USBControl` interface the DFU client talks to. `MockUSBControl` for unit tests; `WebUsbControl` (via `openDfuDevice()`) for production. |
+| `src/transport/webusb.ts` | WebUSB transport — DFU device permission picker, authorised-device polling, claim + control-transfer + close. Production-only (test transport stays WebSocket). |
+| `src/security/uploader.ts` | `SignedArtifactUploader` interface — **all firmware upload paths route through it** (CLAUDE.md rule). v1 is passthrough; real signing/encryption lands later. |
+| `src/workflow/firmware.ts` | Orchestrator — `flash(apj)` for the bootloader path, `flashDfu(spec, opened)` for the DFU path; both drive the UI's `FlashPhase` + progress. |
+| `src/views/FirmwareView.vue` | Operator surface — tabbed "Install over USB" / "Recovery (DFU mode)", file picker (`.apj` everywhere, `.hex` on DFU), parsed metadata, confirm + flash + progress + result. |
 
 ## APJ file format
 
@@ -89,16 +95,62 @@ Upload sequence:
 
 Each round-trip needs a per-command timeout. Slow ones (CHIP_ERASE, GET_CRC) need notably longer (~20s); the rest are fast.
 
-## DFU protocol (follow-on)
+## DFU protocol
 
-STM32 DFU class (ST AN3156) over WebUSB. Operator puts the chip in DFU
-mode physically (BOOT0); the tool detects a USB device matching the DFU
-descriptor, claims the interface, walks the standard DFU control
-transfers (GET_STATUS, DNLOAD, UPLOAD, GETSTATE, CLRSTATUS, ABORT) plus
-the ST DFUSE extensions (sector erase, set-address-pointer) to flash a
-.bin or .hex image at the right offsets. Reference:
-`betaflight-configurator/src/js/protocols/dfu.js` is the canonical
-copy-and-adapt source.
+USB DFU 1.1 (ST AN3156 — the DfuSe extensions for STM32) over WebUSB.
+Operator puts the chip in DFU mode physically (BOOT0 button held while
+plugging USB); the tool detects a USB device matching the DFU descriptor
+(`VID:PID = 0x0483:0xDF11` for STMicro), claims the interface, walks the
+standard DFU control transfers plus DfuSe.
+
+### Class requests (everything is a control transfer on the DFU interface)
+
+| Request | Code | Use |
+|---|---|---|
+| `DETACH` | `0x00` | Leave DFU mode (app → bootloader if applicable). Unused in our flow — we exit by REBOOT-via-manifest. |
+| `DNLOAD` | `0x01` | Host → device data. wBlockNum=0 carries a DfuSe command (SET_ADDRESS / ERASE_PAGE); wBlockNum ≥ 2 carries a chunk of data at the auto-incrementing address. |
+| `GETSTATUS` | `0x03` | Polled after every DNLOAD; returns `[bStatus, bwPollTimeout LE 24-bit, bState, iString]`. Host must wait the device's pollTimeout before the next op. |
+| `CLRSTATUS` | `0x04` | Clear `dfuERROR` back to `dfuIDLE`. |
+| `ABORT` | `0x06` | Cancel an in-flight op, return to `dfuIDLE`. |
+
+### DfuSe commands (first byte of a wBlockNum=0 DNLOAD payload)
+
+- `0x21 + addr LE32` — `SET_ADDRESS`. Next data DNLOADs write here +
+  `(wBlockNum - 2) * wTransferSize`.
+- `0x41 + addr LE32` — `ERASE_PAGE`. Erases the sector at `addr`.
+- `0x41` (lone byte) — mass erase. Wipes the bootloader too; only safe
+  on the `_with_bl.hex` path.
+
+### Upload sequence
+
+1. Discover the device (VID:PID filter + `requestDevice` permission).
+2. Open + claim the DFU interface (class 0xFE / subclass 0x01).
+3. Read the DFU functional descriptor for `wTransferSize` (commonly 2048
+   on STM32). Read each alt-setting's `iInterface` string and parse the
+   DfuSe memory-layout descriptor (`"@Internal Flash /0x08000000/16*128Kg"`).
+4. `ensureIdle` — GETSTATUS; if `dfuERROR` then CLRSTATUS; if a download
+   state then ABORT.
+5. For each sector covered by any region we plan to write: DNLOAD
+   ERASE_PAGE + poll until idle.
+6. For each region: DNLOAD SET_ADDRESS + poll → DNLOAD data chunks
+   (wBlockNum 2, 3, …) + poll between each → next region.
+7. Manifest: DNLOAD empty payload at wBlockNum=0 + poll. Some boards
+   reset themselves during manifest; we treat a controlOut throw as
+   success.
+
+Per-block progress is reported through the `onProgress(fraction)` callback;
+the workflow forwards it to the UI's `UProgress` bar.
+
+### Two artefacts, two routes
+
+- **`.apj`** (recovery) — the same `.apj` the bootloader path uses. The
+  DFU workflow looks up the board's `appAddress` in
+  `board-flash-map.ts` and writes the image as a single region at that
+  offset. Leaves the bootloader intact.
+- **`_with_bl.hex`** (fresh chip) — Intel HEX with embedded addresses.
+  The hex parser produces `{address, data}` segments; the workflow
+  writes each as its own DfuSe region. Use this when the bootloader is
+  missing / corrupt (a fresh chip, or recovery from a wipe).
 
 DFU is independent of the running firmware and works on a blank chip, so
 this is the path for fresh boards, brick recovery, and any case where the
@@ -115,22 +167,40 @@ seam; the implementation is what evolves.
 
 ## UI flow
 
-`FirmwareView` is the home. v1 surface:
+`FirmwareView` is the home — a tab strip with two paths:
 
-1. **Pick a .apj** (operator-supplied file picker). Curated SFD release
+**Install over USB** (default — the bootloader path):
+
+1. **Pick a `.apj`** (operator-supplied file picker). Curated SFD release
    picker (downloads) is a future arc — needs decisions about where SFD
    firmware artifacts live, how versions are listed, and signing.
 2. **Parsed metadata shown** — board id (matched against the connected
    FC), description, version summary, image size. The operator confirms
    "Yes, flash this onto my drone."
-3. **Confirm + flash** — the orchestrator picks the path. Default is the
-   bootloader path; DFU is offered when the bootloader path can't make
-   sync, or as an opt-in "Recovery / fresh chip" alternative.
+3. **Confirm + flash** — orchestrator drives reboot-to-bootloader →
+   raw takeover → upload → reconnect.
 4. **Progress** — phase + percent. CHIP_ERASE has its own
    indeterminate-but-bounded indicator (10s typical, not a stall).
-5. **Result** — success → "Firmware installed, drone restarting" + the
-   session-level auto-reconnect rejoins the new firmware; failure → the
-   clear-cause operator copy from `docs/UX.md`.
+5. **Result** — success → "Done — your drone is running the new
+   firmware" + the session auto-reconnects; failure → the clear-cause
+   operator copy from `docs/UX.md`.
+
+**Recovery (DFU mode)** (the safety-net path):
+
+1. **Instructions** — illustrated 4-step "unplug → hold BOOT → plug back
+   in → release" sequence. Operator-readable, no jargon.
+2. **Pick a file** — accepts `.apj` (recovery) **or** `.hex` (fresh
+   chip). Metadata pane shows the parsed file's shape (board for `.apj`;
+   address span + segment count for `.hex`).
+3. **Find DFU device** — operator clicks the button (a user gesture is
+   required by WebUSB) to grant the page permission to talk to STMicro
+   DFU devices. Authorised devices are then polled every 2s — appearing
+   in the list as soon as the chip enumerates.
+4. **Install in DFU mode** per row — flashDfu runs erase → set-address +
+   DNLOAD chunks → manifest. Same `UProgress` bar as the USB path.
+5. **Result** — "Done. Unplug + replug your drone to start it."
+   (DFU detach is finicky on some boards; a clean replug is the
+   reliable exit.)
 
 Bringup integration (a "Firmware" ribbon tab as the first area, so
 fresh-install → preflight → frame → motors flows in one place) is a
@@ -142,9 +212,13 @@ standalone FirmwareView so the protocol + UX iterate on their own.
 SITL has no bootloader and no DFU. Coverage breakdown:
 
 - **Unit tests** at the protocol layer: APJ parse (synthetic .apj
-  fixtures), bootloader command/response framing, CRC computation. These
-  are the layers where things historically go wrong (off-by-one in
-  framing, wrong CRC polynomial); they're fully unit-testable.
+  fixtures), bootloader command/response framing + CRC, Intel HEX parse
+  (synthetic records + every operator-readable error path), DFU framing
+  + descriptor parser + sector-erase planner, BootloaderClient against
+  `MockRawSerial`, DfuClient against `MockUSBControl`. These are the
+  layers where things historically go wrong (off-by-one in framing,
+  wrong CRC polynomial, sector-overlap maths); they're fully
+  unit-testable.
 - **Bench-hardware verification** for the integrated flash: documented
   procedure (which board, which firmware, expected timings, expected
   result), run by hand. Same posture as the CRSF-menu hardware
@@ -158,7 +232,12 @@ SITL has no bootloader and no DFU. Coverage breakdown:
 ## Open follow-ons (after v1)
 
 - Curated SFD release picker (downloads from a hosted artifact source).
-- DFU implementation.
-- Bringup ribbon "Firmware" tab.
+- Bringup ribbon "Firmware" tab (so fresh-install → preflight → frame →
+  motors flows in one place).
 - Real signing/encryption in the security uploader seam.
 - Bench-hardware CI rig.
+- Programmatic DFU entry (`MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` variants
+  on supported boards) as a faster alternative to the manual BOOT-button
+  step.
+- Board-flash-map coverage for non-H7 SFD targets, once they exist
+  (until then, the `_with_bl.hex` path is the universal escape hatch).
