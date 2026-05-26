@@ -115,12 +115,6 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 - `[ux]` **SFD logo as the favicon.** Use the SmallFastDrone logo as the
   browser-tab icon.
-- `[wizard] [ux]` **Collapse per-wizard "Run at the field" panels into the Field
-  tools catalogue.** Field-install is now a dedicated page (`/field`, header
-  radio icon). The motor-check safety screen still has its own install panel —
-  collapse it to a breadcrumb ("manage in Field tools →") and migrate its E2E
-  (`wizard-motor-check.spec.ts` install/remove test) to drive the catalogue
-  instead. Left intact for now so the suite stays green.
 - `[ux] [security]` **Field tools: real entitlement + custom upload + secure
   path.** The Pro rows (`locked`) and "Add your own applet" (expert) are seams —
   wire the real entitlement check (payment integration) and the custom-applet

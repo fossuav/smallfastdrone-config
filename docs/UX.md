@@ -36,8 +36,19 @@ Power-users get a toggle (top-right of the app shell) that exposes:
 - Manual protocol mode controls (force MAVLink ↔ MSP ↔ 4-way)
 - 4-way ESC raw settings (vs. the simplified "ESC profile" picker)
 - DFU flash with operator-supplied firmware (vs. curated SFD release picker)
+- Operator-supplied / custom Lua field tools (vs. the curated catalogue)
+- **Developer detail**: System ID, raw link byte counters, firmware git hash, dev hints like the SITL transport URL. An operator never needs these; an expert sometimes does. Default surfaces show what the operator needs to decide or confirm; raw FC / build / link metadata goes here.
 
 Expert mode is **off by default** and **per-session** — re-enable each session. Operators must not stumble into expert UI by accident.
+
+## Settings vs procedures — when to use a wizard
+
+Two kinds of operator task, two surfaces — don't conflate them:
+
+- **Settings** are simple, reversible changes the operator already knows they want — flip RPM telemetry on, pick an output protocol, turn scripting on. There's nothing to guide; the right surface is an **inline quick control** they can flip in place, using the `SettingsView` reboot pattern (flip → write → reboot if needed → auto-reconnect, no babysitting). That's the only ceremony.
+- **Procedures** are multi-step or need live interaction or guidance — the motor order/direction check (spin each motor, identify), sensor calibrations, the full bringup walk. These earn their wizard.
+
+A wizard for a setting is friction (extra clicks for no benefit). A setting where a procedure belongs is dangerous (the operator skipped the guidance). Pick the right surface for the task. The bringup ribbon's Motors tab is the worked example: protocol + RPM telemetry are inline quick controls on the config panel, the order/direction check is the guided procedure below.
 
 ## Visual language
 
@@ -107,6 +118,7 @@ Not a v1 polish target, but baseline:
 | `FirmwareView` | Animated DFU flow with visual stage indicators; firmware metadata card. |
 | `EscToolsView` | Per-ESC card with live data; "ESC profile" picker visible by default; raw 4-way settings only in expert mode. |
 | `SettingsView` | One card per feature toggle (switch + plain-language description + current-state line). Reboot-required toggles surface an Apply confirm; the restart + reconnect is handled for the operator. |
+| `FieldToolsView` | Catalogue of field-installable tools (one row per tool, Install / Remove inline); scripting-on indicator; commercial gating shown as locked "Pro" rows; expert-only "Add your own applet" affordance. Reached from a header radio-icon entry point that also carries the installed-count badge. |
 
 ## Feature toggles & reboot-required changes
 
@@ -116,6 +128,28 @@ Not a v1 polish target, but baseline:
 - **One action does the whole job.** When a reboot *is* required, the single confirm (Apply) does everything: write the parameter, restart the drone, and reconnect — with no further clicks. Don't decompose a reboot into separate "Apply", "Restart", and "Reconnect" buttons the operator has to chase in sequence. The operator expressed intent once; honour it end-to-end.
 - **Reconnect is automatic, not the operator's chore.** After a restart, the tool reconnects on its own, retrying through the FC's boot window. A manual "Reconnect" affordance appears only as a *fallback* if auto-reconnect exhausts its budget — never as the default path. The operator should be able to walk away during the restart and come back to a settled, applied state.
 - **Name the consequence before it happens.** The confirm copy says what will occur in operator terms — "Applying this restarts your drone (a few seconds) — we'll reconnect automatically when it's back" — not "Set SCR_ENABLE=1 and reboot".
+- **Surfaces stay put across a reboot they initiated.** When a panel triggers an FC restart (a feature toggle, a quick control), the surrounding UI doesn't collapse to "connect your drone" mid-flow — the control owns its restarting/reconnecting state inline, and the parent surface stays mounted. The bringup ribbon does this via `session.rebooting`; the wizard runner via "keep mounted across transient drops." A surface that vanishes during the reboot it initiated reads as a failure to the operator, even when it isn't.
+
+## Notifications: bell + toasts
+
+Two surfaces, two roles — don't blur them:
+
+- **Toasts are the *alert* path.** Fired for FC warnings / errors as they arrive (the session store thresholds STATUSTEXTs at `MAV_SEVERITY_WARNING` and below). Routine INFO never toasts: a normal boot is dozens of INFO lines, and toasting them all is noise.
+- **The bell is the *audit trail*.** Browsable history of every STATUSTEXT this session, in the nav popover. Its trigger badge counts only **unread important** (warning-or-worse) messages, clearing on open. Routine INFO doesn't drive the badge — a normal boot has nothing alarming to surface — but is still listed for review.
+
+The rule: never present routine FC chatter as something demanding attention. The badge climbing into double-digits on every connect is alarm fatigue, not signal.
+
+## Field tools (run from the radio)
+
+Some procedures benefit from "no laptop at the field" — installed onto the FC, run from the transmitter's CRSF menu. The operator-facing model:
+
+- **One global home, not per-wizard panels.** `FieldToolsView` is the catalogue, reached from a header radio-icon entry point. The operator's question is *"what can I run from the radio?"*, which spans wizards (and later settings); per-wizard install panels fragment it.
+- **Selective.** The operator installs only what they pick — never an all-or-nothing bundle. Each row has its own Install / Remove.
+- **Per-wizard indicator on the library card.** A field-capable wizard's card shows a green **"On the radio"** badge when its field tool is currently installed (gated on a live connection), else **"Field-capable"**. The catalogue, the cards, and the header badge all read the same `useFieldToolsStore`, so a change in one place reflects everywhere.
+- **Commercial gating reuses the wizard library's `locked` seam.** A paid field tool is a Pro row, greyed with "Unlock" until entitled. No new gating mechanism.
+- **Custom (operator-supplied) tools live behind expert mode**, same posture as operator-supplied firmware DFU.
+
+Catalogue contract + extensibility seams: see `docs/WIZARDS.md` "Field tools catalogue".
 
 ## Anti-patterns we won't ship
 
