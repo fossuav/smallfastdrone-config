@@ -121,10 +121,6 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   collapse it to a breadcrumb ("manage in Field tools →") and migrate its E2E
   (`wizard-motor-check.spec.ts` install/remove test) to drive the catalogue
   instead. Left intact for now so the suite stays green.
-- `[ux]` **Field tools: header installed-count badge.** The header entry point
-  is just an icon; the preview had a badge showing how many tools are on the
-  radio. Needs a small shared store so the chrome + the page agree on install
-  state (also the building block for enable/disable-by-moving-dirs later).
 - `[ux] [security]` **Field tools: real entitlement + custom upload + secure
   path.** The Pro rows (`locked`) and "Add your own applet" (expert) are seams —
   wire the real entitlement check (payment integration) and the custom-applet
