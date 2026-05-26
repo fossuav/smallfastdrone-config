@@ -28,8 +28,9 @@ test('Wizard library shows unlocked + locked cards, and frame-select writes FRAM
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText('Connected to your Quadcopter')).toBeVisible({ timeout: 15_000 })
 
-  // Open the library via the nav.
+  // Open the library: Bringup → ribbon → "All wizards" → library.
   await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: 'All wizards' }).click()
   await expect(page.getByRole('heading', { name: 'Bringup wizards' })).toBeVisible()
 
   // Unlocked card for frame-select is present.
@@ -100,10 +101,9 @@ test('Bringup ribbon walks preflight + frame-select + motor-check and marks itse
   // as a Hexacopter rather than the default Quadcopter. Either is fine.
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
 
-  // Open the bringup ribbon (the runner mounts the bringup wizard's
-  // DesktopView = the ribbon).
+  // Bringup nav lands on the ribbon directly (the runner mounts the
+  // bringup wizard's DesktopView = the ribbon).
   await page.getByRole('link', { name: 'Bringup', exact: true }).click()
-  await page.getByRole('link', { name: /Open the Full bringup wizard/ }).click()
   await expect(page.getByRole('heading', { name: 'Full bringup' })).toBeVisible()
   // Pre-flight tab is the default (first incomplete).
   await expect(page.getByRole('tab', { name: /Pre-flight check/ })).toBeVisible({ timeout: 15_000 })
@@ -149,7 +149,9 @@ test('Bringup ribbon walks preflight + frame-select + motor-check and marks itse
 
   // All three sub-wizards complete → bringup auto-marks itself; the
   // library card shows the Done badge with the outcome from the watcher.
+  // Library is one hop further now (Bringup nav → ribbon → All wizards).
   await page.getByRole('link', { name: 'Bringup', exact: true }).click()
+  await page.getByRole('link', { name: 'All wizards' }).click()
   const bringupCard = page.getByRole('link', { name: /Open the Full bringup wizard/ })
   await expect(bringupCard.getByText('Done')).toBeVisible({ timeout: 15_000 })
   await expect(bringupCard.getByText(/All 3 bringup steps complete/)).toBeVisible()

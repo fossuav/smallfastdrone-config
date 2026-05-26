@@ -63,7 +63,9 @@ test('IMU noise wizard runs end-to-end with live scripting against SITL', async 
   }
 
   // --- Run the wizard's live path ---
+  // Bringup nav → ribbon → "All wizards" → library → wizard card.
   await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: 'All wizards' }).click()
   await page.getByRole('link', { name: /Open the Check sensor noise wizard/ }).click()
   await expect(page.getByRole('heading', { name: 'Check sensor noise' })).toBeVisible()
 

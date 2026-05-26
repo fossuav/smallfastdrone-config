@@ -31,10 +31,15 @@ export const routes: RouteRecordRaw[] = [
     meta: { label: 'Connect', icon: 'i-lucide-plug' },
   },
   {
+    // The wizard library is still hosted at /wizard (sensor noise, Pro PID,
+    // standalone wizard access). But "Bringup" in the top nav now goes
+    // straight to the ribbon — the library is reached via the "All wizards"
+    // link in the bringup view (until Recipes carries the orphans). navTo
+    // overrides the nav target without changing the route path.
     path: '/wizard',
     name: 'wizard',
     component: () => import('./views/WizardLibraryView.vue'),
-    meta: { label: 'Bringup', icon: 'i-lucide-wand-2' },
+    meta: { label: 'Bringup', icon: 'i-lucide-list-checks', navTo: '/wizard/bringup' },
   },
   {
     // Field tools catalogue. No nav label — reached via the header's

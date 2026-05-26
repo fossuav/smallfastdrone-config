@@ -39,7 +39,11 @@ test('IMU noise wizard shows the scripting-off prompt against a stock SITL', asy
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
 
+  // Bringup → ribbon → "All wizards" → library → wizard card. (Sensor
+  // noise isn't a ribbon tab; it lives in the library until it gets a
+  // proper home — see PROGRESS.)
   await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: 'All wizards' }).click()
   await page.getByRole('link', { name: /Open the Check sensor noise wizard/ }).click()
   await expect(page.getByRole('heading', { name: 'Check sensor noise' })).toBeVisible()
 

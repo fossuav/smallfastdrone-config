@@ -55,7 +55,10 @@ const navItems = computed(() =>
     .map(r => ({
       label: r.meta!.label as string,
       icon: r.meta!.icon as string,
-      to: r.path,
+      // navTo lets a route serve its real path while the nav link points
+      // somewhere else (e.g. "Bringup" routes to the ribbon, /wizard the
+      // library stays reachable via in-page links).
+      to: (r.meta?.navTo as string | undefined) ?? r.path,
     })),
 )
 </script>

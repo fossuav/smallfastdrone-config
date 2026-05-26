@@ -252,6 +252,17 @@ onMounted(() => {
       <div v-else class="text-muted py-12 text-center text-sm">
         Loading…
       </div>
+
+      <!-- Discoverability for wizards that don't live in the ribbon yet
+           (sensor noise, Pro PID, standalone access). Will retire once
+           those land in their proper homes (recipes / additional ribbon
+           tabs). -->
+      <p class="text-muted border-default mt-6 border-t pt-3 text-center text-xs">
+        Looking for a specific check or a paid wizard?
+        <RouterLink to="/wizard" class="text-primary hover:underline">
+          All wizards →
+        </RouterLink>
+      </p>
     </template>
   </div>
 </template>

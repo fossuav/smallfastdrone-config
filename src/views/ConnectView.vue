@@ -131,7 +131,7 @@ function toggle() {
             color="primary"
             block
             trailing-icon="i-lucide-arrow-right"
-            to="/wizard"
+            to="/wizard/bringup"
           >
             Set up your drone
           </UButton>

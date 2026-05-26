@@ -97,7 +97,11 @@ async function openMotorCheck(page: Page) {
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
+  // Bringup nav now lands on the ribbon. The library (where the standalone
+  // "Open the Set up motors wizard" card link lives) is reached via the
+  // "All wizards" link in the ribbon.
   await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: 'All wizards' }).click()
   await page.getByRole('link', { name: /Open the Set up motors wizard/ }).click()
   await expect(page.getByRole('heading', { name: 'Set up motors' })).toBeVisible()
   // ESC setup runs first. SITL boots DShot600, so it's usually already-good
@@ -245,8 +249,11 @@ test('Field tools installs Motor check on the radio; the wizard card reflects it
   await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible({ timeout: 60_000 })
 
   // The wizard-library card now reads "On the radio" (the per-wizard
-  // indicator) — proving the shared store wires catalogue → card.
+  // indicator) — proving the shared store wires catalogue → card. Bringup
+  // nav lands on the ribbon now; the library (with the card) is one hop
+  // further via "All wizards".
   await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: 'All wizards' }).click()
   await expect(page.getByRole('heading', { name: 'Bringup wizards' })).toBeVisible()
   const card = page.getByRole('link', { name: /Open the Set up motors wizard/ })
   await expect(card.getByText('On the radio')).toBeVisible({ timeout: 15_000 })
@@ -257,6 +264,7 @@ test('Field tools installs Motor check on the radio; the wizard card reflects it
   await page.getByRole('button', { name: 'Remove' }).click()
   await expect(page.getByRole('button', { name: 'Install' })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: 'All wizards' }).click()
   await expect(card.getByText('Field-capable')).toBeVisible({ timeout: 15_000 })
 })
 
@@ -266,7 +274,9 @@ test('ESC setup: changing the protocol applies, restarts, and reconnects (SITL)'
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
+  // Bringup nav → ribbon → "All wizards" link → library → wizard card.
   await page.getByRole('link', { name: 'Bringup' }).click()
+  await page.getByRole('link', { name: 'All wizards' }).click()
   await page.getByRole('link', { name: /Open the Set up motors wizard/ }).click()
 
   // ESC setup is already-good (booted DShot600); go expert and pick a
