@@ -62,7 +62,10 @@ test('Connect view talks to SITL, decodes heartbeat + AUTOPILOT_VERSION', async 
   // The message bell in the nav has accrued the boot STATUSTEXTs.
   await page.getByRole('button', { name: 'Recent messages from your drone' }).click()
   // Boot banner — sent by ArduPilot in response to our DO_SEND_BANNER.
-  await expect(page.getByText(/ArduCopter V.*SFD/)).toBeVisible({ timeout: 5_000 })
+  // `.first()`: SITL sometimes emits the banner twice (boot + DO_SEND_BANNER
+  // reply), so the bell can hold two identical lines — strict mode would
+  // otherwise fail on the multi-match.
+  await expect(page.getByText(/ArduCopter V.*SFD/).first()).toBeVisible({ timeout: 5_000 })
   // One of the routine boot lines we always see from SITL. `.first()`
   // because either side of the regex may match — they both show up in
   // the bell on a normal SITL boot, and toBeVisible() forbids multi-match.

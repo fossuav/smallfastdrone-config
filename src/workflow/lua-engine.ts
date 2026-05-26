@@ -267,6 +267,25 @@ export function useLuaEngine() {
     }
   }
 
+  // Install state for several applets in ONE directory listing — for the
+  // field-tools catalogue / per-wizard indicators, which would otherwise list
+  // the dir once per tool. Returns id -> present. Any FTP error treats them
+  // all as not installed (same posture as isAppletInstalled).
+  async function installedApplets(wizardIds: string[]): Promise<Record<string, boolean>> {
+    const result: Record<string, boolean> = {}
+    let names = new Set<string>()
+    try {
+      const entries = await getFtp().listDirectory('APM/scripts')
+      names = new Set(entries.filter(e => !e.isDir).map(e => e.name))
+    }
+    catch {
+      // leave names empty → everything reads as not installed
+    }
+    for (const id of wizardIds)
+      result[id] = names.has(appletFilename(id))
+    return result
+  }
+
   // Restart the FC's Lua scripting engine so a freshly-uploaded applet
   // gets rescanned and loaded (see the load-model note at the top of
   // this file). Requires scripting already enabled — it's a no-op
@@ -425,6 +444,7 @@ export function useLuaEngine() {
     removeApplet,
     uploadModule,
     isAppletInstalled,
+    installedApplets,
     restartScripting,
     readParam,
     waitForControlParam,

@@ -25,134 +25,27 @@
 // registry + asset model is in workflow/field-tools.ts; design in
 // docs/WIZARDS.md "Field tools catalogue".
 
-import type { FieldTool } from '../workflow/field-tools'
-import type { ScriptStorageStatus } from '../workflow/script-storage'
-import { onMounted, ref, watch } from 'vue'
+import { onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import { useFieldToolsStore } from '../stores/fieldTools'
 import { useSessionStore } from '../stores/session'
 import { useUiStore } from '../stores/ui'
 import { installableTools, lockedTools } from '../workflow/field-tools'
-import { useLuaEngine } from '../workflow/lua-engine'
-import { storageProblemFromError } from '../workflow/script-storage'
 
 const session = useSessionStore()
 const ui = useUiStore()
-const lua = useLuaEngine()
-
-type Scripting = 'unknown' | 'unavailable' | 'off' | 'on'
-const scripting = ref<Scripting>('unknown')
-const installed = ref<Record<string, boolean>>({})
-// Tool id currently installing/removing, or 'scripting' while enabling it.
-const busy = ref<string | null>(null)
-const loading = ref(false)
-const error = ref<string | null>(null)
+// Shared install state — the same the wizard cards + header badge read.
+// Connect-time refresh is owned by the app shell; this just covers landing
+// here directly while already connected.
+const field = useFieldToolsStore()
 
 const available = installableTools()
 const locked = lockedTools()
 
-// Operator copy for an SD-card / storage problem (field tools live on the card).
-function storageHint(status: ScriptStorageStatus): string {
-  switch (status) {
-    case 'no-card': return 'Your flight controller has no SD card to keep field tools on. Insert a formatted SD card, reconnect, and try again.'
-    case 'unformatted': return 'Your flight controller can\'t read its SD card. Format it as FAT32, reconnect, and try again.'
-    case 'readonly': return 'The SD card is locked. Slide its write-protect switch off, reconnect, and try again.'
-    default: return 'Your flight controller can\'t store field tools right now. Check its SD card, reconnect, and try again.'
-  }
-}
-
-// Probe scripting + which tools are already on the radio.
-async function refresh() {
-  if (!session.connected || !session.hasHeartbeat)
-    return
-  loading.value = true
-  error.value = null
-  try {
-    const scr = await lua.checkScripting()
-    scripting.value = !scr.available ? 'unavailable' : scr.enabled ? 'on' : 'off'
-    if (scripting.value === 'on') {
-      const next: Record<string, boolean> = {}
-      for (const t of available)
-        next[t.id] = await lua.isAppletInstalled(t.id)
-      installed.value = next
-    }
-  }
-  catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  }
-  finally {
-    loading.value = false
-  }
-}
-
-// Turn scripting on (write + reboot + reconnect), checking for writable
-// storage first so we don't reboot for nothing.
-async function enableScripting() {
-  busy.value = 'scripting'
-  error.value = null
-  try {
-    const storage = await lua.checkScriptStorage()
-    if (storage !== 'ok') {
-      error.value = storageHint(storage)
-      return
-    }
-    const ok = await lua.enableScripting()
-    if (!ok) {
-      error.value = 'Couldn\'t turn on scripting and reconnect. Try the Drone settings page.'
-      return
-    }
-    await refresh()
-  }
-  catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  }
-  finally {
-    busy.value = null
-  }
-}
-
-// Upload a tool's applet + shared modules and rescan (no reboot). Stays
-// installed for field use until removed.
-async function install(tool: FieldTool) {
-  if (!tool.applet)
-    return
-  busy.value = tool.id
-  error.value = null
-  try {
-    for (const m of tool.modules ?? [])
-      await lua.uploadModule(m.name, m.source)
-    await lua.uploadApplet(tool.id, tool.applet)
-    await lua.restartScripting()
-    installed.value = { ...installed.value, [tool.id]: true }
-  }
-  catch (e) {
-    const problem = storageProblemFromError(e)
-    error.value = problem ? storageHint(problem) : (e instanceof Error ? e.message : String(e))
-  }
-  finally {
-    busy.value = null
-  }
-}
-
-// Remove a tool's applet and rescan so it leaves the radio menu. Shared
-// modules are left in place (other tools may use them).
-async function remove(tool: FieldTool) {
-  busy.value = tool.id
-  error.value = null
-  try {
-    await lua.removeApplet(tool.id)
-    await lua.restartScripting()
-    installed.value = { ...installed.value, [tool.id]: false }
-  }
-  catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  }
-  finally {
-    busy.value = null
-  }
-}
-
-onMounted(refresh)
-watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
+onMounted(() => {
+  if (session.connected && session.hasHeartbeat)
+    void field.refresh()
+})
 </script>
 
 <template>
@@ -188,7 +81,7 @@ watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
     <template v-else>
       <!-- Scripting unavailable on this build. -->
       <UAlert
-        v-if="scripting === 'unavailable'"
+        v-if="field.scripting === 'unavailable'"
         color="warning"
         icon="i-lucide-triangle-alert"
         title="Field tools aren't available on this firmware"
@@ -196,7 +89,7 @@ watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
       />
 
       <!-- Scripting off — offer to turn it on (reboot-required). -->
-      <UCard v-else-if="scripting === 'off'">
+      <UCard v-else-if="field.scripting === 'off'">
         <div class="flex items-center justify-between gap-3">
           <div>
             <p class="text-highlighted font-medium">
@@ -209,8 +102,8 @@ watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
           <UButton
             color="primary"
             icon="i-lucide-power"
-            :loading="busy === 'scripting'"
-            @click="enableScripting"
+            :loading="field.busy === 'scripting'"
+            @click="field.enableScripting"
           >
             Turn on
           </UButton>
@@ -218,7 +111,7 @@ watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
       </UCard>
 
       <!-- Catalogue. -->
-      <template v-else-if="scripting === 'on'">
+      <template v-else-if="field.scripting === 'on'">
         <p class="text-muted text-xs">
           <UIcon name="i-lucide-circle-check" class="text-success mr-1 inline size-3.5 align-text-top" />
           Scripting is on.
@@ -239,7 +132,7 @@ watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
                 <h3 class="text-highlighted font-semibold">
                   {{ tool.name }}
                 </h3>
-                <UBadge v-if="installed[tool.id]" color="success" variant="subtle" size="sm" icon="i-lucide-check">
+                <UBadge v-if="field.installed[tool.id]" color="success" variant="subtle" size="sm" icon="i-lucide-check">
                   On the radio
                 </UBadge>
               </div>
@@ -248,12 +141,12 @@ watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
               </p>
             </div>
             <UButton
-              v-if="installed[tool.id]"
+              v-if="field.installed[tool.id]"
               color="neutral"
               variant="outline"
               size="sm"
-              :loading="busy === tool.id"
-              @click="remove(tool)"
+              :loading="field.busy === tool.id"
+              @click="field.remove(tool)"
             >
               Remove
             </UButton>
@@ -262,8 +155,8 @@ watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
               color="primary"
               size="sm"
               icon="i-lucide-download"
-              :loading="busy === tool.id"
-              @click="install(tool)"
+              :loading="field.busy === tool.id"
+              @click="field.install(tool)"
             >
               Install
             </UButton>
@@ -323,7 +216,7 @@ watch(() => session.connected && session.hasHeartbeat, ok => ok && refresh())
         </div>
       </template>
 
-      <UAlert v-if="error" color="warning" :description="error" />
+      <UAlert v-if="field.error" color="warning" :description="field.error" />
     </template>
   </div>
 </template>

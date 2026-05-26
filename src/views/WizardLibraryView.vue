@@ -20,8 +20,9 @@
 // possible" stays visible without burying the live ones. Cards link out
 // to /wizard/:id which mounts the WizardRunnerView.
 
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import { useFieldToolsStore } from '../stores/fieldTools'
 import { useSessionStore } from '../stores/session'
 import { useWizardProgressStore } from '../stores/wizardProgress'
 import {
@@ -32,6 +33,20 @@ import {
 
 const session = useSessionStore()
 const wizardProgress = useWizardProgressStore()
+// Shared field-install state so each card can show whether its field version
+// is currently on the radio.
+const field = useFieldToolsStore()
+
+// Is this wizard's field tool currently installed on the connected drone?
+// Gated on connection so a stale state never shows for a drone that's gone.
+function fieldInstalled(wizardId: string): boolean {
+  return session.connected && session.hasHeartbeat && field.isInstalled(wizardId)
+}
+
+onMounted(() => {
+  if (session.connected && session.hasHeartbeat)
+    void field.refresh()
+})
 
 // Snapshot of FC capabilities for prereq evaluation. Slice A only
 // needs the session-level checks; later slices grow this snapshot
@@ -131,7 +146,16 @@ function timeAgo(ms: number): string {
                 Done
               </UBadge>
               <UBadge
-                v-if="w.manifest.field_capable"
+                v-if="fieldInstalled(w.manifest.id)"
+                color="success"
+                variant="subtle"
+                size="sm"
+                icon="i-lucide-radio"
+              >
+                On the radio
+              </UBadge>
+              <UBadge
+                v-else-if="w.manifest.field_capable"
                 color="info"
                 variant="subtle"
                 size="sm"

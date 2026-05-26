@@ -144,18 +144,7 @@ export const useParamsStore = defineStore('params', () => {
   // Fetch every parameter from the FC into the store. Re-fetching clears
   // pending edits — a reload means "give me the live state," and merging
   // live state with pending edits would surface confusing diffs.
-  async function load() {
-    if (loading.value)
-      return
-    if (!session.connected) {
-      error.value = 'Connect to a drone first'
-      return
-    }
-    if (session.sysid === null) {
-      error.value = 'Waiting for heartbeat before fetching params'
-      return
-    }
-
+  async function runLoad(targetSys: number) {
     loading.value = true
     error.value = null
     progress.value = null
@@ -165,7 +154,7 @@ export const useParamsStore = defineStore('params', () => {
     edits.value.clear()
 
     try {
-      params.value = await streamParams(session.sysid)
+      params.value = await streamParams(targetSys)
       loadedAt.value = Date.now()
     }
     catch (e) {
@@ -174,6 +163,30 @@ export const useParamsStore = defineStore('params', () => {
     finally {
       loading.value = false
     }
+  }
+
+  // Fetch all params from the FC. Concurrent callers share one in-flight load:
+  // several surfaces can ask near-simultaneously (the app shell on connect, a
+  // wizard on mount), param streaming must not overlap, and — critically — an
+  // early caller returning before the stream completes would leave a later
+  // caller reading an empty map (the bug behind a wizard racing a connect-time
+  // load). Awaiting load() always resolves with params populated.
+  let loadInFlight: Promise<void> | null = null
+  function load(): Promise<void> {
+    if (loadInFlight)
+      return loadInFlight
+    if (!session.connected) {
+      error.value = 'Connect to a drone first'
+      return Promise.resolve()
+    }
+    if (session.sysid === null) {
+      error.value = 'Waiting for heartbeat before fetching params'
+      return Promise.resolve()
+    }
+    loadInFlight = runLoad(session.sysid).finally(() => {
+      loadInFlight = null
+    })
+    return loadInFlight
   }
 
   // Stream PARAM_VALUE messages into a Map until the FC's reported

@@ -19,14 +19,30 @@
 // render the nav; filters out routes flagged expert:true unless the
 // operator has enabled expert mode in the UI store.
 
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import logoUrl from './assets/sfd-logo.png'
 import { routes } from './router'
+import { useFieldToolsStore } from './stores/fieldTools'
+import { useSessionStore } from './stores/session'
 import { useUiStore } from './stores/ui'
 import MessageBell from './ui/components/MessageBell.vue'
 
 const ui = useUiStore()
+const session = useSessionStore()
+const field = useFieldToolsStore()
+
+// Keep field-install state current app-wide so the header badge + the wizard
+// cards reflect the live FC: refresh on (re)connect, clear on disconnect.
+watch(
+  () => session.connected && session.hasHeartbeat,
+  (ok) => {
+    if (ok)
+      void field.refresh()
+    else
+      field.reset()
+  },
+)
 
 // Project the route table into the nav menu's expected shape. Routes
 // without a `meta.label` are not navigable (none today, but the filter
@@ -73,7 +89,13 @@ const navItems = computed(() =>
                 color="neutral"
                 size="sm"
                 aria-label="Field tools"
-              />
+              >
+                <template v-if="field.installedCount > 0" #trailing>
+                  <UBadge color="success" variant="solid" size="sm" class="justify-center rounded-full px-1 text-[10px] leading-none">
+                    {{ field.installedCount }}
+                  </UBadge>
+                </template>
+              </UButton>
             </UTooltip>
             <label class="flex cursor-pointer items-center gap-2 text-sm">
               <span class="text-muted select-none">Expert</span>
