@@ -170,16 +170,18 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
 
 **Done when:** Operator can list logs on FC, download one, find it on disk, and run `notch-from-hover` against it to commit a notch-filter config — all without leaving the tool.
 
-### Phase 5 — DFU firmware flashing + security seam
-- `src/security/uploader.ts` — `SignedArtifactUploader` interface; v1 implementation is a passthrough that calls the protocol-layer file/upload primitive.
-- WebUSB transport: `src/transport/webusb.ts`.
-- DFU protocol: `src/protocol/dfu.ts` — STM32 DFU class implementation, mirroring betaflight-configurator's `dfu.js` (DFU descriptors, GET_STATUS / DNLOAD / UPLOAD / GETSTATE / CLRSTATUS, manifest tolerance, ST extensions for sector erase + address pointer).
-- Workflow: detect DFU device on USB → parse target memory layout → verify signature via uploader → erase → flash → verify → exit DFU.
-- All upload paths (firmware reflash here, Lua install future, mission upload future) routed through the uploader.
-- `docs/SECURITY.md` documents the future local-keys and remote-key-exchange flows.
-- No actual crypto in v1; uploader is passthrough but the call site is correct.
+### Phase 5 — Firmware flashing (bootloader + DFU) + security seam
 
-**Done when:** Operator can put an FC into DFU mode, the tool detects it via WebUSB, presents firmware metadata, and successfully flashes a smallfastdrone firmware image. Repo has zero direct upload calls outside `security/uploader.ts`.
+Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md) for the full architecture.
+
+- **Bootloader path (default, daily-driver)** — uses the existing USB-serial transport. The running ArduPilot reboots to its custom bootloader (via `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` param1=3); the tool speaks the bootloader's binary protocol on the same port (`GET_SYNC` / `GET_DEVICE` / `CHIP_ERASE` / `PROG_MULTI` / `GET_CRC` / `REBOOT`). Reference: `Tools/scripts/uploader.py` in the firmware repo. No new transport needed; works for ~99% of upgrades.
+- **DFU path (recovery, fresh chip)** — `src/transport/webusb.ts` + `src/protocol/dfu.ts`. STM32 DFU class via WebUSB, mirroring `betaflight-configurator/src/js/protocols/dfu.js` (DFU descriptors, GET_STATUS / DNLOAD / UPLOAD / GETSTATE / CLRSTATUS, manifest tolerance, ST DFUSE extensions for sector erase + address pointer). Operator puts the chip in DFU mode physically (BOOT0 button / jumper, or — on supported boards — a magic `MAV_CMD`).
+- **Firmware artifact** — `src/protocol/apj.ts` parses ArduPilot's `.apj` (JSON wrapper around base64-gzipped image): validates magic, decodes, gunzips via `DecompressionStream('gzip')`, surfaces board id / description / version / image bytes. Operator-supplied file picker in v1; curated SFD release picker is a follow-on (needs hosting + signing decisions).
+- **Security uploader seam** — `src/security/uploader.ts` — `SignedArtifactUploader` interface; v1 implementation is a passthrough. **All upload paths route through it** (firmware reflash here, Lua install today, mission upload future). `docs/SECURITY.md` documents the future local-keys + remote-key-exchange flows. No actual crypto in v1; the call sites are correct.
+- **UI** — `src/views/FirmwareView.vue`: file picker → parsed metadata + board-id match → confirm → path picker (default bootloader; DFU as "Recovery / fresh chip") → progress (per-phase + percent) → success/failure with operator-first copy. Bringup ribbon "Firmware" tab as the first area is a *second slice* — keep first slice standalone so protocol + UX iterate on their own.
+- **Testing** — unit tests at the protocol layer (APJ parse, bootloader framing, CRC); bench-hardware verification for the integrated flash (no SITL bootloader / DFU; documented procedure, same posture as CRSF-menu hardware verification).
+
+**Done when:** Operator can pick an SFD firmware `.apj`, the tool parses it and confirms the board match against the connected FC, then successfully flashes the firmware via the bootloader path (operator never touches DFU mode for the common case). For a blank chip or recovery, the tool detects a DFU device via WebUSB and flashes via DFU. Repo has zero direct upload calls outside `security/uploader.ts`.
 
 ### Phase 6 — MSP + BLHeli passthrough
 - `src/protocol/msp.ts` — minimal MSP v1/v2 client; only the commands needed to negotiate BLHeli passthrough entry/exit. Not a general MSP client.
