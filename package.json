@@ -43,6 +43,7 @@
     "@playwright/test": "^1.60.0",
     "@types/bun": "^1.3.14",
     "@types/w3c-web-serial": "^1.0.8",
+    "@types/w3c-web-usb": "^1.0.14",
     "@vitejs/plugin-vue": "^6.0.0",
     "@vue/tsconfig": "^0.7.0",
     "eslint": "^10.4.0",
