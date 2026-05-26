@@ -115,7 +115,10 @@ watch(
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-3xl space-y-4">
+  <div
+    class="mx-auto w-full space-y-4"
+    :class="wizard?.manifest.wide_layout ? 'max-w-5xl' : 'max-w-3xl'"
+  >
     <div class="flex items-center gap-2">
       <RouterLink
         to="/wizard"

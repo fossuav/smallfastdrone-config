@@ -37,4 +37,7 @@ export const manifest: WizardManifest = {
   ],
   in_flight: false,
   requires_props_off: false,
+  // The ribbon (tabs + config panel + inline child wizard) wants the
+  // runner's wider canvas, not the default single-column width.
+  wide_layout: true,
 }

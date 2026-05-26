@@ -87,6 +87,11 @@ export interface WizardManifest {
   // in v1.
   locked?: boolean
   unlock_blurb?: string
+  // Render this wizard in the runner's wider canvas (max-w-5xl vs the
+  // default max-w-3xl). For wizards whose surface is a dashboard rather
+  // than a single-column flow — e.g. the bringup ribbon's tabs + config
+  // panel + inline child wizard want the extra horizontal real estate.
+  wide_layout?: boolean
 }
 
 // A manifest paired with a lazy loader for its DesktopView component.

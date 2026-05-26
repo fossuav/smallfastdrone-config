@@ -14,155 +14,244 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Bringup meta-wizard DesktopView. Walks the operator through a fixed
-// ordered list of sub-wizards: preflight, frame-select, then motor-check.
-// (Future slices grow this list to cover sensors, RC, failsafes, etc.
-// per docs/BRINGUP.md — bringup picks them up automatically as long
-// as their ids are listed below.) Each step links to the standalone
-// sub-wizard URL with a returnTo query so the sub-wizard's back path
-// flows back here rather than dumping the operator at the library.
-// Bringup itself records completion when every sub-wizard is complete,
-// with no separate "finish" affordance — meta-wizards don't take
-// actions of their own.
+// Bringup meta-wizard DesktopView — the ribbon. Each bringup area is a tab
+// with its done-state; selecting one shows that area's current config
+// pulled live from the FC plus the area's wizard mounted full-width below.
+// Field-capable areas (motor-check) carry an inline "On the radio" toggle
+// in their header — field-install reads as a property OF the area, not a
+// separate concern. Selection is route-backed (/wizard/bringup?area=<id>)
+// so tabs are deep-linkable + browser back/forward steps between areas;
+// the route carries returnTo=/wizard/bringup so the inline wizards'
+// back/cancel/done paths return to the ribbon (which then auto-advances
+// to the next incomplete area).
+//
+// Bringup auto-marks itself complete once every sub-wizard is complete —
+// no separate Finish, meta-wizards don't take actions of their own. The
+// runner provides the title chrome; this view focuses on the journey.
 
-import { computed, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import type { Component } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
+import EscQuickControls from '../../ui/components/EscQuickControls.vue'
+import FieldEnabledToggle from '../../ui/components/FieldEnabledToggle.vue'
+import WizardRibbon from '../../ui/components/WizardRibbon.vue'
+import { frameGeometry } from '../../workflow/motor-geometry'
 import { getWizard } from '../../workflow/wizard-runtime'
 
 const session = useSessionStore()
-const wizardProgress = useWizardProgressStore()
+const params = useParamsStore()
+const progress = useWizardProgressStore()
+const route = useRoute()
 const router = useRouter()
 
-// Ordered chain of sub-wizard ids. Sequence matters — later steps assume
-// earlier ones have run: frame-select assumes the operator eyeballed
-// sensor health via preflight, and motor-check assumes the frame is set
-// (it reads FRAME_CLASS/TYPE to know the motor layout).
-const SUB_WIZARD_IDS = ['preflight', 'frame-select', 'motor-check'] as const
+// Ordered chain of bringup areas. Pre-arm readiness is deliberately NOT
+// surfaced here — that's a phase-05 (pre-first-flight) gate, not an
+// opening-step concern. See docs/BRINGUP.md.
+const AREA_IDS = ['preflight', 'frame-select', 'motor-check'] as const
 
-// Per-step projection of manifest + completion record so the template
-// stays declarative. Steps for unknown ids degrade gracefully — a
-// typo in SUB_WIZARD_IDS shows as a "missing" placeholder row rather
-// than crashing the view.
-const steps = computed(() =>
-  SUB_WIZARD_IDS.map((id) => {
+// Where this DesktopView lives, for routing tabs + returnTo.
+const RIBBON_PATH = '/wizard/bringup'
+
+// Core sensors the opening pre-flight check cares about (operator labels).
+const SENSOR_LABELS: Record<string, string> = {
+  gyro: 'Gyro',
+  accel: 'Accelerometer',
+  mag: 'Compass',
+  baro: 'Barometer',
+}
+
+function val(name: string): number | undefined {
+  return params.effectiveValue(name)
+}
+
+interface ConfigField { label: string, value: string }
+
+// Structured "current config" per area, read live from the FC.
+const config = computed<Record<string, ConfigField[]>>(() => {
+  let sensors = 'Waiting for status…'
+  if (session.subsystems.length > 0) {
+    const bad = session.subsystems
+      .filter(s => s.key in SENSOR_LABELS && s.state === 'unhealthy')
+      .map(s => SENSOR_LABELS[s.key])
+    sensors = bad.length === 0 ? 'All healthy' : `${bad.join(', ')} need attention`
+  }
+  const preflight: ConfigField[] = [
+    { label: 'Vehicle', value: session.vehicleLabel ?? '—' },
+    { label: 'Sensors', value: sensors },
+  ]
+
+  const frame: ConfigField[] = []
+  const cls = val('FRAME_CLASS')
+  const typ = val('FRAME_TYPE')
+  const geo = cls !== undefined && typ !== undefined ? frameGeometry(Math.trunc(cls), Math.trunc(typ)) : null
+  frame.push({ label: 'Layout', value: geo?.label ?? (cls === undefined ? 'Not set yet' : `Frame ${Math.trunc(cls)} / ${Math.trunc(typ ?? 0)}`) })
+  if (geo)
+    frame.push({ label: 'Motors', value: String(geo.motors.length) })
+
+  // Motors has no read-only fields here — its panel hosts EscQuickControls +
+  // the direction-check status instead.
+  return { 'preflight': preflight, 'frame-select': frame }
+})
+
+// Project each area into its tab + panel data.
+const areas = computed(() =>
+  AREA_IDS.map((id) => {
     const reg = getWizard(id)
     return {
       id,
-      manifest: reg?.manifest,
-      completion: wizardProgress.getCompletion(session.fcUid, id),
+      label: reg?.manifest.title ?? id,
+      hero: reg?.manifest.hero ?? 'i-lucide-wand-2',
+      fieldCapable: Boolean(reg?.manifest.field_capable),
+      done: Boolean(progress.getCompletion(session.fcUid, id)),
+      fields: config.value[id] ?? [],
     }
   }),
 )
 
-const completedCount = computed(() => steps.value.filter(s => s.completion).length)
-const allComplete = computed(() =>
-  steps.value.length > 0 && completedCount.value === steps.value.length,
+const tabs = computed(() => areas.value.map(a => ({ id: a.id, label: a.label, done: a.done })))
+
+// Motor order/direction status for the Motors panel.
+const motorDirectionStatus = computed(() =>
+  progress.getCompletion(session.fcUid, 'motor-check') ? 'checked — all passing' : 'not checked yet',
 )
 
-// Auto-mark bringup complete once every sub-wizard is complete. No
-// Finish button — bringup itself doesn't take an action, completion
-// is purely derived. Guards against re-marking so the completedAt
-// timestamp stays the time the operator actually finished the last
-// sub-wizard, not whenever they revisited the page afterwards.
+// Selection comes from the URL so tabs are deep-linkable + back/forward works.
+function isAreaId(v: unknown): v is typeof AREA_IDS[number] {
+  return typeof v === 'string' && (AREA_IDS as readonly string[]).includes(v)
+}
+const selected = computed(() =>
+  isAreaId(route.query.area)
+    ? route.query.area
+    : (areas.value.find(a => !a.done)?.id ?? AREA_IDS[0]),
+)
+const selectedArea = computed(() => areas.value.find(a => a.id === selected.value))
+
+// Navigate to a tab. Carries returnTo so the inline wizard's own
+// back/cancel/done paths return to the ribbon.
+function selectArea(id: string) {
+  void router.push({ path: RIBBON_PATH, query: { area: id, returnTo: RIBBON_PATH } })
+}
+
+// Keep the URL canonical: land on /wizard/bringup (or return from an inline
+// wizard to a bare /wizard/bringup) → replace with the resolved area +
+// returnTo so the state is always deep-linkable and returnTo is set.
+watch(
+  () => route.query.area,
+  () => {
+    if (route.path === RIBBON_PATH && !isAreaId(route.query.area))
+      void router.replace({ path: RIBBON_PATH, query: { area: selected.value, returnTo: RIBBON_PATH } })
+  },
+  { immediate: true },
+)
+
+// Lazy-load + mount the selected area's wizard view full-width below.
+const contentView = shallowRef<Component | null>(null)
+watch(selected, async (id) => {
+  contentView.value = null
+  contentView.value = (await getWizard(id)?.loadDesktopView()) ?? null
+}, { immediate: true })
+
+// Auto-mark bringup complete once every sub-wizard is complete.
+const allComplete = computed(() =>
+  areas.value.length > 0 && areas.value.every(a => a.done),
+)
 watch(
   allComplete,
   (done) => {
-    if (done && !wizardProgress.isCompleted(session.fcUid, 'bringup')) {
-      wizardProgress.markComplete(
+    if (done && !progress.isCompleted(session.fcUid, 'bringup')) {
+      progress.markComplete(
         session.fcUid,
         'bringup',
-        `All ${steps.value.length} bringup steps complete.`,
+        `All ${areas.value.length} bringup steps complete.`,
       )
     }
   },
   { immediate: true },
 )
 
-// Done state takes the operator back to the library. Bringup's own
-// completion badge will already be visible on the library card.
-function backToLibrary() {
-  router.push('/wizard')
-}
+onMounted(() => {
+  if (session.connected && params.count === 0)
+    void params.load()
+})
 </script>
 
 <template>
   <div class="space-y-4">
-    <p class="text-muted">
-      Each step focuses on one part of getting your drone configured. Run them
-      in order — earlier steps make sure later ones have what they need. You
-      can leave and come back; we'll remember where you are for this drone.
-    </p>
-
-    <div class="text-sm">
-      <span class="text-muted">Progress:</span>
-      <span class="text-highlighted ml-1 font-semibold">
-        {{ completedCount }} of {{ steps.length }} complete
-      </span>
+    <!-- Disconnected (and not in a reboot we initiated) — friendly prompt
+         rather than stale tabs. The runner keeps us mounted across drops. -->
+    <div
+      v-if="!session.rebooting && (!session.connected || !session.hasHeartbeat)"
+      class="text-muted py-8 text-center text-sm"
+    >
+      <UIcon name="i-lucide-plug" class="mx-auto size-6" />
+      <p class="mt-2">
+        Connect your drone to run bringup.
+      </p>
+      <RouterLink to="/" class="text-primary mt-2 inline-block">
+        Go to Connect
+      </RouterLink>
     </div>
 
-    <ol class="space-y-3">
-      <li
-        v-for="(step, i) in steps"
-        :key="step.id"
-        class="border-default rounded-lg border bg-elevated/30 p-3"
-      >
-        <div class="flex items-start gap-3">
-          <div
-            class="flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
-            :class="step.completion ? 'bg-success/20 text-success' : 'bg-elevated text-muted'"
-          >
-            <UIcon v-if="step.completion" name="i-lucide-check" class="size-5" />
-            <span v-else>{{ i + 1 }}</span>
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center justify-between gap-2">
-              <h3 class="text-highlighted font-semibold">
-                {{ step.manifest?.title ?? step.id }}
-              </h3>
-              <RouterLink
-                :to="`/wizard/${step.id}?returnTo=/wizard/bringup`"
-                class="shrink-0"
-              >
-                <UButton
-                  :color="step.completion ? 'neutral' : 'primary'"
-                  :variant="step.completion ? 'outline' : 'solid'"
-                  size="sm"
-                >
-                  {{ step.completion ? 'Redo' : 'Start' }}
-                </UButton>
-              </RouterLink>
+    <template v-else>
+      <!-- The ribbon — route-backed tab navigation. -->
+      <WizardRibbon :model-value="selected" :tabs="tabs" @update:model-value="selectArea" />
+
+      <!-- Current-config panel for the selected tab. Field-capable areas
+           carry the inline "On the radio" toggle in their header. -->
+      <div v-if="selectedArea" class="space-y-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-md">
+              <UIcon :name="selectedArea.hero" class="size-6" />
             </div>
-            <p v-if="step.completion" class="text-success mt-1 text-sm">
-              ✓ {{ step.completion.outcome }}
-            </p>
-            <p v-else-if="step.manifest" class="text-muted mt-1 text-sm">
-              {{ step.manifest.description }}
-            </p>
-            <p v-else class="text-warning mt-1 text-sm">
-              This step's wizard isn't installed — skip it for now.
-            </p>
+            <h2 class="text-highlighted font-semibold">
+              {{ selectedArea.label }}
+            </h2>
+          </div>
+          <div class="flex items-center gap-4">
+            <FieldEnabledToggle
+              v-if="selectedArea.fieldCapable"
+              :wizard-id="selectedArea.id"
+            />
+            <RouterLink
+              :to="`/wizard/${selected}?returnTo=${RIBBON_PATH}`"
+              class="text-muted hover:text-primary inline-flex shrink-0 items-center gap-1 text-sm"
+            >
+              Open on its own
+              <UIcon name="i-lucide-arrow-up-right" class="size-4" />
+            </RouterLink>
           </div>
         </div>
-      </li>
-    </ol>
 
-    <div
-      v-if="allComplete"
-      class="border-success/40 bg-success/10 space-y-2 rounded-lg border p-4 text-center"
-    >
-      <UIcon name="i-lucide-party-popper" class="text-success mx-auto size-8" />
-      <p class="text-highlighted font-medium">
-        Bringup complete!
-      </p>
-      <p class="text-muted text-sm">
-        Your drone has the basics sorted. Next up: failsafes, filter tuning,
-        and PIDs — those land as more wizards in later slices.
-      </p>
-      <UButton class="mt-2" color="primary" @click="backToLibrary">
-        Back to the wizard library
-      </UButton>
-    </div>
+        <!-- Motors: ESC settings are quick controls; the direction check is the procedure below. -->
+        <template v-if="selected === 'motor-check'">
+          <EscQuickControls />
+          <div class="text-sm">
+            <span class="text-muted">Motor direction:</span>
+            <span class="text-default ml-1 font-medium">{{ motorDirectionStatus }}</span>
+          </div>
+        </template>
+
+        <!-- Other areas: read-only current-config fields. -->
+        <div v-else class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <span v-for="f in selectedArea.fields" :key="f.label">
+            <span class="text-muted">{{ f.label }}:</span>
+            <span class="text-default ml-1 font-medium">{{ f.value }}</span>
+          </span>
+        </div>
+      </div>
+
+      <hr class="border-default my-4">
+
+      <!-- The selected area's wizard, full width. Motors skips ESC setup
+           since the panel above owns it. -->
+      <component :is="contentView" v-if="contentView" :key="selected" :skip-esc="selected === 'motor-check'" />
+      <div v-else class="text-muted py-12 text-center text-sm">
+        Loading…
+      </div>
+    </template>
   </div>
 </template>

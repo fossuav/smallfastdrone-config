@@ -89,79 +89,46 @@ test('Locked Pro wizard accessed by URL renders the gating page, not the runner'
   await expect(page.getByText('Coming soon — a paid Pro wizard')).toBeVisible()
 })
 
-test('Bringup meta-wizard chains preflight + frame-select + motor-check and marks itself complete', async ({ page }) => {
-  // Two reboot-free reconfigs but a hexa motor walk — give it room.
+test('Bringup ribbon walks preflight + frame-select + motor-check and marks itself complete', async ({ page }) => {
+  // Two reboot-free reconfigs + a hexa motor walk — give it room.
   test.setTimeout(120_000)
 
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   // Loose vehicle-type match — the earlier frame-select happy-path test
   // persists FRAME_CLASS=2 to SITL, so subsequent specs see SITL report
-  // as a Hexacopter rather than the default Quadcopter. Either is fine
-  // for this test; we just need a heartbeat-driven connection.
+  // as a Hexacopter rather than the default Quadcopter. Either is fine.
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
 
-  // Open bringup from the library.
-  await page.getByRole('link', { name: 'Bringup' }).click()
+  // Open the bringup ribbon (the runner mounts the bringup wizard's
+  // DesktopView = the ribbon).
+  await page.getByRole('link', { name: 'Bringup', exact: true }).click()
   await page.getByRole('link', { name: /Open the Full bringup wizard/ }).click()
   await expect(page.getByRole('heading', { name: 'Full bringup' })).toBeVisible()
+  // Pre-flight tab is the default (first incomplete).
+  await expect(page.getByRole('tab', { name: /Pre-flight check/ })).toBeVisible({ timeout: 15_000 })
 
-  // All steps render as not-yet-started, "0 of 3 complete".
-  await expect(page.getByText('0 of 3 complete')).toBeVisible()
-
-  // Start preflight from bringup. The Start button is a router link to
-  // /wizard/preflight?returnTo=/wizard/bringup; we click and end up at
-  // the preflight runner.
-  const preflightRow = page.locator('li').filter({ hasText: 'Pre-flight check' })
-  await preflightRow.getByRole('link', { name: 'Start' }).click()
-  await expect(page.getByRole('heading', { name: 'Pre-flight check' })).toBeVisible()
-
-  // Confirm — preflight has no FC writes, just an operator confirmation.
+  // Complete preflight inline — no FC writes, just operator confirmation.
+  // The button's leave() returns to the ribbon, which auto-advances.
   await page.getByRole('button', { name: /Looks good/ }).click()
 
-  // Back at bringup, preflight is done and progress reads 1 of 3.
-  await expect(page.getByRole('heading', { name: 'Full bringup' })).toBeVisible()
-  await expect(page.getByText('1 of 3 complete')).toBeVisible()
-  await expect(preflightRow.getByText(/Pre-flight check passed/)).toBeVisible()
-
-  // Start frame-select from bringup; ends at /wizard/frame-select.
-  const frameRow = page.locator('li').filter({ hasText: 'Pick your frame' })
-  await frameRow.getByRole('link', { name: 'Start' }).click()
-  await expect(page.getByRole('heading', { name: 'Pick your frame' })).toBeVisible()
-
-  // Wait for params, pick a frame, apply. (Quad X may already be set —
-  // the wizard handles that case with the "no change needed" path.)
+  // Auto-advanced to Frame: the frame picker is the inline content.
+  // Pick Hex Plus, Apply, then "Back to the wizard library" returns to
+  // the ribbon (via returnTo), which auto-advances to Motors.
   await expect(page.getByRole('button', { name: /Hex Plus/, pressed: false })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: /Hex Plus/, pressed: false }).click()
   await page.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByText('Done — your drone knows its motor layout.')).toBeVisible({ timeout: 15_000 })
-
-  // Back to bringup via the Done button — should return us to the
-  // bringup runner, not the library, because of the returnTo query.
   await page.getByRole('button', { name: 'Back to the wizard library' }).click()
-  await expect(page.getByRole('heading', { name: 'Full bringup' })).toBeVisible()
 
-  // Frame done — 2 of 3; motor-check still pending, so no banner yet.
-  await expect(page.getByText('2 of 3 complete')).toBeVisible()
-  await expect(page.getByText('Bringup complete!')).toHaveCount(0)
-
-  // Run the motor check. The frame is now a Hex Plus and the FC applies
-  // that live (it rebuilds the mixer + reassigns motor outputs while
-  // disarmed), so this exercises the hexa geometry end-to-end — six
-  // motors, no reboot needed.
-  const motorRow = page.locator('li').filter({ hasText: 'Set up motors' })
-  await motorRow.getByRole('link', { name: 'Start' }).click()
-  await expect(page.getByRole('heading', { name: 'Set up motors' })).toBeVisible()
-  // ESC setup runs first (booted DShot600 → already good) → continue.
-  await expect(page.getByText('Your ESCs are set up well')).toBeVisible({ timeout: 30_000 })
-  await page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 15_000 })
+  // Motors tab: skipEsc → motor-check opens straight on the safety gate
+  // (ESC config lives in the ribbon's panel above). Six-motor hexa walk
+  // exercises the hexa geometry end-to-end — no reboot needed.
+  await expect(page.getByText('Remove all propellers first')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText(/Hexa \+/)).toBeVisible()
   await page.getByRole('switch', { name: 'Propellers are removed' }).click()
   await page.getByRole('button', { name: 'Start motor check' }).click()
 
-  // Confirm the six hexa-plus motors at their pre-selected expected
-  // position + spin (front cw, then alternating round the ring).
   const hexaPlus = [
     { position: 'Front', direction: 'Clockwise' },
     { position: 'Front right', direction: 'Counter-clockwise' },
@@ -179,16 +146,11 @@ test('Bringup meta-wizard chains preflight + frame-select + motor-check and mark
     await page.getByRole('button', { name: i === hexaPlus.length - 1 ? 'Finish' : 'Next motor' }).click()
   }
   await expect(page.getByRole('heading', { name: 'Motors all check out' })).toBeVisible({ timeout: 10_000 })
-  await page.getByRole('button', { name: 'Back to library' }).click()
 
-  // All three steps complete; the celebratory done banner appears.
-  await expect(page.getByRole('heading', { name: 'Full bringup' })).toBeVisible()
-  await expect(page.getByText('3 of 3 complete')).toBeVisible()
-  await expect(page.getByText('Bringup complete!')).toBeVisible()
-
-  // Library card for bringup itself now shows the completion badge.
+  // All three sub-wizards complete → bringup auto-marks itself; the
+  // library card shows the Done badge with the outcome from the watcher.
   await page.getByRole('link', { name: 'Bringup', exact: true }).click()
   const bringupCard = page.getByRole('link', { name: /Open the Full bringup wizard/ })
-  await expect(bringupCard.getByText('Done')).toBeVisible()
+  await expect(bringupCard.getByText('Done')).toBeVisible({ timeout: 15_000 })
   await expect(bringupCard.getByText(/All 3 bringup steps complete/)).toBeVisible()
 })

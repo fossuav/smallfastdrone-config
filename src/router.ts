@@ -37,13 +37,6 @@ export const routes: RouteRecordRaw[] = [
     meta: { label: 'Bringup', icon: 'i-lucide-wand-2' },
   },
   {
-    // PROTOTYPE — ribbon layout for the bringup journey. No nav label
-    // (kept out of the main menu); reached via the library's preview link.
-    path: '/bringup',
-    name: 'bringup-ribbon',
-    component: () => import('./views/BringupRibbonView.vue'),
-  },
-  {
     // Field tools catalogue. No nav label — reached via the header's
     // radio-icon entry point (it's a cross-cutting capability, not a
     // primary destination).

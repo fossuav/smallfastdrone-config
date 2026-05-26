@@ -97,25 +97,17 @@ function timeAgo(ms: number): string {
 
 <template>
   <div class="space-y-6">
-    <header class="flex items-start justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <UIcon name="i-lucide-wand-2" class="text-primary size-7" />
-        <div>
-          <h1 class="text-highlighted text-2xl font-semibold">
-            Bringup wizards
-          </h1>
-          <p class="text-muted text-sm">
-            Step-by-step flows that get your drone configured the right way. Pick
-            one to start, or run the full bringup from the top.
-          </p>
-        </div>
+    <header class="flex items-center gap-3">
+      <UIcon name="i-lucide-wand-2" class="text-primary size-7" />
+      <div>
+        <h1 class="text-highlighted text-2xl font-semibold">
+          Bringup wizards
+        </h1>
+        <p class="text-muted text-sm">
+          Step-by-step flows that get your drone configured the right way. Pick
+          one to start, or run the full bringup from the top.
+        </p>
       </div>
-      <!-- PROTOTYPE entry point — the ribbon-layout bringup (preview). -->
-      <RouterLink to="/bringup" class="shrink-0">
-        <UButton color="neutral" variant="outline" size="sm" trailing-icon="i-lucide-arrow-up-right">
-          Ribbon layout (preview)
-        </UButton>
-      </RouterLink>
     </header>
 
     <!-- Unlocked wizards — the live catalogue. -->
