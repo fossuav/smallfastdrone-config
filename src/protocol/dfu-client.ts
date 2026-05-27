@@ -59,6 +59,25 @@ export const DEFAULT_TRANSFER_SIZE = 2048
 // actual wait.
 const MAX_STATUS_POLLS = 600
 
+// Ceiling on how long we sleep between GETSTATUS polls, regardless of
+// what `bwPollTimeout` the device requests. Some ST DFU devices return
+// bwPollTimeout values in the tens of seconds for an operation that
+// actually completes in well under a second — making the upload look
+// stalled because the host is honouring a generous device hint. We
+// still wait *at least* the device's reported time on each request,
+// just not more than this cap. Same approach dfu-util's `-t` option
+// uses; 500 ms is a comfortable middle ground (responsive bar + still
+// gentle on the USB stack).
+const MAX_POLL_INTERVAL_MS = 500
+
+// Per-sector erase estimate for the progress-bar animation while we're
+// waiting on the device. H7 typical is ~1.3 s, max ~4 s. The bar
+// interpolates from sectorStart/N to (sectorStart+1)/N over this
+// window (capped at 95 % until the actual ack lands), so even a long
+// erase keeps the bar moving and the operator knows the flow isn't
+// frozen.
+const SECTOR_ERASE_ESTIMATE_MS = 2_000
+
 // DFU control transfer setup boilerplate — bmRequestType is always
 // class | interface, the request varies. Index is the bInterface (0
 // for the boards we target).
@@ -185,7 +204,7 @@ export class DfuClient {
         )
       }
       if (s.pollTimeoutMs > 0)
-        await sleep(s.pollTimeoutMs)
+        await sleep(Math.min(s.pollTimeoutMs, MAX_POLL_INTERVAL_MS))
     }
     throw new Error(`DFU ${op} didn't finish after ${MAX_STATUS_POLLS} status polls.`)
   }
@@ -254,9 +273,34 @@ export class DfuClient {
 
     onPhase?.('erasing')
     onProgress?.(0)
-    for (let i = 0; i < sectorsToErase.length; i++) {
-      await this.erasePage(sectorsToErase[i]!)
-      onProgress?.((i + 1) / sectorsToErase.length)
+    const totalSectors = sectorsToErase.length
+    for (let i = 0; i < totalSectors; i++) {
+      const sectorStart = i / totalSectors
+      const sectorEnd = (i + 1) / totalSectors
+      // Tick an estimate-based animation while we wait on the device.
+      // Without this the bar is frozen at sectorStart through the
+      // whole 1-2 s sector erase, which reads as "stalled".
+      let cancelled = false
+      let interval: ReturnType<typeof setInterval> | null = null
+      if (onProgress) {
+        const startedAt = Date.now()
+        interval = setInterval(() => {
+          if (cancelled)
+            return
+          const elapsed = Date.now() - startedAt
+          const t = Math.min(elapsed / SECTOR_ERASE_ESTIMATE_MS, 0.95)
+          onProgress(sectorStart + (sectorEnd - sectorStart) * t)
+        }, 100)
+      }
+      try {
+        await this.erasePage(sectorsToErase[i]!)
+      }
+      finally {
+        cancelled = true
+        if (interval)
+          clearInterval(interval)
+      }
+      onProgress?.(sectorEnd)
     }
 
     onPhase?.('programming')
