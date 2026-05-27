@@ -109,6 +109,32 @@ export type DfuFlashSpec
   = | { kind: 'apj', apj: ApjFirmware }
     | { kind: 'hex', hex: ParsedHex, filename: string }
 
+// How aggressive to be with erase. The default depends on file kind
+// (mass for .hex, sectors for .apj), but the operator can override —
+// see `recommendedEraseStrategy()`.
+//   - 'mass'    → DfuSe MASS_ERASE (one command, wipes the whole chip).
+//                 Faster, but loses anything outside the write regions
+//                 (param storage, the bootloader for .apj, etc.).
+//   - 'sectors' → walk the regions and erase only sectors that overlap.
+//                 Slower (and may hit dual-bank H7 quirks across
+//                 0x08100000), but preserves untouched flash like the
+//                 param-storage area at the end of the chip.
+export type EraseStrategy = 'mass' | 'sectors'
+
+// Sensible default per file kind. `.hex` always carries bootloader-
+// plus-firmware (full replacement) → mass erase. `.apj` carries the
+// firmware only and *must* preserve the bootloader at the low sectors
+// → per-sector. The operator can override either way from the UI.
+export function recommendedEraseStrategy(specKind: DfuFlashSpec['kind']): EraseStrategy {
+  return specKind === 'hex' ? 'mass' : 'sectors'
+}
+
+export interface DfuFlashOptions {
+  // Override the default erase strategy for this run. Omit to use
+  // `recommendedEraseStrategy(spec.kind)`.
+  eraseStrategy?: EraseStrategy
+}
+
 export function useFirmwareFlash() {
   const session = useSessionStore()
 
@@ -409,7 +435,11 @@ export function useFirmwareFlash() {
   // flow itself, inside the user gesture). We close the device once
   // we're done (or on error) — the operator unplugs + re-plugs to
   // return to normal mode.
-  async function flashDfu(spec: DfuFlashSpec, opened: OpenedDfuDevice): Promise<void> {
+  async function flashDfu(
+    spec: DfuFlashSpec,
+    opened: OpenedDfuDevice,
+    options: DfuFlashOptions = {},
+  ): Promise<void> {
     assertIdle()
     error.value = null
     progress.value = null
@@ -481,13 +511,18 @@ export function useFirmwareFlash() {
       const client = new DfuClient(opened.control, { interfaceNumber: opened.interfaceNumber })
       const flat = flattenRegions(regions, totalBytes)
 
-      // Full-chip `.hex` flashes (which include the bootloader) use
-      // MASS_ERASE — one command instead of N per-sector erases,
-      // dodges STM32 ROM-DFU state-machine quirks at flash-bank
-      // boundaries (H743's dual-bank 0x08100000 seam has been
-      // observed to wedge per-sector erase). `.apj` recovery must
-      // preserve the bootloader, so stays on per-sector.
-      const useMassErase = spec.kind === 'hex'
+      // Erase strategy — operator-overridable via the DFU-tab radio,
+      // sensible default per file kind:
+      //   `.hex`  → mass erase (full chip; the .hex carries bootloader
+      //             + firmware and ROM-DFU per-sector erase has
+      //             wedged on dual-bank H7 at 0x08100000).
+      //   `.apj`  → per-sector erase (preserves the bootloader at the
+      //             low sectors and any param-storage at the high
+      //             sectors that the firmware image doesn't cover).
+      // Operator picks "Wipe the entire chip" or "Erase only what's
+      // needed" from the DFU tab; this just honours that choice.
+      const eraseStrategy = options.eraseStrategy ?? recommendedEraseStrategy(spec.kind)
+      const useMassErase = eraseStrategy === 'mass'
 
       try {
         await defaultUploader.upload(

@@ -33,8 +33,8 @@
 import type { ApjFirmware } from '../protocol/apj'
 import type { ParsedHex } from '../protocol/intel-hex'
 import type { DfuDeviceHandle } from '../transport/webusb'
-import type { DfuFlashSpec } from '../workflow/firmware'
-import { computed, ref } from 'vue'
+import type { DfuFlashSpec, EraseStrategy } from '../workflow/firmware'
+import { computed, ref, watch } from 'vue'
 import { parseApj } from '../protocol/apj'
 import { parseIntelHex } from '../protocol/intel-hex'
 import { useSessionStore } from '../stores/session'
@@ -43,7 +43,7 @@ import {
   openDfuDevice,
   requestDfuDevice,
 } from '../transport/webusb'
-import { useFirmwareFlash } from '../workflow/firmware'
+import { recommendedEraseStrategy, useFirmwareFlash } from '../workflow/firmware'
 
 const session = useSessionStore()
 // Destructure so the refs auto-unwrap in the template.
@@ -254,6 +254,24 @@ async function requestDfuPermission() {
   }
 }
 
+// Erase strategy selector — operator-overridable per flash. Defaults
+// per file kind (mass for .hex full reflash, sectors for .apj
+// recovery) via the watch below.
+const eraseStrategy = ref<EraseStrategy>('sectors')
+watch(dfuFile, (next) => {
+  if (next)
+    eraseStrategy.value = recommendedEraseStrategy(next.kind)
+})
+// Warn when the operator picks the dangerous combo (mass erase + .apj):
+// mass erase wipes the bootloader, but an `.apj` doesn't carry one —
+// the drone won't boot until they follow up with a `_with_bl.hex` flash.
+const eraseStrategyWarning = computed(() => {
+  if (eraseStrategy.value === 'mass' && dfuFile.value?.kind === 'apj') {
+    return 'This will erase the bootloader too. Your drone won\'t boot afterwards — you\'ll need to flash a "_with_bl.hex" file next to restore it.'
+  }
+  return null
+})
+
 async function startDfuFlash(handle: DfuDeviceHandle) {
   if (!dfuFile.value)
     return
@@ -262,7 +280,7 @@ async function startDfuFlash(handle: DfuDeviceHandle) {
     const spec: DfuFlashSpec = dfuFile.value.kind === 'apj'
       ? { kind: 'apj', apj: dfuFile.value.apj }
       : { kind: 'hex', hex: dfuFile.value.hex, filename: dfuFile.value.filename }
-    await flashDfu(spec, opened)
+    await flashDfu(spec, opened, { eraseStrategy: eraseStrategy.value })
   }
   catch {
     /* flashError populated, UI reads from it */
@@ -604,6 +622,54 @@ const webUsbSupported = computed(() => 'usb' in navigator)
               <span class="text-default ml-1 font-medium">{{ (dfuFile.hex.totalBytes / 1024).toFixed(1) }} KB</span>
             </p>
           </div>
+        </UCard>
+
+        <!-- Step 2b: erase strategy. Operator-overridable; defaults
+             per file kind (mass for .hex full reflash, sectors for
+             .apj recovery). The dangerous combo (mass + .apj) gets
+             a yellow warning under the radio. -->
+        <UCard v-if="dfuFile">
+          <h2 class="text-highlighted font-semibold">
+            Erase strategy
+          </h2>
+          <p class="text-muted mt-1 text-sm">
+            What should we erase before writing the new firmware?
+          </p>
+          <div class="mt-3 space-y-2">
+            <label class="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-muted/30">
+              <input
+                v-model="eraseStrategy"
+                type="radio"
+                value="mass"
+                class="mt-1"
+                :disabled="isRunning"
+              >
+              <span class="text-sm">
+                <span class="text-default font-medium">Wipe the entire chip</span>
+                <span class="text-muted ml-1">— faster. Loses any saved settings (and the bootloader, on <code>.apj</code> files).</span>
+              </span>
+            </label>
+            <label class="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-muted/30">
+              <input
+                v-model="eraseStrategy"
+                type="radio"
+                value="sectors"
+                class="mt-1"
+                :disabled="isRunning"
+              >
+              <span class="text-sm">
+                <span class="text-default font-medium">Erase only what's needed for this firmware</span>
+                <span class="text-muted ml-1">— slower. Tries to keep your saved settings (and the bootloader on <code>.apj</code> files).</span>
+              </span>
+            </label>
+          </div>
+          <UAlert
+            v-if="eraseStrategyWarning"
+            color="warning"
+            class="mt-3"
+            icon="i-lucide-triangle-alert"
+            :description="eraseStrategyWarning"
+          />
         </UCard>
 
         <!-- Step 3: device + flash. -->
