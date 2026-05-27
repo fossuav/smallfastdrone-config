@@ -94,12 +94,15 @@ const MASS_ERASE_TIMEOUT_MS = 120_000
 // WebUSB on Windows has been observed to never resolve a
 // `controlTransferIn` if the device drops a response — without these
 // the UI sits frozen indefinitely with no surfaced error.
-//   - GETSTATUS_TIMEOUT_MS: a single status read should land in well
-//     under a second on a healthy bus; 5 s is well past anything we'd
-//     accept and well before "operator gives up".
+//   - GETSTATUS_TIMEOUT_MS: cap on a *single* GETSTATUS round trip.
+//     On a healthy bus this lands in milliseconds, but during mass
+//     erase the STM32 H7 ROM DFU bootloader has been observed to
+//     stop servicing USB ISRs while it polls the flash BSY bit —
+//     so a single GETSTATUS can genuinely take 20-30 s. 45 s gives
+//     mass-erase headroom while still catching a really-gone device.
 //   - OPERATION_TIMEOUT_MS: total budget for one set-address / erase /
-//     program — H7 sector erase max is ~4 s, so 30 s is a 7× cushion.
-const GETSTATUS_TIMEOUT_MS = 5_000
+//     program — H7 sector erase max is ~4 s, so 60 s is a 15× cushion.
+const GETSTATUS_TIMEOUT_MS = 45_000
 const OPERATION_TIMEOUT_MS = 60_000
 
 // DFU control transfer setup boilerplate — bmRequestType is always
