@@ -481,6 +481,14 @@ export function useFirmwareFlash() {
       const client = new DfuClient(opened.control, { interfaceNumber: opened.interfaceNumber })
       const flat = flattenRegions(regions, totalBytes)
 
+      // Full-chip `.hex` flashes (which include the bootloader) use
+      // MASS_ERASE — one command instead of N per-sector erases,
+      // dodges STM32 ROM-DFU state-machine quirks at flash-bank
+      // boundaries (H743's dual-bank 0x08100000 seam has been
+      // observed to wedge per-sector erase). `.apj` recovery must
+      // preserve the bootloader, so stays on per-sector.
+      const useMassErase = spec.kind === 'hex'
+
       try {
         await defaultUploader.upload(
           { kind: 'firmware', name, bytes: flat },
@@ -491,6 +499,7 @@ export function useFirmwareFlash() {
                 sectorsToErase,
                 {
                   transferSize: opened.transferSize,
+                  useMassErase,
                   onProgress: (fraction) => {
                     progress.value = fraction
                     onProgress?.(fraction)

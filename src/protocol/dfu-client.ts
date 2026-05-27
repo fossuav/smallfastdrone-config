@@ -39,6 +39,7 @@
 import type { ControlSetup, USBControl } from '../transport/usb-control'
 import {
   buildErasePagePayload,
+  buildMassErasePayload,
   buildSetAddressPayload,
   DFU_REQ,
   DFU_STATE,
@@ -78,6 +79,16 @@ const MAX_POLL_INTERVAL_MS = 10_000
 // erase keeps the bar moving and the operator knows the flow isn't
 // frozen.
 const SECTOR_ERASE_ESTIMATE_MS = 2_000
+
+// Time-based estimate for mass-erase animation. H7 mass erase is
+// ~30-40 s; the actual ack might arrive earlier or later. Same shape
+// as the bootloader CHIP_ERASE animation (capped at 95 % until ack).
+const MASS_ERASE_ESTIMATE_MS = 35_000
+
+// Mass erase needs its own operation budget — it's one command that
+// covers the whole chip and is genuinely allowed to take 30-60 s on
+// H7. The per-op timeout is for individual sector operations.
+const MASS_ERASE_TIMEOUT_MS = 120_000
 
 // Ceilings to keep a stuck device from hanging the flow forever.
 // WebUSB on Windows has been observed to never resolve a
@@ -129,6 +140,13 @@ export interface DfuFlashOptions {
   onProgress?: (fraction: number) => void
   // Coarse phase callback. Drives the UI's status line.
   onPhase?: (phase: DfuPhase) => void
+  // When true, use DfuSe MASS_ERASE instead of walking per-sector
+  // ERASE_PAGE commands. Sidesteps STM32 ROM-DFU quirks at flash-bank
+  // boundaries (H743 dual-bank in particular). Caller must only set
+  // this for full-chip flashes (e.g. `_with_bl.hex`) — mass erase wipes
+  // the bootloader region too, which is fine when you're replacing it
+  // and catastrophic when you're not (.apj recovery must preserve it).
+  useMassErase?: boolean
 }
 
 export class DfuClient {
@@ -180,7 +198,7 @@ export class DfuClient {
   // STM32 documents this as a 2-poll sequence (busy → idle).
   async setAddress(address: number): Promise<void> {
     await this.dnloadCommand(buildSetAddressPayload(address))
-    await this.pollUntilIdle('set-address')
+    await this.pollUntilIdle('set-address', OPERATION_TIMEOUT_MS)
   }
 
   // Erase a single page at the given address. Block size = sector size
@@ -196,7 +214,7 @@ export class DfuClient {
   // reason.
   async erasePage(address: number): Promise<void> {
     await this.dnloadCommand(buildErasePagePayload(address))
-    await this.pollUntilIdle('erase')
+    await this.pollUntilIdle('erase', OPERATION_TIMEOUT_MS)
     try {
       await this.abort()
     }
@@ -204,6 +222,44 @@ export class DfuClient {
       // Abort failure is non-fatal — the next op will surface any
       // genuine state issue. Swallow so a flaky bus during the abort
       // doesn't tank an otherwise-successful erase.
+    }
+  }
+
+  // Mass erase — wipes the entire user flash region in one command.
+  // Used by the `_with_bl.hex` (full reflash including bootloader) path
+  // because it's faster than walking 14+ sector erases and sidesteps
+  // ROM-DFU state-machine quirks at flash-bank boundaries (the H743's
+  // 0x08100000 dual-bank seam in particular has been observed to wedge
+  // per-sector erase). Don't use this for `.apj` recovery — that has
+  // to preserve the bootloader at the low sectors.
+  async massErase(onProgress?: (fraction: number) => void): Promise<void> {
+    await this.dnloadCommand(buildMassErasePayload())
+    let cancelled = false
+    let interval: ReturnType<typeof setInterval> | null = null
+    if (onProgress) {
+      const startedAt = Date.now()
+      onProgress(0)
+      interval = setInterval(() => {
+        if (cancelled)
+          return
+        const elapsed = Date.now() - startedAt
+        onProgress(Math.min(0.95, elapsed / MASS_ERASE_ESTIMATE_MS))
+      }, 250)
+    }
+    try {
+      await this.pollUntilIdle('mass erase', MASS_ERASE_TIMEOUT_MS)
+      onProgress?.(1)
+    }
+    finally {
+      cancelled = true
+      if (interval)
+        clearInterval(interval)
+    }
+    try {
+      await this.abort()
+    }
+    catch {
+      // see erasePage comment.
     }
   }
 
@@ -225,11 +281,11 @@ export class DfuClient {
   // any DNBUSY-ish state and lands in dfuDNLOAD_IDLE (or another
   // we-can-proceed state). Throws on any non-OK status or unexpected
   // state, naming the operation in the error.
-  private async pollUntilIdle(op: string): Promise<void> {
-    const deadline = Date.now() + OPERATION_TIMEOUT_MS
+  private async pollUntilIdle(op: string, timeoutMs: number = OPERATION_TIMEOUT_MS): Promise<void> {
+    const deadline = Date.now() + timeoutMs
     for (let i = 0; i < MAX_STATUS_POLLS; i++) {
       if (Date.now() > deadline)
-        throw new Error(`DFU ${op} timed out after ${OPERATION_TIMEOUT_MS / 1000}s without completing.`)
+        throw new Error(`DFU ${op} timed out after ${timeoutMs / 1000}s without completing.`)
       const s = await this.getStatus()
       if (s.status !== DFU_STATUS.OK) {
         throw new Error(
@@ -313,41 +369,49 @@ export class DfuClient {
 
     onPhase?.('erasing')
     onProgress?.(0)
-    const totalSectors = sectorsToErase.length
-    for (let i = 0; i < totalSectors; i++) {
-      const sectorStart = i / totalSectors
-      const sectorEnd = (i + 1) / totalSectors
-      // Tick an estimate-based animation while we wait on the device.
-      // Without this the bar is frozen at sectorStart through the
-      // whole 1-2 s sector erase, which reads as "stalled".
-      let cancelled = false
-      let interval: ReturnType<typeof setInterval> | null = null
-      if (onProgress) {
-        const startedAt = Date.now()
-        interval = setInterval(() => {
-          if (cancelled)
-            return
-          const elapsed = Date.now() - startedAt
-          const t = Math.min(elapsed / SECTOR_ERASE_ESTIMATE_MS, 0.95)
-          onProgress(sectorStart + (sectorEnd - sectorStart) * t)
-        }, 100)
+    if (options.useMassErase) {
+      // Single DfuSe MASS_ERASE — wipes the whole chip in one go. Used
+      // by the `_with_bl.hex` path; the per-sector loop below is for
+      // `.apj` recovery where the bootloader has to survive.
+      await this.massErase(onProgress)
+    }
+    else {
+      const totalSectors = sectorsToErase.length
+      for (let i = 0; i < totalSectors; i++) {
+        const sectorStart = i / totalSectors
+        const sectorEnd = (i + 1) / totalSectors
+        // Tick an estimate-based animation while we wait on the device.
+        // Without this the bar is frozen at sectorStart through the
+        // whole 1-2 s sector erase, which reads as "stalled".
+        let cancelled = false
+        let interval: ReturnType<typeof setInterval> | null = null
+        if (onProgress) {
+          const startedAt = Date.now()
+          interval = setInterval(() => {
+            if (cancelled)
+              return
+            const elapsed = Date.now() - startedAt
+            const t = Math.min(elapsed / SECTOR_ERASE_ESTIMATE_MS, 0.95)
+            onProgress(sectorStart + (sectorEnd - sectorStart) * t)
+          }, 100)
+        }
+        try {
+          await this.erasePage(sectorsToErase[i]!)
+        }
+        catch (e) {
+          const addr = sectorsToErase[i]!.toString(16).padStart(8, '0')
+          const detail = e instanceof Error ? e.message : String(e)
+          throw new Error(
+            `Erase failed at sector 0x${addr} (${i + 1}/${totalSectors}): ${detail}`,
+          )
+        }
+        finally {
+          cancelled = true
+          if (interval)
+            clearInterval(interval)
+        }
+        onProgress?.(sectorEnd)
       }
-      try {
-        await this.erasePage(sectorsToErase[i]!)
-      }
-      catch (e) {
-        const addr = sectorsToErase[i]!.toString(16).padStart(8, '0')
-        const detail = e instanceof Error ? e.message : String(e)
-        throw new Error(
-          `Erase failed at sector 0x${addr} (${i + 1}/${totalSectors}): ${detail}`,
-        )
-      }
-      finally {
-        cancelled = true
-        if (interval)
-          clearInterval(interval)
-      }
-      onProgress?.(sectorEnd)
     }
 
     onPhase?.('programming')

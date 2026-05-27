@@ -211,6 +211,33 @@ describe('dfuClient.flash — end-to-end', () => {
     expect(dataChunks).toHaveLength(2) // both regions started at block 2
   })
 
+  it('uses MASS_ERASE instead of per-sector erase when useMassErase is set', async () => {
+    const mock = new MockUSBControl()
+    // ensureIdle + 1 mass-erase poll + set-address + chunk + manifest.
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuIDLE), //              ensureIdle
+      status(DFU_STATE.dfuDNLOAD_IDLE), //       mass erase
+      status(DFU_STATE.dfuDNLOAD_IDLE), //       set-address
+      status(DFU_STATE.dfuDNLOAD_IDLE), //       chunk
+      status(DFU_STATE.dfuIDLE), //              manifest
+    ])
+    const client = new DfuClient(mock)
+    await client.flash(
+      [{ address: 0x08000000, data: new Uint8Array([1, 2, 3, 4]) }],
+      // sectorsToErase is ignored when useMassErase is true.
+      [0x08000000, 0x08020000, 0x08100000],
+      { transferSize: 2048, useMassErase: true },
+    )
+    const dnloads = mock.log.filter(e => e.kind === 'out' && e.setup.request === DFU_REQ.DNLOAD)
+    // One mass-erase + set-address + 1 chunk + manifest = 4 (vs 6 with
+    // per-sector erase across 3 sectors). Mass erase is just `[0x41]`
+    // — no address payload — distinguishing it from ERASE_PAGE.
+    expect(dnloads).toHaveLength(4)
+    const eraseCmd = dnloads.find(d => d.setup.value === 0 && d.data?.[0] === DFUSE_CMD.ERASE_PAGE)
+    expect(eraseCmd).toBeDefined()
+    expect(eraseCmd!.data!.length).toBe(1) // mass erase has no address payload
+  })
+
   it('rejects an empty regions list', async () => {
     const client = new DfuClient(new MockUSBControl())
     await expect(client.flash([], [])).rejects.toThrow(/no regions/)
