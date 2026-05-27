@@ -23,7 +23,7 @@ The bootloader path is the front door. DFU is the safety net.
 
 | Module | Role |
 |---|---|
-| `src/protocol/apj.ts` | Parse ArduPilot's `.apj` firmware artifact (JSON + base64-encoded gzipped image). |
+| `src/protocol/apj.ts` | Parse ArduPilot's `.apj` firmware artifact (JSON + base64-encoded zlib-compressed image). |
 | `src/protocol/bootloader.ts` | The ArduPilot custom bootloader protocol — command framing, response parsing, CRC. |
 | `src/protocol/bootloader-client.ts` | The sync → board-id confirm → erase → program → verify → reboot sequence on top of the framing primitives. |
 | `src/protocol/intel-hex.ts` | Intel-HEX parser for `<vehicle>_with_bl.hex` — the bootloader-plus-firmware artefact used by the DFU fresh-chip path. |
@@ -46,20 +46,22 @@ ArduPilot ships firmware as `.apj` — a JSON wrapper:
   "board_id": 50,
   "magic": "APJFWv1",
   "description": "Firmware for the CubeOrangePlus board",
-  "image": "<base64 of gzipped raw image>",
+  "image": "<base64 of zlib-compressed raw image>",
   "image_size": 1234567,
   "summary": "ArduCopter V4.7.0-beta4-SFD",
   "git_identity": "210fe9473d"
 }
 ```
 
-The parser **validates** the magic, decodes the base64, gunzips the image
-(via the browser's `DecompressionStream('gzip')` — Chromium-only is fine
-per PLAN decision 17), and returns the raw image bytes plus the metadata
-the UI shows the operator (board id, description, version summary). The
-parser does **not** talk to the FC — it only turns a file into bytes +
-fields. Board-id matching against the connected FC is the upload
-orchestrator's job.
+The parser **validates** the magic, decodes the base64, inflates the
+image (ArduPilot's `make_apj.py` uses `zlib.compress(img, 9)` — RFC 1950
+zlib wrapper, *not* RFC 1952 gzip — which the Web Compression Streams
+spec confusingly calls `'deflate'`; Chromium-only is fine per PLAN
+decision 17), and returns the raw image bytes plus the metadata the UI
+shows the operator (board id, description, version summary). The parser
+does **not** talk to the FC — it only turns a file into bytes + fields.
+Board-id matching against the connected FC is the upload orchestrator's
+job.
 
 ## Bootloader protocol
 

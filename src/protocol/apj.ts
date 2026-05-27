@@ -14,13 +14,13 @@
  */
 
 // ArduPilot `.apj` firmware-artifact parser. The shape ships as JSON
-// wrapping a base64-encoded gzipped raw image:
+// wrapping a base64-encoded zlib-compressed raw image:
 //
 //   {
 //     "board_id":      <number>,        // e.g. 50 for CubeOrangePlus
 //     "magic":         "APJFWv1",       // file-format identifier
 //     "description":   "<board name>",
-//     "image":         "<base64 of gzipped raw image>",
+//     "image":         "<base64 of zlib-compressed raw image>",
 //     "image_size":    <uncompressed bytes>,
 //     "summary":       "ArduCopter V4.7.0-beta4-SFD",
 //     "git_identity":  "<short hash>"
@@ -30,8 +30,12 @@
 // It does NOT talk to the FC, NOT verify board_id matches the connected
 // board (that's the upload orchestrator's job), and NOT route through the
 // security uploader seam (uploads do; parsing doesn't). Browser-native
-// `DecompressionStream('gzip')` does the gunzip — modern Chromium target
-// per PLAN decision 17 means no zlib dep. See docs/FIRMWARE.md.
+// `DecompressionStream('deflate')` does the inflate — modern Chromium
+// target per PLAN decision 17 means no zlib dep. ArduPilot's
+// `Tools/scripts/make_apj.py` calls `zlib.compress(img, 9)` (RFC 1950
+// zlib wrapper, not RFC 1952 gzip); the Compression Streams spec calls
+// that format `'deflate'` (confusingly — `'deflate-raw'` is RFC 1951).
+// See docs/FIRMWARE.md.
 
 // File-format magic. The parser rejects anything else as "not a firmware
 // file we recognise" — better than failing later with a confusing decode
@@ -64,18 +68,18 @@ function base64Decode(b64: string): Uint8Array {
   return bytes
 }
 
-// Gunzip a buffer via the browser-native (and Bun-native) compression
-// streams. No external zlib dep; works in the browser and in Vitest's
-// Node-like runtime. Copies the input into a fresh ArrayBuffer-backed
-// Uint8Array first — strict-TS DOM signatures want `Uint8Array<ArrayBuffer>`,
-// not the wider `Uint8Array<ArrayBufferLike>` that the base64-decoded
-// input is typed as. The copy is cheap (firmware images are small) and
-// the cast-free workaround is the most boring.
-async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
+// Inflate a zlib-wrapped (RFC 1950) buffer via the browser-native (and
+// Bun-native) compression streams. No external zlib dep; works in the
+// browser and in Vitest's Node-like runtime. Copies the input into a
+// fresh ArrayBuffer-backed Uint8Array first — strict-TS DOM signatures
+// want `Uint8Array<ArrayBuffer>`, not the wider `Uint8Array<ArrayBufferLike>`
+// that the base64-decoded input is typed as. The copy is cheap (firmware
+// images are small) and the cast-free workaround is the most boring.
+async function inflate(bytes: Uint8Array): Promise<Uint8Array> {
   const buf = new ArrayBuffer(bytes.byteLength)
   const fresh = new Uint8Array(buf)
   fresh.set(bytes)
-  const stream = new Blob([fresh]).stream().pipeThrough(new DecompressionStream('gzip'))
+  const stream = new Blob([fresh]).stream().pipeThrough(new DecompressionStream('deflate'))
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
@@ -111,10 +115,10 @@ export async function parseApj(json: string): Promise<ApjFirmware> {
 
   let image: Uint8Array
   try {
-    image = await gunzip(compressed)
+    image = await inflate(compressed)
   }
   catch {
-    throw new Error('Firmware image data is corrupt (not a valid gzip stream).')
+    throw new Error('Firmware image data is corrupt (couldn\'t decompress).')
   }
 
   return {

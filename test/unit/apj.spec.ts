@@ -14,22 +14,25 @@
  */
 
 // Unit tests for src/protocol/apj.ts. Synthesizes .apj fixtures
-// in-test (gzip + base64 + JSON-wrap) so we don't ship binary firmware
-// blobs in the repo and the round-trip parser-vs-builder consistency
-// is exercised directly.
+// in-test (zlib-compress + base64 + JSON-wrap) so we don't ship binary
+// firmware blobs in the repo. Matches what ArduPilot's
+// `Tools/scripts/make_apj.py` produces (`zlib.compress(img, 9)` —
+// RFC 1950 zlib wrapper), so the parser is verified against the real
+// firmware shape, not against itself.
 
 import { describe, expect, it } from 'vitest'
 import { parseApj } from '../../src/protocol/apj'
 
-// Gzip a buffer the same way the parser ungzips it — browser-native
-// CompressionStream. Bun ships this; Vitest's runtime uses Bun. Same
-// ArrayBuffer-copy workaround as parseApj's gunzip for the strict-TS
-// Uint8Array generic flavour.
-async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
+// Compress a buffer the way ArduPilot's make_apj.py does — zlib (RFC
+// 1950), which the Web Compression Streams spec confusingly calls
+// 'deflate'. Bun ships CompressionStream; Vitest's runtime uses Bun.
+// Same ArrayBuffer-copy workaround as parseApj's inflate for the
+// strict-TS Uint8Array generic flavour.
+async function zlibCompress(bytes: Uint8Array): Promise<Uint8Array> {
   const buf = new ArrayBuffer(bytes.byteLength)
   const fresh = new Uint8Array(buf)
   fresh.set(bytes)
-  const stream = new Blob([fresh]).stream().pipeThrough(new CompressionStream('gzip'))
+  const stream = new Blob([fresh]).stream().pipeThrough(new CompressionStream('deflate'))
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
@@ -42,7 +45,7 @@ function base64Encode(bytes: Uint8Array): string {
 
 // Build a valid .apj JSON string wrapping the given raw image bytes.
 async function makeApj(image: Uint8Array, overrides: Record<string, unknown> = {}): Promise<string> {
-  const gz = await gzip(image)
+  const gz = await zlibCompress(image)
   const body: Record<string, unknown> = {
     board_id: 50,
     magic: 'APJFWv1',
@@ -69,7 +72,7 @@ describe('parseApj', () => {
     expect(Array.from(result.image)).toEqual([0x01, 0x02, 0x03, 0xFE, 0xFF])
   })
 
-  it('round-trips a larger image (gzip + base64 + parse → identical bytes)', async () => {
+  it('round-trips a larger image (zlib + base64 + parse → identical bytes)', async () => {
     // 4 KB of pseudo-random-ish data — exercises the gunzip stream beyond
     // a tiny payload.
     const image = new Uint8Array(4096)
@@ -84,7 +87,7 @@ describe('parseApj', () => {
   it('accepts a .apj with no summary / git_identity (optional fields)', async () => {
     const image = new Uint8Array([0xAA])
     // Build the wire by hand to omit the optional fields.
-    const gz = await gzip(image)
+    const gz = await zlibCompress(image)
     const apj = JSON.stringify({
       board_id: 9,
       magic: 'APJFWv1',
@@ -127,13 +130,13 @@ describe('parseApj', () => {
     await expect(parseApj(apj)).rejects.toThrow(/missing its image data/)
   })
 
-  it('rejects an image that isn\'t a valid gzip stream', async () => {
-    // Valid base64 but not gzip-framed → DecompressionStream throws.
+  it('rejects an image that isn\'t a valid zlib stream', async () => {
+    // Valid base64 but not zlib-framed → DecompressionStream throws.
     const apj = JSON.stringify({
       magic: 'APJFWv1',
       board_id: 50,
       image: base64Encode(new Uint8Array([0, 1, 2, 3, 4, 5])),
     })
-    await expect(parseApj(apj)).rejects.toThrow(/corrupt \(not a valid gzip stream\)/)
+    await expect(parseApj(apj)).rejects.toThrow(/corrupt \(couldn't decompress\)/)
   })
 })
