@@ -237,6 +237,23 @@ export class DfuClient {
   // to preserve the bootloader at the low sectors.
   async massErase(onProgress?: (fraction: number) => void): Promise<void> {
     await this.dnloadCommand(buildMassErasePayload())
+
+    // Use the device's own first-poll `bwPollTimeout` as the animation
+    // duration. On ST H7 it's typically the device's estimate of the
+    // remaining erase time and matches reality much better than any
+    // static guess (per-chip mass-erase time varies 5-30+ s with flash
+    // size). Fall back to the static estimate on devices that return
+    // a tiny or missing timeout. The first GETSTATUS is fast (just a
+    // status read, no waiting), so we have the estimate within ~10 ms
+    // of the DNLOAD landing — then start the animation.
+    const first = await this.getStatus()
+    if (first.status !== DFU_STATUS.OK) {
+      throw new Error(
+        `DFU mass erase failed: device reported ${statusLabel(first.status)} (state ${stateLabel(first.state)}).`,
+      )
+    }
+    const estimateMs = first.pollTimeoutMs > 500 ? first.pollTimeoutMs : MASS_ERASE_ESTIMATE_MS
+
     let cancelled = false
     let interval: ReturnType<typeof setInterval> | null = null
     if (onProgress) {
@@ -246,11 +263,19 @@ export class DfuClient {
         if (cancelled)
           return
         const elapsed = Date.now() - startedAt
-        onProgress(Math.min(0.95, elapsed / MASS_ERASE_ESTIMATE_MS))
-      }, 250)
+        onProgress(Math.min(0.95, elapsed / estimateMs))
+      }, 100)
     }
     try {
-      await this.pollUntilIdle('mass erase', MASS_ERASE_TIMEOUT_MS)
+      // If the device is already idle (some H7 ROM bootloaders ack the
+      // mass-erase command immediately and do the work synchronously),
+      // skip the poll loop. Otherwise wait the requested time and then
+      // keep polling.
+      if (first.state !== DFU_STATE.dfuDNLOAD_IDLE && first.state !== DFU_STATE.dfuIDLE) {
+        if (first.pollTimeoutMs > 0)
+          await sleep(Math.min(first.pollTimeoutMs, MAX_POLL_INTERVAL_MS))
+        await this.pollUntilIdle('mass erase', MASS_ERASE_TIMEOUT_MS)
+      }
       onProgress?.(1)
     }
     finally {
