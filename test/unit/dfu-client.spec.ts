@@ -262,6 +262,52 @@ describe('dfuClient.flash — end-to-end', () => {
     expect(eraseCmd!.data!.length).toBe(1) // mass erase has no address payload
   })
 
+  it('re-SET_ADDRESSes after the H7 Rev.V write-stuck workaround drains state', async () => {
+    // Simulate a write where one chunk hits the H7 Rev.V stuck state:
+    // first poll = dfuDNBUSY, wait, second poll = STILL dfuDNBUSY →
+    // drainToIdle kicks in (CLRSTATUS until dfuIDLE), and the program
+    // loop must re-SET_ADDRESS to the current offset before continuing.
+    const mock = new MockUSBControl()
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuIDLE), //                    ensureIdle
+      status(DFU_STATE.dfuDNLOAD_IDLE), //             mass erase first poll (short-circuit)
+      status(DFU_STATE.dfuDNLOAD_IDLE), //             set-address (initial)
+      status(DFU_STATE.dfuDNLOAD_IDLE), //             chunk 0: fast-chip path → 'ok'
+      // chunk 1 hits the Rev.V quirk:
+      status(DFU_STATE.dfuDNBUSY), //                  chunk 1 first poll
+      status(DFU_STATE.dfuDNBUSY), //                  chunk 1 second poll — still busy
+      // drainToIdle:
+      status(DFU_STATE.dfuDNBUSY), //                  drain attempt 1
+      status(DFU_STATE.dfuERROR, DFU_STATUS.errUNKNOWN), // drain attempt 2
+      status(DFU_STATE.dfuIDLE), //                    drain attempt 3 → idle ✓
+      // outer loop re-SET_ADDRESSes:
+      status(DFU_STATE.dfuDNLOAD_IDLE), //             set-address (resumed)
+      status(DFU_STATE.dfuDNLOAD_IDLE), //             chunk 2: back to fast-chip path
+      status(DFU_STATE.dfuIDLE), //                    manifest
+    ])
+
+    const image = new Uint8Array(3 * 2048) // 3 chunks of 2 KB
+    const client = new DfuClient(mock)
+    await client.flash(
+      [{ address: 0x08020000, data: image }],
+      [],
+      { transferSize: 2048, useMassErase: true },
+    )
+
+    // Two SET_ADDRESS commands on the wire — initial + resume-after-drain.
+    const dnloads = mock.log.filter(e => e.kind === 'out' && e.setup.request === DFU_REQ.DNLOAD)
+    const setAddrs = dnloads.filter(d => d.setup.value === 0 && d.data?.[0] === DFUSE_CMD.SET_ADDRESS)
+    expect(setAddrs).toHaveLength(2)
+    // The resumed SET_ADDRESS should point at the offset where chunk 1
+    // landed (2 chunks × 2048 = 4096 bytes into the region).
+    const resumedSetAddr = setAddrs[1]!.data!
+    const addr = resumedSetAddr[1]! | (resumedSetAddr[2]! << 8) | (resumedSetAddr[3]! << 16) | (resumedSetAddr[4]! << 24)
+    expect(addr >>> 0).toBe((0x08020000 + 4096) >>> 0)
+    // Two CLRSTATUS calls on the wire (the drainToIdle workaround).
+    const clearStatuses = mock.log.filter(e => e.kind === 'out' && e.setup.request === 0x04 /* CLRSTATUS */)
+    expect(clearStatuses).toHaveLength(2)
+  })
+
   it('rejects an empty regions list', async () => {
     const client = new DfuClient(new MockUSBControl())
     await expect(client.flash([], [])).rejects.toThrow(/no regions/)

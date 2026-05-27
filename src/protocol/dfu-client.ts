@@ -342,9 +342,49 @@ export class DfuClient {
   // Push one chunk of data at the address sequence implied by the last
   // SET_ADDRESS + (block - 2) * transferSize. The caller manages the
   // running block counter.
-  private async dnloadData(blockNum: number, chunk: Uint8Array): Promise<void> {
+  //
+  // Returns `'ok'` for a clean write, `'reset'` if the H7 Rev.V errata
+  // tripped — the chunk was (assumed) written, but the chip's state
+  // machine got stuck and `drainToIdle()` had to CLRSTATUS it back to
+  // dfuIDLE, which resets the DfuSe address pointer. The caller must
+  // re-SET_ADDRESS and reset blockNum to 2 before the next chunk in
+  // that case. Same workaround as erasePage, applied here because on
+  // dual-bank H7 the Rev.V quirk also stalls writes that cross the
+  // 0x08100000 bank boundary (operator hit this mid-write at 70 %).
+  private async dnloadData(blockNum: number, chunk: Uint8Array): Promise<'ok' | 'reset'> {
     await this.ctrl.controlOut(dfuSetup(DFU_REQ.DNLOAD, 'out', blockNum, this.iface), chunk)
-    await this.pollUntilIdle('program')
+
+    const first = await this.getStatus()
+    if (first.status !== DFU_STATUS.OK) {
+      throw new Error(
+        `DFU program failed: device reported ${statusLabel(first.status)} (state ${stateLabel(first.state)}).`,
+      )
+    }
+    if (first.state === DFU_STATE.dfuDNLOAD_IDLE || first.state === DFU_STATE.dfuIDLE)
+      return 'ok' // fast chip / small chunk completed inside the controlOut window
+    if (first.state !== DFU_STATE.dfuDNBUSY && first.state !== DFU_STATE.dfuDNLOAD_SYNC) {
+      throw new Error(`DFU program ended in unexpected state ${stateLabel(first.state)}.`)
+    }
+
+    if (first.pollTimeoutMs > 0)
+      await sleep(Math.min(first.pollTimeoutMs, MAX_POLL_INTERVAL_MS))
+
+    const second = await this.getStatus()
+    if (second.status !== DFU_STATUS.OK) {
+      throw new Error(
+        `DFU program failed: device reported ${statusLabel(second.status)} (state ${stateLabel(second.state)}).`,
+      )
+    }
+    if (second.state === DFU_STATE.dfuDNLOAD_IDLE || second.state === DFU_STATE.dfuIDLE)
+      return 'ok' // normal completion
+    if (second.state === DFU_STATE.dfuDNBUSY) {
+      // H7 Rev.V silicon errata — same stuck-in-DNBUSY pattern as
+      // erasePage. Drain to dfuIDLE and signal the caller that the
+      // address pointer needs reasserting before the next chunk.
+      await this.drainToIdle()
+      return 'reset'
+    }
+    throw new Error(`DFU program ended in unexpected state ${stateLabel(second.state)}.`)
   }
 
   // Push a DfuSe command (wBlockNum = 0). Distinguishing wrapper so the
@@ -496,21 +536,30 @@ export class DfuClient {
     let writtenBytes = 0
 
     for (const region of regions) {
-      await this.setAddress(region.address)
-      // wBlockNum starts at 2 after each SET_ADDRESS.
-      let blockNum = 2
       let offset = 0
+      // Outer loop re-issues SET_ADDRESS whenever the inner write loop
+      // hands back a "device state was reset" signal (H7 Rev.V workaround
+      // in `dnloadData` had to drain the state machine back to dfuIDLE,
+      // wiping the DfuSe address pointer).
       while (offset < region.data.length) {
-        const remaining = region.data.length - offset
-        const len = Math.min(transferSize, remaining)
-        // No padding — the device pads with 0xFF inside the page if
-        // the final write is < transferSize. (STM32 DFU spec.)
-        const chunk = region.data.subarray(offset, offset + len)
-        await this.dnloadData(blockNum, chunk)
-        offset += len
-        writtenBytes += len
-        blockNum++
-        onProgress?.(writtenBytes / totalBytes)
+        await this.setAddress(region.address + offset)
+        // wBlockNum starts at 2 after each SET_ADDRESS.
+        let blockNum = 2
+        let resetSignalled = false
+        while (offset < region.data.length && !resetSignalled) {
+          const remaining = region.data.length - offset
+          const len = Math.min(transferSize, remaining)
+          // No padding — the device pads with 0xFF inside the page if
+          // the final write is < transferSize. (STM32 DFU spec.)
+          const chunk = region.data.subarray(offset, offset + len)
+          const result = await this.dnloadData(blockNum, chunk)
+          offset += len
+          writtenBytes += len
+          blockNum++
+          onProgress?.(writtenBytes / totalBytes)
+          if (result === 'reset')
+            resetSignalled = true
+        }
       }
     }
 
