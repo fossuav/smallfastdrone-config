@@ -254,20 +254,32 @@ async function requestDfuPermission() {
   }
 }
 
-// Erase strategy selector — operator-overridable per flash. Defaults
-// per file kind (mass for .hex full reflash, sectors for .apj
-// recovery) via the watch below.
+// Erase strategy — exposed as a single "Wipe whole chip" switch next
+// to the install button. Defaults per file kind (mass for `.hex`
+// full reflash, sectors for `.apj` recovery); operator can override
+// either way.
 const eraseStrategy = ref<EraseStrategy>('sectors')
 watch(dfuFile, (next) => {
   if (next)
     eraseStrategy.value = recommendedEraseStrategy(next.kind)
 })
+const wipeAll = computed({
+  get: () => eraseStrategy.value === 'mass',
+  set: (v: boolean) => { eraseStrategy.value = v ? 'mass' : 'sectors' },
+})
+// One-line hover tip so the operator can find out what each state
+// does without us writing an essay inline.
+const wipeAllToggleTip = computed(() =>
+  wipeAll.value
+    ? 'Mass erase — fastest, but loses any saved settings (and the bootloader on .apj files).'
+    : 'Per-sector erase — keeps your saved settings (and the bootloader on .apj files).',
+)
 // Warn when the operator picks the dangerous combo (mass erase + .apj):
 // mass erase wipes the bootloader, but an `.apj` doesn't carry one —
 // the drone won't boot until they follow up with a `_with_bl.hex` flash.
 const eraseStrategyWarning = computed(() => {
-  if (eraseStrategy.value === 'mass' && dfuFile.value?.kind === 'apj') {
-    return 'This will erase the bootloader too. Your drone won\'t boot afterwards — you\'ll need to flash a "_with_bl.hex" file next to restore it.'
+  if (wipeAll.value && dfuFile.value?.kind === 'apj') {
+    return 'Wipe-whole-chip + .apj will erase the bootloader too — your drone won\'t boot afterwards until you flash a "_with_bl.hex" file to restore it.'
   }
   return null
 })
@@ -624,54 +636,6 @@ const webUsbSupported = computed(() => 'usb' in navigator)
           </div>
         </UCard>
 
-        <!-- Step 2b: erase strategy. Operator-overridable; defaults
-             per file kind (mass for .hex full reflash, sectors for
-             .apj recovery). The dangerous combo (mass + .apj) gets
-             a yellow warning under the radio. -->
-        <UCard v-if="dfuFile">
-          <h2 class="text-highlighted font-semibold">
-            Erase strategy
-          </h2>
-          <p class="text-muted mt-1 text-sm">
-            What should we erase before writing the new firmware?
-          </p>
-          <div class="mt-3 space-y-2">
-            <label class="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-muted/30">
-              <input
-                v-model="eraseStrategy"
-                type="radio"
-                value="mass"
-                class="mt-1"
-                :disabled="isRunning"
-              >
-              <span class="text-sm">
-                <span class="text-default font-medium">Wipe the entire chip</span>
-                <span class="text-muted ml-1">— faster. Loses any saved settings (and the bootloader, on <code>.apj</code> files).</span>
-              </span>
-            </label>
-            <label class="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-muted/30">
-              <input
-                v-model="eraseStrategy"
-                type="radio"
-                value="sectors"
-                class="mt-1"
-                :disabled="isRunning"
-              >
-              <span class="text-sm">
-                <span class="text-default font-medium">Erase only what's needed for this firmware</span>
-                <span class="text-muted ml-1">— slower. Tries to keep your saved settings (and the bootloader on <code>.apj</code> files).</span>
-              </span>
-            </label>
-          </div>
-          <UAlert
-            v-if="eraseStrategyWarning"
-            color="warning"
-            class="mt-3"
-            icon="i-lucide-triangle-alert"
-            :description="eraseStrategyWarning"
-          />
-        </UCard>
-
         <!-- Step 3: device + flash. -->
         <UCard>
           <div class="flex items-start justify-between gap-3">
@@ -704,23 +668,37 @@ const webUsbSupported = computed(() => 'usb' in navigator)
             <li
               v-for="(d, i) in dfuDevices"
               :key="i"
-              class="bg-muted/30 flex items-center justify-between rounded-lg px-3 py-2"
+              class="bg-muted/30 flex flex-wrap items-center justify-between gap-3 rounded-lg px-3 py-2"
             >
               <div class="flex items-center gap-2 text-sm">
                 <UIcon name="i-lucide-cpu" class="text-primary size-4" />
                 <span class="text-default font-medium">{{ d.label }}</span>
               </div>
-              <UButton
-                color="primary"
-                icon="i-lucide-download"
-                :loading="isRunning"
-                :disabled="!canStartDfu"
-                @click="startDfuFlash(d)"
-              >
-                Install in DFU mode
-              </UButton>
+              <div class="flex items-center gap-3">
+                <label v-if="dfuFile" class="flex cursor-pointer items-center gap-1.5 text-xs" :title="wipeAllToggleTip">
+                  <UIcon name="i-lucide-eraser" class="text-muted size-3.5" />
+                  <span class="text-default">Wipe whole chip</span>
+                  <USwitch v-model="wipeAll" size="xs" :disabled="isRunning" />
+                </label>
+                <UButton
+                  color="primary"
+                  icon="i-lucide-download"
+                  :loading="isRunning"
+                  :disabled="!canStartDfu"
+                  @click="startDfuFlash(d)"
+                >
+                  Install in DFU mode
+                </UButton>
+              </div>
             </li>
           </ul>
+          <UAlert
+            v-if="eraseStrategyWarning"
+            color="warning"
+            class="mt-3"
+            icon="i-lucide-triangle-alert"
+            :description="eraseStrategyWarning"
+          />
 
           <div v-if="phaseLabel" class="mt-4 space-y-2">
             <div class="flex items-center gap-2 text-sm">

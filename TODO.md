@@ -27,6 +27,20 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   submodule at the merged commit. Currently the BLHeli-in-SITL support lives on
   a private branch (`vendor/smallfastdrone` @ `blheli-sitl`) that we bumped to
   for direction-correction testing — it needs to land in the SFD beta line.
+- `[firmware]` **Dual-bank H7 per-sector DFU erase wedges at 0x08100000.** On
+  STM32H743 the ROM DFU bootloader hangs (60 s+) when the host issues
+  `ERASE_PAGE` for the first sector of bank 2 after successfully erasing
+  bank 1 — even with ABORT-between-erases and 45 s GETSTATUS timeouts.
+  Mass erase works fine; only per-sector hits this. Suspected cause: the
+  device descriptor splits flash across multiple alt-settings (one per
+  bank) and we need to `selectAlternateInterface(iface, alt)` before
+  operating on sectors from a different alt. Workaround in place: the
+  DFU error message points the operator at the "Wipe whole chip" toggle.
+  Proper fix would track each sector's alt-setting in
+  `combineFlashLayouts`, expose `selectAlternateInterface` on the
+  USBControl interface, and have `DfuClient` switch alt before
+  erase/program of a sector from a non-current alt. Non-blocking for v1
+  — the mass-erase path covers the common `_with_bl.hex` case.
 
 ## 3D / visuals
 
