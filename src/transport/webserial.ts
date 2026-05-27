@@ -148,6 +148,36 @@ export class WebSerialTransport implements Transport {
     return () => bucket.delete(listener)
   }
 
+  // The currently-open MAVLink port (or null). Exposed so the firmware
+  // workflow can capture it before reboot-to-bootloader and use it as
+  // the auto-reconnect target after the flash completes — `port.open()`
+  // on an already-authorised port requires no user gesture (unlike
+  // `requestPort()`), so the reconnect succeeds without an extra click.
+  currentPort(): SerialPort | null {
+    return this.port
+  }
+
+  // Adopt an already-authorised SerialPort as the MAVLink transport:
+  // open it (if it isn't already), start the background read pump that
+  // fans data events out to subscribers. No user gesture required —
+  // the operator has already granted permission to this port in a
+  // prior session. Used by the firmware workflow's post-flash
+  // auto-reconnect to avoid the `requestPort()` gesture trap.
+  async attachToPort(port: SerialPort): Promise<void> {
+    if (port.readable === null || port.writable === null) {
+      await port.open({
+        baudRate: BAUD_RATE,
+        dataBits: 8,
+        parity: 'none',
+        stopBits: 1,
+        flowControl: 'none',
+      })
+    }
+    this.port = port
+    this.description = describePort(port.getInfo())
+    this.readerTask = this.readLoop()
+  }
+
   // Cancel the MAVLink read pump + close the originally-open port,
   // *without* trying to reopen anything. Used by the firmware workflow:
   // after the FC has been told to reboot into its bootloader, we let

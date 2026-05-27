@@ -27,18 +27,6 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   submodule at the merged commit. Currently the BLHeli-in-SITL support lives on
   a private branch (`vendor/smallfastdrone` @ `blheli-sitl`) that we bumped to
   for direction-correction testing — it needs to land in the SFD beta line.
-- `[firmware] [ux]` **Post-flash reconnect needs the same picker treatment as
-  pre-flash.** The bootloader-path's `'reconnecting'` phase calls
-  `session.connect()` → `transport.connect()` → `navigator.serial.requestPort()`,
-  which requires a user gesture; after a multi-second flash there isn't one, so
-  the reconnect attempt fails silently (or surfaces as "Something went wrong"
-  even though the firmware install itself succeeded). Mirror the pre-flash fix:
-  snapshot connected ports before flash → after flash, poll for the
-  firmware port to come back up by `connected` flipping true → open it
-  directly via `port.open()` (no gesture needed for already-authorised ports).
-  Fall back to a "Pick firmware port" UI step if auto-detection fails.
-  Surface a friendly "Firmware installed — reconnect when ready" state if
-  the operator dismisses the reconnect.
 
 ## 3D / visuals
 

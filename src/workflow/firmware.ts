@@ -77,10 +77,18 @@ export type FlashPhase
 const POST_REBOOT_SETTLE_MS = 1_500
 
 // After the bootloader REBOOT, the device disappears again and comes
-// back as the running firmware. Wait briefly before the MAVLink
-// session.connect() (which would otherwise prompt the operator to
-// re-pick the port if the device hasn't re-enumerated yet).
+// back as the running firmware. Wait briefly before we start polling
+// for the firmware port — gives the USB stack time to enumerate the
+// new device.
 const POST_FLASH_SETTLE_MS = 2_000
+
+// How long we wait for the firmware port to come back online after
+// the bootloader REBOOT command. On most boards this is < 3s; we give
+// it 15s of polling before declaring the auto-reconnect lost. If the
+// timeout fires the firmware is still installed — the operator just
+// needs to reconnect manually from the Connect screen.
+const FIRMWARE_RECONNECT_TIMEOUT_MS = 15_000
+const FIRMWARE_RECONNECT_POLL_MS = 250
 
 // What the DFU path takes as input. The UI sends one of these depending
 // on what file the operator picked. We keep `apj` and `hex` as separate
@@ -137,6 +145,35 @@ export function useFirmwareFlash() {
     portRejecter = null
   }
 
+  // After the bootloader REBOOT command, poll for the firmware port to
+  // come back online. We prefer the original SerialPort instance the
+  // MAVLink session was using (browsers maintain identity across
+  // device-disappear / reappear); falling back to any newly-connected
+  // authorised port that isn't currently the bootloader. Returns null
+  // if nothing plausible shows up within the deadline — the firmware
+  // is installed regardless, the operator just needs to reconnect by
+  // hand.
+  async function waitForFirmwarePort(
+    originalPort: SerialPort | null,
+    deadlineMs: number,
+  ): Promise<SerialPort | null> {
+    const deadline = Date.now() + deadlineMs
+    while (Date.now() < deadline) {
+      if (originalPort && originalPort.connected)
+        return originalPort
+      // Fall back to any other connected authorised port — handles the
+      // (rare) case where the firmware comes up as a different
+      // SerialPort identity than the bootloader-mode session.
+      const ports = await navigator.serial.getPorts()
+      for (const p of ports) {
+        if (p.connected && p !== originalPort)
+          return p
+      }
+      await sleep(FIRMWARE_RECONNECT_POLL_MS)
+    }
+    return null
+  }
+
   // Run the bootloader-path firmware upload end-to-end. Throws on any
   // failure; the caller's UI reads `phase` / `progress` / `error`.
   async function flash(apj: ApjFirmware): Promise<void> {
@@ -154,12 +191,20 @@ export function useFirmwareFlash() {
     progress.value = null
 
     try {
-      // 1. Tell the FC to reboot into its bootloader (MAVLink command
+      // 1. Capture the firmware port so we can reattach to it after
+      //    the bootloader REBOOT — `port.open()` on an already-
+      //    authorised port needs no user gesture, unlike
+      //    `requestPort()`, so we can auto-reconnect without staring
+      //    down "Must be handling a user gesture" once the flash is
+      //    done.
+      const firmwarePort = transport.currentPort()
+
+      // 2. Tell the FC to reboot into its bootloader (MAVLink command
       //    on the still-open MAVLink session).
       phase.value = 'rebooting-to-bootloader'
       await session.rebootToBootloader()
 
-      // 2. Cancel the MAVLink reader + close the firmware port. The
+      // 3. Cancel the MAVLink reader + close the firmware port. The
       //    bootloader will (or already has) come up on a different
       //    USB device than the firmware on most STM32 ArduPilot boards.
       await transport.detachMavlink()
@@ -213,11 +258,18 @@ export function useFirmwareFlash() {
         await raw.close()
       }
 
-      // 4. Bootloader has been told to reboot. Give the firmware time
-      //    to come back up, then reconnect MAVLink.
+      // 4. Bootloader has been told to reboot. Wait for the firmware
+      //    port to come back online, then reattach silently — no
+      //    `requestPort()` gesture trap, no manual reconnect step.
+      //    If the firmware port can't be found within the timeout the
+      //    flash itself still succeeded; we just leave the operator
+      //    to reconnect from the Connect screen.
       phase.value = 'reconnecting'
       await sleep(POST_FLASH_SETTLE_MS)
-      await session.connect()
+      const reconnected = await waitForFirmwarePort(firmwarePort, FIRMWARE_RECONNECT_TIMEOUT_MS)
+      if (reconnected) {
+        await session.attachToPort(reconnected)
+      }
 
       phase.value = 'done'
       progress.value = 1

@@ -36,6 +36,7 @@ import type { Heartbeat, MavAutopilot, MavState, MavType } from 'mavlink-mapping
 import type { AutopilotVersion } from 'mavlink-mappings/dist/lib/standard'
 import type { MessageHandler, SubsystemStatus } from '../protocol/mavlink'
 import type { Transport } from '../transport/types'
+import type { WebSerialTransport } from '../transport/webserial'
 import { useToast } from '@nuxt/ui/composables/useToast'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -352,6 +353,43 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  // Adopt an already-authorised SerialPort as the active MAVLink
+  // transport. Mirrors `connect()` minus the `requestPort()` prompt —
+  // used by the firmware-flash workflow's post-flash reconnect, where
+  // the original firmware port is already in `navigator.serial.getPorts()`
+  // and just needs to be re-opened (a user gesture isn't available
+  // after a multi-second flash). Refuses to run on non-WebSerial
+  // transports.
+  async function attachToPort(port: SerialPort) {
+    if (connected.value || connecting.value)
+      return
+    if (transport.value.kind !== 'webserial') {
+      lastError.value = 'attachToPort: only the WebSerial transport supports this.'
+      return
+    }
+    connecting.value = true
+    lastError.value = null
+    resetParsed()
+    try {
+      await (transport.value as WebSerialTransport).attachToPort(port)
+      unsubscribeData = transport.value.on('data', (bytes) => {
+        bytesReceived.value += bytes.length
+        session.feed(bytes)
+      })
+      unsubscribeClose = transport.value.on('close', () => {
+        connected.value = false
+      })
+      connected.value = true
+    }
+    catch (e) {
+      lastError.value = e instanceof Error ? e.message : String(e)
+      connected.value = false
+    }
+    finally {
+      connecting.value = false
+    }
+  }
+
   // Tear the transport down. Subscriber unsubscribe runs first so we
   // don't get a final close-event echo bouncing around mid-teardown.
   async function disconnect() {
@@ -387,6 +425,7 @@ export const useSessionStore = defineStore('session', () => {
     systemStatusText,
     hasHeartbeat,
     connect,
+    attachToPort,
     disconnect,
     reboot,
     rebootToBootloader,
