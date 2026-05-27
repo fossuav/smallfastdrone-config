@@ -51,7 +51,13 @@ import { useSessionStore } from '../stores/session'
 // 'error' = stopped, see `error`.
 export type FlashPhase
   = | 'idle'
-    | 'rebooting-to-bootloader' // bootloader path: sent MAVLink reboot
+    | 'rebooting-to-bootloader' //  bootloader path: sent MAVLink reboot
+    | 'awaiting-bootloader-port' // bootloader path: bootloader is a different
+    //                              USB device (different VID:PID) than the
+    //                              firmware on most boards, and the browser
+    //                              hasn't seen it yet — operator needs to
+    //                              pick it once. UI shows a picker button
+    //                              that calls `provideBootloaderPort()`.
     | 'syncing' //                  bootloader path: GET_SYNC retries
     | 'verifying-board' //          bootloader path: GET_DEVICE check
     | 'erasing' //                  CHIP_ERASE (bootloader) / sector-erase (DFU)
@@ -65,10 +71,17 @@ export type FlashPhase
 // How long to wait after sending the MAVLink reboot-to-bootloader
 // command before we try to take over the serial port. The FC needs a
 // moment to act on the command, close USB, and re-enumerate as the
-// bootloader. acquireRaw() additionally retries port.open() until the
+// bootloader. openPortRaw() additionally retries port.open() until the
 // device comes back, but this initial pause keeps the first attempt
 // from racing the USB stack.
 const POST_REBOOT_SETTLE_MS = 1_500
+
+// How long to wait for the bootloader's USB device to show up in the
+// browser's authorised-ports list. On boards where the operator has
+// already picked the bootloader port once, it appears within ~1s.
+// Beyond this we stop waiting and ask the operator to pick it.
+const BOOTLOADER_PORT_DISCOVERY_MS = 4_000
+const BOOTLOADER_PORT_POLL_MS = 200
 
 // After the bootloader REBOOT, the device disappears again and comes
 // back as the running firmware. Wait briefly before the MAVLink
@@ -94,6 +107,15 @@ export function useFirmwareFlash() {
   const progress = ref<number | null>(null)
   const error = ref<string | null>(null)
 
+  // Set while the workflow is paused at 'awaiting-bootloader-port'. The
+  // UI shows a picker button whose click handler calls
+  // `provideBootloaderPort(port)` with the port the operator just
+  // selected (or `cancelBootloaderPick()` to abort). `requestPort()`
+  // *must* run inside that user gesture; we can't drive the picker
+  // ourselves from inside this async chain.
+  let portResolver: ((port: SerialPort) => void) | null = null
+  let portRejecter: ((err: Error) => void) | null = null
+
   function reset() {
     phase.value = 'idle'
     progress.value = null
@@ -103,6 +125,64 @@ export function useFirmwareFlash() {
   function assertIdle() {
     if (phase.value !== 'idle' && phase.value !== 'done' && phase.value !== 'error')
       throw new Error('A firmware flash is already in progress.')
+  }
+
+  // Called by the UI after the operator picks the bootloader port from
+  // navigator.serial.requestPort(). Resumes the paused flash. No-op if
+  // we're not currently awaiting a port.
+  function provideBootloaderPort(port: SerialPort): void {
+    portResolver?.(port)
+    portResolver = null
+    portRejecter = null
+  }
+
+  // Called by the UI's Cancel button when the operator backs out of the
+  // bootloader-port pick. Aborts the flash with a friendly error.
+  function cancelBootloaderPick(): void {
+    portRejecter?.(new Error('Cancelled — bootloader port not picked.'))
+    portResolver = null
+    portRejecter = null
+  }
+
+  // Poll for an authorised port that is currently *connected* (the
+  // underlying USB device is enumerated right now), is not the original
+  // firmware port, and wasn't already connected before the reboot.
+  // That's the bootloader on the boards where it enumerates as a
+  // different USB device than the running firmware — which is most
+  // STM32-based ArduPilot boards. `SerialPort.connected` (a property of
+  // the SerialPort object) goes true when the underlying USB device
+  // shows up, false when it disappears — so the boot/firmware switch
+  // shows up here without us doing anything beyond polling.
+  //
+  // The baseline-by-identity matters because `getPorts()` returns every
+  // authorised port — including the bootloader port from a previous
+  // flash, which has `connected: false` while the firmware is running
+  // and flips to `connected: true` when the bootloader comes up.
+  // Returns null if no plausible bootloader port appears within the
+  // deadline.
+  async function findBootloaderPort(
+    preRebootConnectedPorts: SerialPort[],
+    originalPort: SerialPort | null,
+    deadlineMs: number,
+  ): Promise<SerialPort | null> {
+    const alreadyConnected = new Set<SerialPort>(preRebootConnectedPorts)
+    if (originalPort)
+      alreadyConnected.add(originalPort)
+    const deadline = Date.now() + deadlineMs
+    while (Date.now() < deadline) {
+      const ports = await navigator.serial.getPorts()
+      for (const p of ports) {
+        if (p === originalPort)
+          continue
+        if (!p.connected)
+          continue
+        if (alreadyConnected.has(p))
+          continue
+        return p
+      }
+      await sleep(BOOTLOADER_PORT_POLL_MS)
+    }
+    return null
   }
 
   // Run the bootloader-path firmware upload end-to-end. Throws on any
@@ -122,17 +202,51 @@ export function useFirmwareFlash() {
     progress.value = null
 
     try {
-      // 1. Tell the FC to reboot into its bootloader (MAVLink command
+      // 1. Snapshot which authorised ports are currently physically
+      //    connected + remember which one is the firmware port. After
+      //    the reboot we look for an authorised port that's connected
+      //    *now* but wasn't connected before — that's the bootloader on
+      //    most boards (STM32 ArduPilot ships the bootloader as its own
+      //    USB descriptor with a different VID:PID from the running
+      //    firmware, so it appears as a separate SerialPort that goes
+      //    `connected: true` when the bootloader is running and
+      //    `connected: false` when the firmware is).
+      const preRebootConnectedPorts = await transport.snapshotConnectedPorts()
+      const originalPort = transport.currentPort()
+
+      // 2. Tell the FC to reboot into its bootloader (MAVLink command
       //    on the still-open MAVLink session).
       phase.value = 'rebooting-to-bootloader'
       await session.rebootToBootloader()
 
-      // 2. Take raw control of the port. acquireRaw closes the MAVLink
-      //    reader, closes the port, waits for the device to re-enumerate
-      //    as the bootloader, and reopens it at bootloader baud.
-      const raw = await transport.acquireRaw({
+      // 3. Cancel the MAVLink reader + close the firmware port. The
+      //    bootloader will (or already has) come up on a different
+      //    device.
+      await transport.detachMavlink()
+      await sleep(POST_REBOOT_SETTLE_MS)
+
+      // 4. Find the bootloader port. If the operator has picked it for
+      //    this drone before, it's already authorised + appears in
+      //    getPorts() — auto-detected, no extra clicks. Otherwise we
+      //    pause + ask the UI to drive the browser picker.
+      let bootloaderPort = await findBootloaderPort(
+        preRebootConnectedPorts,
+        originalPort,
+        BOOTLOADER_PORT_DISCOVERY_MS,
+      )
+      if (!bootloaderPort) {
+        phase.value = 'awaiting-bootloader-port'
+        bootloaderPort = await new Promise<SerialPort>((resolve, reject) => {
+          portResolver = resolve
+          portRejecter = reject
+        })
+      }
+
+      // 5. Open the bootloader port at bootloader baud.
+      phase.value = 'syncing'
+      const raw = await transport.openPortRaw(bootloaderPort, {
         baudRate: 115_200,
-        settleDelayMs: POST_REBOOT_SETTLE_MS,
+        settleDelayMs: 0,
       })
       const client = new BootloaderClient(raw)
 
@@ -288,7 +402,16 @@ export function useFirmwareFlash() {
     }
   }
 
-  return { phase, progress, error, flash, flashDfu, reset }
+  return {
+    phase,
+    progress,
+    error,
+    flash,
+    flashDfu,
+    reset,
+    provideBootloaderPort,
+    cancelBootloaderPick,
+  }
 }
 
 // Map the DFU client's coarse phase to the workflow's UI phase. The

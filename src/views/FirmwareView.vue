@@ -54,7 +54,31 @@ const {
   flash,
   flashDfu,
   reset,
+  provideBootloaderPort,
+  cancelBootloaderPick,
 } = useFirmwareFlash()
+
+// The bootloader runs at the same baud + framing as the firmware
+// (ArduPilot uses the same USB-CDC config in both modes), so we don't
+// need vendor/product filters here — letting the operator pick from
+// any serial port keeps the dialog forgiving for prototype hardware.
+const bootloaderPickError = ref<string | null>(null)
+async function pickBootloaderPort() {
+  bootloaderPickError.value = null
+  try {
+    const port = await navigator.serial.requestPort({ filters: [] })
+    provideBootloaderPort(port)
+  }
+  catch (e) {
+    // User-cancel of the browser dialog is a DOMException; everything
+    // else is also user-actionable.
+    if (e instanceof DOMException && e.name === 'NotFoundError') {
+      bootloaderPickError.value = 'No port picked. Tap "Pick bootloader port" once your drone is showing up in the dialog.'
+      return
+    }
+    bootloaderPickError.value = e instanceof Error ? e.message : String(e)
+  }
+}
 
 // --- Path selection -------------------------------------------------
 
@@ -223,6 +247,7 @@ const phaseLabel = computed(() => {
   switch (phase.value) {
     case 'idle': return ''
     case 'rebooting-to-bootloader': return 'Restarting your drone in upload mode…'
+    case 'awaiting-bootloader-port': return 'Waiting for you to pick the upload-mode port…'
     case 'syncing': return 'Reaching the drone…'
     case 'verifying-board': return 'Checking this firmware matches your drone…'
     case 'erasing': return 'Erasing the old firmware…'
@@ -268,7 +293,11 @@ const webUsbSupported = computed(() => 'usb' in navigator)
 
     <!-- ================= USB / bootloader path ================== -->
     <template v-if="pathKind === 'usb'">
-      <UCard v-if="!session.connected || !session.hasHeartbeat">
+      <!-- Gate when truly disconnected. Suppressed while a flash is
+           mid-flight — the MAVLink heartbeat stops as soon as the FC
+           reboots into bootloader mode, but we still need to surface
+           the picker + progress UI through that window. -->
+      <UCard v-if="(!session.connected || !session.hasHeartbeat) && !isRunning">
         <div class="text-muted py-8 text-center text-sm">
           <UIcon name="i-lucide-plug" class="mx-auto size-6" />
           <p class="mt-2">
@@ -281,7 +310,7 @@ const webUsbSupported = computed(() => 'usb' in navigator)
       </UCard>
 
       <UAlert
-        v-else-if="session.transport.kind !== 'webserial'"
+        v-else-if="session.transport.kind !== 'webserial' && !isRunning"
         color="warning"
         icon="i-lucide-triangle-alert"
         title="Firmware install needs a USB connection"
@@ -370,6 +399,30 @@ const webUsbSupported = computed(() => 'usb' in navigator)
               color="primary"
               size="sm"
             />
+
+            <!-- Bootloader-port picker. ArduPilot's bootloader enumerates
+                 as a different USB device than the firmware on most boards,
+                 so the browser needs the operator to pick it the first time
+                 (after that it stays authorised + auto-detected). -->
+            <UAlert
+              v-if="phase === 'awaiting-bootloader-port'"
+              color="info"
+              variant="subtle"
+              icon="i-lucide-mouse-pointer-click"
+              title="Pick the upload-mode port"
+              description="Your drone is in upload mode but the browser needs you to grant access to that port (it appears as a different USB device than the running firmware). Pick it once — we'll remember it for next time."
+            >
+              <template #actions>
+                <UButton color="primary" icon="i-lucide-plug-zap" size="sm" @click="pickBootloaderPort">
+                  Pick bootloader port
+                </UButton>
+                <UButton color="neutral" variant="ghost" size="sm" @click="cancelBootloaderPick">
+                  Cancel
+                </UButton>
+              </template>
+            </UAlert>
+            <UAlert v-if="bootloaderPickError" color="warning" :description="bootloaderPickError" />
+
             <UAlert v-if="flashError" color="warning" :description="flashError" />
           </div>
         </UCard>

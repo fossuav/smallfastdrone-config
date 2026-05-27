@@ -148,27 +148,35 @@ export class WebSerialTransport implements Transport {
     return () => bucket.delete(listener)
   }
 
-  // Take raw control of the serial port for a non-MAVLink protocol
-  // (firmware bootloader, future DFU-fallback-via-serial). Steps:
-  //   1. Cancel the MAVLink read loop + release its reader.
-  //   2. Close the port (caller's previous MAVLink session is done with it).
-  //   3. Reopen the port at the requested baud (the FC may have rebooted
-  //      into its bootloader, which can enumerate on a different USB device
-  //      momentarily — retry the open until the OS sees it again).
-  //   4. Hand back a `RawSerial` over the freshly-opened streams.
-  //
-  // The caller is responsible for `close()`-ing the returned RawSerial,
-  // then triggering session.connect() (a fresh `connect()` call) to
-  // re-acquire the port at MAVLink baud and restart the read loop.
-  //
-  // Throws if the port has never been opened (no port to reuse), or if
-  // the post-reboot reopen never succeeds within the retry budget.
-  async acquireRaw(opts: { baudRate?: number, settleDelayMs?: number } = {}): Promise<RawSerial> {
-    const port = this.port
-    if (!port)
-      throw new Error('No serial port to take over — connect first.')
+  // The currently-open MAVLink port (or null). Exposed so the firmware
+  // workflow can diff `getPorts()` snapshots against it — ArduPilot's
+  // bootloader enumerates as a *different* USB device (different VID:PID)
+  // than the running firmware on most boards, so the post-reboot port
+  // isn't the same object.
+  currentPort(): SerialPort | null {
+    return this.port
+  }
 
-    // Stop the MAVLink pump.
+  // Snapshot which authorised ports are currently *connected* (their
+  // underlying USB device is enumerated right now). Together with
+  // `currentPort()`, lets the workflow distinguish "this port was
+  // already physically plugged in before the reboot" from "this port
+  // just appeared, so it's the bootloader". `SerialPort.connected`
+  // tracks the underlying USB device's presence — false for any
+  // authorised port whose physical device isn't currently attached.
+  async snapshotConnectedPorts(): Promise<SerialPort[]> {
+    if (!('serial' in navigator))
+      return []
+    const ports = await navigator.serial.getPorts()
+    return ports.filter(p => p.connected)
+  }
+
+  // Cancel the MAVLink read pump + close the originally-open port,
+  // *without* trying to reopen anything. Used by the firmware workflow:
+  // after the FC has been told to reboot into its bootloader, we let the
+  // original port go and then open whichever port the bootloader came
+  // up on (often a different USB device entirely).
+  async detachMavlink(): Promise<void> {
     if (this.reader) {
       try {
         await this.reader.cancel()
@@ -179,21 +187,30 @@ export class WebSerialTransport implements Transport {
       await this.readerTask.catch(() => {})
       this.readerTask = null
     }
-
-    // Close the port — the bootloader is going to (or has already)
-    // come up; we'll reopen at the right baud below. Swallow errors
-    // because the device may already be gone.
-    try {
-      await port.close()
+    if (this.port) {
+      try {
+        await this.port.close()
+      }
+      catch { /* already closed (the FC has rebooted) */ }
+      this.port = null
     }
-    catch { /* already closed (the FC has rebooted) */ }
+  }
 
-    // Optional settle window so the FC's bootloader has time to
-    // enumerate before we hammer port.open().
+  // Open the given SerialPort at the requested baud and hand back a
+  // `RawSerial` over its streams. The port can be:
+  //   - one freshly returned by `navigator.serial.requestPort()` inside
+  //     a user gesture (the operator just picked the bootloader port);
+  //   - one already in `getPorts()` (pre-authorised — typically the
+  //     case for any flash after the first one to a given board).
+  // Settle delay + open retries cover the case where the device is
+  // still re-enumerating when we get here. Caller is responsible for
+  // `close()`-ing the returned RawSerial.
+  async openPortRaw(
+    port: SerialPort,
+    opts: { baudRate?: number, settleDelayMs?: number } = {},
+  ): Promise<RawSerial> {
     if (opts.settleDelayMs && opts.settleDelayMs > 0)
       await sleep(opts.settleDelayMs)
-
-    // Reopen — retry while the device is still re-enumerating.
     const baud = opts.baudRate ?? BAUD_RATE
     let lastErr: unknown = null
     for (let i = 0; i < REOPEN_ATTEMPTS; i++) {
@@ -209,13 +226,23 @@ export class WebSerialTransport implements Transport {
     }
     if (lastErr !== null) {
       const detail = lastErr instanceof Error ? lastErr.message : String(lastErr)
-      throw new Error(`Couldn't reopen the serial port for upload (${detail}). Try unplugging + plugging the USB cable.`)
+      throw new Error(`Couldn't open the bootloader port (${detail}). Try unplugging + plugging the USB cable.`)
     }
-
-    // Hand back a RawSerial backed by this port's streams. The MAVLink
-    // listeners stay subscribed but get nothing — the read pump is
-    // gone — until the caller releases + reconnects.
     return new PortRawSerial(port)
+  }
+
+  // Take raw control of the *same* serial port for a non-MAVLink protocol.
+  // Convenience wrapper used in tests + the fallback case where the
+  // bootloader actually came up on the same USB device. The firmware
+  // workflow prefers the explicit detach + openPortRaw split so it can
+  // handle the (common) case where the bootloader is a different device.
+  async acquireRaw(opts: { baudRate?: number, settleDelayMs?: number } = {}): Promise<RawSerial> {
+    const port = this.port
+    if (!port)
+      throw new Error('No serial port to take over — connect first.')
+    await this.detachMavlink()
+    // detachMavlink nulled this.port; restore the local ref for the open.
+    return await this.openPortRaw(port, opts)
   }
 
   // Background task that pulls chunks out of the port's readable stream
