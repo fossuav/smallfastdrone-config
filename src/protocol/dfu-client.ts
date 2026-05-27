@@ -78,6 +78,18 @@ const MAX_POLL_INTERVAL_MS = 500
 // frozen.
 const SECTOR_ERASE_ESTIMATE_MS = 2_000
 
+// Ceilings to keep a stuck device from hanging the flow forever.
+// WebUSB on Windows has been observed to never resolve a
+// `controlTransferIn` if the device drops a response — without these
+// the UI sits frozen indefinitely with no surfaced error.
+//   - GETSTATUS_TIMEOUT_MS: a single status read should land in well
+//     under a second on a healthy bus; 5 s is well past anything we'd
+//     accept and well before "operator gives up".
+//   - OPERATION_TIMEOUT_MS: total budget for one set-address / erase /
+//     program — H7 sector erase max is ~4 s, so 30 s is a 7× cushion.
+const GETSTATUS_TIMEOUT_MS = 5_000
+const OPERATION_TIMEOUT_MS = 30_000
+
 // DFU control transfer setup boilerplate — bmRequestType is always
 // class | interface, the request varies. Index is the bInterface (0
 // for the boards we target).
@@ -125,9 +137,16 @@ export class DfuClient {
     this.iface = options.interfaceNumber ?? 0
   }
 
-  // GETSTATUS — single request, parsed into a DfuStatus.
+  // GETSTATUS — single request, parsed into a DfuStatus. Timed out
+  // because WebUSB's controlTransferIn doesn't itself: if the device
+  // drops a response (rare but observed on Windows after a long
+  // session) we throw a useful error instead of hanging forever.
   async getStatus(): Promise<ReturnType<typeof parseStatus>> {
-    const bytes = await this.ctrl.controlIn(dfuSetup(DFU_REQ.GETSTATUS, 'in', 0, this.iface), 6)
+    const bytes = await raceWithTimeout(
+      this.ctrl.controlIn(dfuSetup(DFU_REQ.GETSTATUS, 'in', 0, this.iface), 6),
+      GETSTATUS_TIMEOUT_MS,
+      'DFU GETSTATUS',
+    )
     return parseStatus(bytes)
   }
 
@@ -189,7 +208,10 @@ export class DfuClient {
   // we-can-proceed state). Throws on any non-OK status or unexpected
   // state, naming the operation in the error.
   private async pollUntilIdle(op: string): Promise<void> {
+    const deadline = Date.now() + OPERATION_TIMEOUT_MS
     for (let i = 0; i < MAX_STATUS_POLLS; i++) {
+      if (Date.now() > deadline)
+        throw new Error(`DFU ${op} timed out after ${OPERATION_TIMEOUT_MS / 1000}s without completing.`)
       const s = await this.getStatus()
       if (s.status !== DFU_STATUS.OK) {
         throw new Error(
@@ -295,6 +317,13 @@ export class DfuClient {
       try {
         await this.erasePage(sectorsToErase[i]!)
       }
+      catch (e) {
+        const addr = sectorsToErase[i]!.toString(16).padStart(8, '0')
+        const detail = e instanceof Error ? e.message : String(e)
+        throw new Error(
+          `Erase failed at sector 0x${addr} (${i + 1}/${totalSectors}): ${detail}`,
+        )
+      }
       finally {
         cancelled = true
         if (interval)
@@ -337,4 +366,21 @@ export class DfuClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// Race a promise against a timeout. Used to bound the WebUSB control
+// transfers — those have no built-in timeout and `controlTransferIn`
+// has been observed to never resolve when a Windows DFU device drops
+// a response.
+async function raceWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs),
+    ),
+  ])
 }
