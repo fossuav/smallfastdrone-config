@@ -281,6 +281,87 @@ export function useFirmwareFlash() {
     }
   }
 
+  // Recovery flash: the FC is *already* in bootloader mode (typically
+  // after a failed firmware install left the bootloader running) and
+  // MAVLink isn't reachable. The operator picks the bootloader port
+  // themselves — inside their click gesture — and hands it here, so
+  // we skip the MAVLink reboot dance and go straight to GET_SYNC.
+  // Same bootloader protocol as `flash()` post-reboot; the same-CRC
+  // skip inside BootloaderClient.flash protects against re-flashing
+  // the same firmware unnecessarily.
+  async function flashViaBootloaderPort(
+    apj: ApjFirmware,
+    bootloaderPort: SerialPort,
+  ): Promise<void> {
+    assertIdle()
+
+    if (session.transport.kind !== 'webserial') {
+      throw new Error('Firmware flashing requires a USB-serial connection (not the SITL bridge).')
+    }
+    const transport = session.transport as WebSerialTransport
+
+    error.value = null
+    progress.value = null
+
+    try {
+      // Detach any live MAVLink session — though typically there isn't
+      // one if the operator is on this recovery path. The
+      // currentPort() snapshot lets us auto-reconnect to the firmware
+      // port after the flash, just like the normal path.
+      const firmwarePort = transport.currentPort()
+      if (firmwarePort)
+        await transport.detachMavlink()
+
+      phase.value = 'syncing'
+      const raw = await transport.openPortRaw(bootloaderPort, {
+        baudRate: 115_200,
+        settleDelayMs: 0,
+      })
+      const client = new BootloaderClient(raw)
+
+      try {
+        await defaultUploader.upload(
+          { kind: 'firmware', name: apj.summary ?? apj.description, bytes: apj.image },
+          {
+            runUpload: async (bytes, onProgress) => {
+              await client.flash(
+                bytes,
+                apj.boardId,
+                (p) => { phase.value = p },
+                (fraction) => {
+                  progress.value = fraction
+                  onProgress?.(fraction)
+                },
+              )
+            },
+          },
+        )
+      }
+      finally {
+        await raw.close()
+      }
+
+      // Best-effort auto-reconnect — same as the normal path, but the
+      // "original firmware port" is whatever we captured before
+      // detaching (might be null if no MAVLink session was ever
+      // established on this page load, in which case waitForFirmwarePort
+      // falls back to "any newly-connected port").
+      phase.value = 'reconnecting'
+      await sleep(POST_FLASH_SETTLE_MS)
+      const reconnected = await waitForFirmwarePort(firmwarePort, FIRMWARE_RECONNECT_TIMEOUT_MS)
+      if (reconnected)
+        await session.attachToPort(reconnected)
+
+      phase.value = 'done'
+      progress.value = 1
+    }
+    catch (e) {
+      phase.value = 'error'
+      error.value = e instanceof Error ? e.message : String(e)
+      throw e
+    }
+  }
+
   // Run the DFU-path firmware upload end-to-end. Caller passes the
   // already-opened DFU device (the UI runs the device picker / wait
   // flow itself, inside the user gesture). We close the device once
@@ -394,6 +475,7 @@ export function useFirmwareFlash() {
     progress,
     error,
     flash,
+    flashViaBootloaderPort,
     flashDfu,
     reset,
     provideBootloaderPort,

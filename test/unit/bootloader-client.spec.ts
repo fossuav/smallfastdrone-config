@@ -218,6 +218,7 @@ describe('bootloaderClient.flash (end-to-end)', () => {
       ...infoReply(5), //                     bootloader rev (required prerequisite for erase)
       ...infoReply(50), //                    board id (matches)
       ...infoReply(flashSize), //             flash size
+      ...infoReply(0xCAFE), //                pre-flash CRC probe — doesn't match, so we flash
       ...ACK, //                              chip erase
       ...ACK, //                              program (single chunk: 256 bytes ≤ 252+4 → actually 252+4 chunks)
       ...ACK, //                              program (second chunk)
@@ -226,7 +227,31 @@ describe('bootloaderClient.flash (end-to-end)', () => {
     const client = new BootloaderClient(raw)
     const phases: string[] = []
     await client.flash(image, 50, p => phases.push(p))
-    expect(phases).toEqual(['syncing', 'erasing', 'programming', 'verifying', 'restarting'])
+    expect(phases).toEqual(['syncing', 'verifying', 'erasing', 'programming', 'verifying', 'restarting'])
+  })
+
+  it('skips erase + program when the flashed firmware already matches the image', async () => {
+    const image = new Uint8Array(256)
+    for (let i = 0; i < image.length; i++) image[i] = i & 0xFF
+    const flashSize = 1024
+    const { bootloaderCrc, padToErase } = await import('../../src/protocol/bootloader')
+    const expectedCrc = bootloaderCrc(padToErase(image, flashSize))
+
+    const raw = new MockRawSerial([
+      ...ACK, //                              sync
+      ...infoReply(5), //                     bl rev
+      ...infoReply(50), //                    board id
+      ...infoReply(flashSize), //             flash size
+      ...infoReply(expectedCrc), //           pre-flash CRC probe — matches!
+      // ...no erase / program / verify bytes — we skip straight to REBOOT
+    ])
+    const client = new BootloaderClient(raw)
+    const phases: string[] = []
+    await client.flash(image, 50, p => phases.push(p))
+    expect(phases).toEqual(['syncing', 'verifying', 'restarting'])
+    // Only the REBOOT command should have been written after the prereqs.
+    // (We don't pin the exact byte sequence here — bootloader.spec already
+    // covers the command bytes.)
   })
 
   it('refuses to flash a board-id mismatch (different drone)', async () => {

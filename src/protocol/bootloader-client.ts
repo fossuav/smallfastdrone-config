@@ -159,16 +159,26 @@ export class BootloaderClient {
     }
   }
 
-  // Ask the bootloader to CRC its full user-flash region; compare
-  // against the CRC we computed over the same image padded to that
-  // region. Throws on mismatch — that's "firmware corrupt in flash",
-  // serious enough to surface and refuse the reboot.
-  async verify(expectedCrc: number): Promise<void> {
+  // Pull the bootloader's CRC of its full user-flash region. Used
+  // both as a pre-flash "is the firmware already what we'd install?"
+  // probe (skip the erase/program cycle when it matches) and as the
+  // post-flash verify. Same prerequisites as CHIP_ERASE — see
+  // `getBootloaderRev`.
+  async getCrc(): Promise<number> {
     await this.raw.write(buildGetCrc())
     const reply = await this.raw.readExact(6, CRC_TIMEOUT_MS)
     const got = parseInfoReply(reply)
     if (got === null)
       throw new Error(`CRC reply was invalid (got ${formatBytes(reply)})`)
+    return got
+  }
+
+  // Verify the bootloader's CRC of its full user-flash region matches
+  // the expected CRC (image padded to the erase boundary). Throws on
+  // mismatch — that's "firmware corrupt in flash", serious enough to
+  // surface and refuse the reboot.
+  async verify(expectedCrc: number): Promise<void> {
+    const got = await this.getCrc()
     if (got !== expectedCrc) {
       throw new Error(
         `Firmware verification failed: bootloader CRC ${hexU32(got)} doesn't match expected ${hexU32(expectedCrc)}. The flash didn't take — try again.`,
@@ -214,6 +224,20 @@ export class BootloaderClient {
     }
     const padded = padToErase(image, flashSize)
     const expectedCrc = bootloaderCrc(padded)
+
+    // Pre-flash CRC check: if the firmware in flash already matches
+    // what we'd install, skip the erase/program/verify cycle entirely
+    // and just reboot. Saves a chip cycle on retries (the operator
+    // re-clicked Install on a board that was already on the target
+    // firmware) and — more important — avoids erasing a working board
+    // when the operator picked the same `.apj` they're already running.
+    onPhase('verifying')
+    const currentCrc = await this.getCrc()
+    if (currentCrc === expectedCrc) {
+      onPhase('restarting')
+      await this.reboot()
+      return
+    }
 
     onPhase('erasing')
     await this.chipErase()

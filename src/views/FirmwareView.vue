@@ -52,6 +52,7 @@ const {
   progress,
   error: flashError,
   flash,
+  flashViaBootloaderPort,
   flashDfu,
   reset,
   provideBootloaderPort,
@@ -137,6 +138,40 @@ const canStartUsb = computed(() =>
   apj.value !== null
   && session.connected
   && session.hasHeartbeat
+  && session.transport.kind === 'webserial'
+  && phaseIsTerminal.value,
+)
+
+// Recovery path: the FC is already in bootloader mode (after a failed
+// flash) and MAVLink isn't reachable. Operator picks the bootloader
+// port directly — inside this click gesture (required for
+// `navigator.serial.requestPort()`) — and we run the flash without
+// the MAVLink reboot dance.
+const recoveryError = ref<string | null>(null)
+async function startRecoveryFlash() {
+  if (!apj.value)
+    return
+  recoveryError.value = null
+  let port: SerialPort
+  try {
+    port = await navigator.serial.requestPort({ filters: [] })
+  }
+  catch (e) {
+    if (e instanceof DOMException && e.name === 'NotFoundError')
+      return // operator cancelled the picker
+    recoveryError.value = e instanceof Error ? e.message : String(e)
+    return
+  }
+  try {
+    await flashViaBootloaderPort(apj.value, port)
+  }
+  catch {
+    /* flashError populated, UI reads from it */
+  }
+}
+
+const canStartRecovery = computed(() =>
+  apj.value !== null
   && session.transport.kind === 'webserial'
   && phaseIsTerminal.value,
 )
@@ -293,25 +328,8 @@ const webUsbSupported = computed(() => 'usb' in navigator)
 
     <!-- ================= USB / bootloader path ================== -->
     <template v-if="pathKind === 'usb'">
-      <!-- Gate when truly disconnected. Suppressed for any non-idle
-           phase (running, awaiting picker, done, error) — the MAVLink
-           heartbeat stops as soon as the FC reboots into bootloader
-           mode, and we still need to surface the picker / progress /
-           error UI through that window. -->
-      <UCard v-if="(!session.connected || !session.hasHeartbeat) && phase === 'idle'">
-        <div class="text-muted py-8 text-center text-sm">
-          <UIcon name="i-lucide-plug" class="mx-auto size-6" />
-          <p class="mt-2">
-            Connect your drone before installing firmware.
-          </p>
-          <p class="mt-1 text-xs">
-            If your drone won't connect, switch to <em>Recovery (DFU mode)</em>.
-          </p>
-        </div>
-      </UCard>
-
       <UAlert
-        v-else-if="session.transport.kind !== 'webserial' && phase === 'idle'"
+        v-if="session.transport.kind !== 'webserial' && phase === 'idle'"
         color="warning"
         icon="i-lucide-triangle-alert"
         title="Firmware install needs a USB connection"
@@ -365,7 +383,8 @@ const webUsbSupported = computed(() => 'usb' in navigator)
         </UCard>
 
         <UCard v-if="apj">
-          <div class="flex items-start justify-between gap-3">
+          <!-- Normal path: MAVLink connected → reboot-to-bootloader → flash -->
+          <div v-if="session.connected && session.hasHeartbeat" class="flex items-start justify-between gap-3">
             <div>
               <h2 class="text-highlighted font-semibold">
                 Ready to install
@@ -383,6 +402,42 @@ const webUsbSupported = computed(() => 'usb' in navigator)
             >
               Install firmware
             </UButton>
+          </div>
+
+          <!-- Recovery path: no MAVLink session, the FC is presumably
+               already in bootloader mode (after a failed flash). Skip
+               the reboot dance and let the operator pick the bootloader
+               port directly. -->
+          <div v-else>
+            <div class="flex items-start gap-2">
+              <UIcon name="i-lucide-life-buoy" class="text-primary mt-0.5 size-5 shrink-0" />
+              <div class="text-sm">
+                <h2 class="text-highlighted font-semibold">
+                  Drone not connected
+                </h2>
+                <p class="text-muted mt-1">
+                  Plug your drone in and click <em>Connect drone</em> from the Connect screen — then come back here.
+                </p>
+                <p class="text-default mt-3">
+                  Or, if your drone is already in upload mode (e.g. after a failed flash left the bootloader running), flash it directly:
+                </p>
+              </div>
+            </div>
+            <div class="mt-3 flex justify-end">
+              <UButton
+                color="primary"
+                icon="i-lucide-life-buoy"
+                :loading="isRunning"
+                :disabled="!canStartRecovery"
+                @click="startRecoveryFlash"
+              >
+                Connect to bootloader + flash
+              </UButton>
+            </div>
+            <UAlert v-if="recoveryError" color="warning" class="mt-3" :description="recoveryError" />
+            <p class="text-muted mt-3 text-xs">
+              If neither of these works, try <em>Recovery (DFU mode)</em> instead.
+            </p>
           </div>
 
           <div v-if="phaseLabel" class="mt-4 space-y-2">
