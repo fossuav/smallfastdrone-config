@@ -233,7 +233,18 @@ SITL has no bootloader and no DFU. Coverage breakdown:
 
 ## Open follow-ons (after v1)
 
-- Curated SFD release picker (downloads from a hosted artifact source).
+- **SFD-published builds in the online picker.** The picker currently
+  pulls ArduPilot stock builds from firmware.ardupilot.org via a URL
+  builder (vehicle / version / board dropdowns; board + version lists
+  fetched live from ArduPilot's GitHub repo since the firmware server
+  has no CORS, then operator opens the URL in a new tab + drops the
+  downloaded file in the existing picker). SFD builds aren't on
+  firmware.ardupilot.org — they'd need a CORS-friendly host (GitHub
+  Releases is the obvious choice) and a small adapter in the picker
+  that knows to look in both sources.
+- **Direct fetch + flash** once firmware.ardupilot.org enables CORS —
+  drop-in: replace `window.open(url)` with `fetch(url)` + auto-route
+  into the existing `parseApj` / `parseIntelHex` pipeline.
 - Bringup ribbon "Firmware" tab (so fresh-install → preflight → frame →
   motors flows in one place).
 - Real signing/encryption in the security uploader seam.
