@@ -173,25 +173,26 @@ export class WebSerialTransport implements Transport {
 
   // Cancel the MAVLink read pump + close the originally-open port,
   // *without* trying to reopen anything. Used by the firmware workflow:
-  // after the FC has been told to reboot into its bootloader, we let the
-  // original port go and then open whichever port the bootloader came
-  // up on (often a different USB device entirely).
+  // after the FC has been told to reboot into its bootloader, we let
+  // the original port go and then open whichever port the bootloader
+  // came up on (often a different USB device entirely).
+  //
+  // Every step is timeout-protected because the device is mid-reboot:
+  // `reader.cancel()` and `port.close()` have been observed to hang
+  // for tens of seconds (or never resolve) when the underlying USB
+  // device disappears, which would freeze the firmware workflow at
+  // 'rebooting-to-bootloader' with no operator-visible recovery.
   async detachMavlink(): Promise<void> {
     if (this.reader) {
-      try {
-        await this.reader.cancel()
-      }
-      catch { /* already cancelled */ }
+      await raceWithTimeout(this.reader.cancel(), 1500).catch(() => undefined)
+      this.reader = null
     }
     if (this.readerTask) {
-      await this.readerTask.catch(() => {})
+      await raceWithTimeout(this.readerTask, 1500).catch(() => undefined)
       this.readerTask = null
     }
     if (this.port) {
-      try {
-        await this.port.close()
-      }
-      catch { /* already closed (the FC has rebooted) */ }
+      await raceWithTimeout(this.port.close(), 1500).catch(() => undefined)
       this.port = null
     }
   }
@@ -283,6 +284,19 @@ export class WebSerialTransport implements Transport {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// Resolve when `promise` resolves, OR reject when `timeoutMs` elapses
+// first. Used to cap operations on a mid-reboot port — `reader.cancel()`
+// and `port.close()` have both been observed to hang indefinitely when
+// the underlying USB device disappears.
+async function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs),
+    ),
+  ])
 }
 
 // RawSerial implementation backed directly by a WebSerial `SerialPort`'s

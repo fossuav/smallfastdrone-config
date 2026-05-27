@@ -293,11 +293,12 @@ const webUsbSupported = computed(() => 'usb' in navigator)
 
     <!-- ================= USB / bootloader path ================== -->
     <template v-if="pathKind === 'usb'">
-      <!-- Gate when truly disconnected. Suppressed while a flash is
-           mid-flight — the MAVLink heartbeat stops as soon as the FC
-           reboots into bootloader mode, but we still need to surface
-           the picker + progress UI through that window. -->
-      <UCard v-if="(!session.connected || !session.hasHeartbeat) && !isRunning">
+      <!-- Gate when truly disconnected. Suppressed for any non-idle
+           phase (running, awaiting picker, done, error) — the MAVLink
+           heartbeat stops as soon as the FC reboots into bootloader
+           mode, and we still need to surface the picker / progress /
+           error UI through that window. -->
+      <UCard v-if="(!session.connected || !session.hasHeartbeat) && phase === 'idle'">
         <div class="text-muted py-8 text-center text-sm">
           <UIcon name="i-lucide-plug" class="mx-auto size-6" />
           <p class="mt-2">
@@ -310,7 +311,7 @@ const webUsbSupported = computed(() => 'usb' in navigator)
       </UCard>
 
       <UAlert
-        v-else-if="session.transport.kind !== 'webserial' && !isRunning"
+        v-else-if="session.transport.kind !== 'webserial' && phase === 'idle'"
         color="warning"
         icon="i-lucide-triangle-alert"
         title="Firmware install needs a USB connection"
