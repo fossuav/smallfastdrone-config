@@ -404,23 +404,30 @@ const webUsbSupported = computed(() => 'usb' in navigator)
                  as a different USB device than the firmware on most boards,
                  so the browser needs the operator to pick it the first time
                  (after that it stays authorised + auto-detected). -->
-            <UAlert
+            <div
               v-if="phase === 'awaiting-bootloader-port'"
-              color="info"
-              variant="subtle"
-              icon="i-lucide-mouse-pointer-click"
-              title="Pick the upload-mode port"
-              description="Your drone is in upload mode but the browser needs you to grant access to that port (it appears as a different USB device than the running firmware). Pick it once — we'll remember it for next time."
+              class="border-info bg-info/5 rounded-lg border p-3 space-y-2"
             >
-              <template #actions>
-                <UButton color="primary" icon="i-lucide-plug-zap" size="sm" @click="pickBootloaderPort">
-                  Pick bootloader port
-                </UButton>
+              <div class="flex items-start gap-2">
+                <UIcon name="i-lucide-mouse-pointer-click" class="text-info mt-0.5 size-5 shrink-0" />
+                <div class="flex-1 text-sm">
+                  <p class="text-highlighted font-semibold">
+                    Pick the upload-mode port
+                  </p>
+                  <p class="text-muted mt-1">
+                    Your drone is now in upload mode but the browser needs you to grant access to that port — it appears as a different USB device than the running firmware. Pick it once and we'll remember it.
+                  </p>
+                </div>
+              </div>
+              <div class="flex justify-end gap-2">
                 <UButton color="neutral" variant="ghost" size="sm" @click="cancelBootloaderPick">
                   Cancel
                 </UButton>
-              </template>
-            </UAlert>
+                <UButton color="primary" icon="i-lucide-plug-zap" size="sm" @click="pickBootloaderPort">
+                  Pick bootloader port
+                </UButton>
+              </div>
+            </div>
             <UAlert v-if="bootloaderPickError" color="warning" :description="bootloaderPickError" />
 
             <UAlert v-if="flashError" color="warning" :description="flashError" />

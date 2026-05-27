@@ -225,22 +225,35 @@ export function useFirmwareFlash() {
       await transport.detachMavlink()
       await sleep(POST_REBOOT_SETTLE_MS)
 
-      // 4. Find the bootloader port. If the operator has picked it for
-      //    this drone before, it's already authorised + appears in
-      //    getPorts() — auto-detected, no extra clicks. Otherwise we
-      //    pause + ask the UI to drive the browser picker.
-      let bootloaderPort = await findBootloaderPort(
-        preRebootConnectedPorts,
-        originalPort,
-        BOOTLOADER_PORT_DISCOVERY_MS,
-      )
-      if (!bootloaderPort) {
-        phase.value = 'awaiting-bootloader-port'
-        bootloaderPort = await new Promise<SerialPort>((resolve, reject) => {
-          portResolver = resolve
-          portRejecter = reject
-        })
-      }
+      // 4. Surface the picker immediately + race auto-detect against
+      //    it in the background. Whichever resolves first wins:
+      //      - auto-detect finds the bootloader port (the operator has
+      //        picked it on a prior flash → already authorised → it
+      //        shows up in getPorts() as soon as the bootloader USB
+      //        device enumerates). No extra clicks.
+      //      - operator clicks "Pick bootloader port" + selects it
+      //        from the browser dialog. First flash on this drone.
+      //    Showing the picker eagerly keeps the operator from staring
+      //    at a spinner for several seconds before realising it needs
+      //    a click.
+      phase.value = 'awaiting-bootloader-port'
+      const pickerPromise = new Promise<SerialPort>((resolve, reject) => {
+        portResolver = resolve
+        portRejecter = reject
+      })
+      void (async () => {
+        const auto = await findBootloaderPort(
+          preRebootConnectedPorts,
+          originalPort,
+          BOOTLOADER_PORT_DISCOVERY_MS,
+        )
+        if (auto && portResolver) {
+          portResolver(auto)
+          portResolver = null
+          portRejecter = null
+        }
+      })()
+      const bootloaderPort = await pickerPromise
 
       // 5. Open the bootloader port at bootloader baud.
       phase.value = 'syncing'
