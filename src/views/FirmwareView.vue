@@ -34,7 +34,7 @@ import type { ApjFirmware } from '../protocol/apj'
 import type { ParsedHex } from '../protocol/intel-hex'
 import type { DfuDeviceHandle } from '../transport/webusb'
 import type { DfuFlashSpec, EraseStrategy } from '../workflow/firmware'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { parseApj } from '../protocol/apj'
 import { parseIntelHex } from '../protocol/intel-hex'
 import { useSessionStore } from '../stores/session'
@@ -421,6 +421,99 @@ const channelItems = [
   { label: 'Beta', value: 'beta' as const },
   { label: 'Latest dev', value: 'latest' as const },
 ]
+
+// Board list — fetched once from ArduPilot's GitHub repo (hwdef
+// directory names match firmware.ardupilot.org's board directory
+// names) and cached in localStorage for 24 h. GitHub API supports
+// CORS; firmware.ardupilot.org doesn't. Falls back to a small built-in
+// list if the fetch fails.
+const FALLBACK_BOARDS = [
+  'CubeOrange',
+  'CubeOrangePlus',
+  'CubeBlack',
+  'MatekH743',
+  'MatekH743-bdshot',
+  'MatekF405',
+  'KakuteH7',
+  'KakuteH7-bdshot',
+  'Pixhawk1',
+  'Pixhawk4',
+  'Pixhawk6X',
+  'Pixhawk6C',
+  'fmuv5',
+  'fmuv6X',
+]
+const BOARD_LIST_CACHE_KEY = 'sfdc.ardupilot-board-list'
+const BOARD_LIST_TTL_MS = 24 * 60 * 60 * 1000
+
+const boardList = ref<string[]>(FALLBACK_BOARDS)
+const boardListSource = ref<'fallback' | 'cache' | 'fresh'>('fallback')
+
+interface CachedBoardList {
+  fetched_at: number
+  boards: string[]
+}
+
+function readCachedBoards(): CachedBoardList | null {
+  try {
+    const raw = localStorage.getItem(BOARD_LIST_CACHE_KEY)
+    if (!raw)
+      return null
+    const parsed = JSON.parse(raw) as CachedBoardList
+    if (typeof parsed.fetched_at !== 'number' || !Array.isArray(parsed.boards))
+      return null
+    return parsed
+  }
+  catch {
+    return null
+  }
+}
+
+function writeCachedBoards(boards: string[]): void {
+  try {
+    localStorage.setItem(BOARD_LIST_CACHE_KEY, JSON.stringify({ fetched_at: Date.now(), boards }))
+  }
+  catch {
+    /* quota / private browsing — non-fatal */
+  }
+}
+
+async function fetchAndCacheBoardList(): Promise<void> {
+  try {
+    const res = await fetch('https://api.github.com/repos/ArduPilot/ardupilot/contents/libraries/AP_HAL_ChibiOS/hwdef')
+    if (!res.ok)
+      return
+    const items = await res.json() as { name: string, type: string }[]
+    const boards = items
+      .filter(i => i.type === 'dir')
+      .map(i => i.name)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    if (boards.length === 0)
+      return
+    boardList.value = boards
+    boardListSource.value = 'fresh'
+    writeCachedBoards(boards)
+  }
+  catch {
+    /* network down or rate-limited — operator keeps the fallback list */
+  }
+}
+
+onMounted(() => {
+  const cached = readCachedBoards()
+  if (cached && Date.now() - cached.fetched_at < BOARD_LIST_TTL_MS) {
+    boardList.value = cached.boards
+    boardListSource.value = 'cache'
+    return
+  }
+  // Stale or missing — load cached values immediately for instant UX,
+  // then refresh in the background.
+  if (cached) {
+    boardList.value = cached.boards
+    boardListSource.value = 'cache'
+  }
+  void fetchAndCacheBoardList()
+})
 </script>
 
 <template>
@@ -465,7 +558,14 @@ const channelItems = [
         </div>
         <div>
           <label class="text-muted text-xs font-medium">Board</label>
-          <UInput v-model="onlineBoard" placeholder="e.g. CubeOrange" class="mt-1 w-full" />
+          <USelectMenu
+            v-model="onlineBoard"
+            :items="boardList"
+            placeholder="Pick or type a board…"
+            searchable
+            searchable-placeholder="Filter boards…"
+            class="mt-1 w-full"
+          />
         </div>
       </div>
       <div v-if="onlineApjUrl" class="bg-muted/30 mt-3 break-all rounded-md px-2 py-1.5 font-mono text-xs">
