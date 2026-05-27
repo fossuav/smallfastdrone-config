@@ -98,9 +98,13 @@ describe('dfuClient.setAddress', () => {
 })
 
 describe('dfuClient.erasePage', () => {
-  it('issues DfuSe ERASE_PAGE + polls until idle', async () => {
+  it('issues DfuSe ERASE_PAGE + waits through dfuDNBUSY → dfuDNLOAD_IDLE', async () => {
     const mock = new MockUSBControl()
-    queueStatuses(mock, [status(DFU_STATE.dfuDNLOAD_IDLE)])
+    // Normal-chip path: first GETSTATUS = dfuDNBUSY, second = idle.
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuDNBUSY),
+      status(DFU_STATE.dfuDNLOAD_IDLE),
+    ])
     const client = new DfuClient(mock)
     await client.erasePage(0x08020000)
     const out = mock.log.find(e => e.kind === 'out')!
@@ -113,25 +117,43 @@ describe('dfuClient.erasePage', () => {
     const client = new DfuClient(mock)
     await expect(client.erasePage(0)).rejects.toThrow(/errERASE/)
   })
+
+  it('applies the STM32H7 Rev.V workaround when the device stays in dfuDNBUSY', async () => {
+    const mock = new MockUSBControl()
+    // First GETSTATUS = dfuDNBUSY (normal).
+    // Second GETSTATUS = STILL dfuDNBUSY (Rev.V errata).
+    // drainToIdle then loops:
+    //   - GETSTATUS = dfuDNBUSY (not idle)  → CLRSTATUS
+    //   - GETSTATUS = dfuERROR (errUNKNOWN, not idle) → CLRSTATUS
+    //   - GETSTATUS = dfuIDLE → return
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuDNBUSY), //                    first poll
+      status(DFU_STATE.dfuDNBUSY), //                    second poll — still busy
+      status(DFU_STATE.dfuDNBUSY), //                    drain attempt 1: still busy
+      status(DFU_STATE.dfuERROR, DFU_STATUS.errUNKNOWN), // drain attempt 2: now errored
+      status(DFU_STATE.dfuIDLE), //                      drain attempt 3: idle
+    ])
+    const client = new DfuClient(mock)
+    await client.erasePage(0x08020000)
+    // Should have issued: ERASE_PAGE DNLOAD + 2 CLRSTATUS calls.
+    const clearStatuses = mock.log.filter(e => e.kind === 'out' && e.setup.request === 0x04 /* CLRSTATUS */)
+    expect(clearStatuses).toHaveLength(2)
+  })
 })
 
 describe('dfuClient.flash — end-to-end', () => {
   it('does ensureIdle → erase each sector → set-address → DNLOAD chunks → manifest', async () => {
     const mock = new MockUSBControl()
 
-    // Sequence of GETSTATUS replies, in the order the client polls:
-    //   ensureIdle              — 1 poll (dfuIDLE)
-    //   erase sector 0          — 1 poll (dfuDNLOAD_IDLE)
-    //   erase sector 1          — 1 poll
-    //   set-address             — 1 poll
-    //   dnload chunk 0          — 1 poll (dfuDNLOAD_IDLE)
-    //   dnload chunk 1          — 1 poll
-    //   dnload chunk 2          — 1 poll
-    //   manifest                — 1 poll (dfuMANIFEST_WAIT_RESET)
+    // Sequence of GETSTATUS replies, in the order the client polls.
+    // Erase now does the dfuDNBUSY → dfuDNLOAD_IDLE two-poll dance
+    // (with the H7-Rev.V workaround entry point on the second poll).
     queueStatuses(mock, [
       status(DFU_STATE.dfuIDLE), //              ensureIdle
-      status(DFU_STATE.dfuDNLOAD_IDLE), //       erase sec 0
-      status(DFU_STATE.dfuDNLOAD_IDLE), //       erase sec 1
+      status(DFU_STATE.dfuDNBUSY), //            erase sec 0, first poll
+      status(DFU_STATE.dfuDNLOAD_IDLE), //       erase sec 0, second poll
+      status(DFU_STATE.dfuDNBUSY), //            erase sec 1, first poll
+      status(DFU_STATE.dfuDNLOAD_IDLE), //       erase sec 1, second poll
       status(DFU_STATE.dfuDNLOAD_IDLE), //       set-address
       status(DFU_STATE.dfuDNLOAD_IDLE), //       chunk 0
       status(DFU_STATE.dfuDNLOAD_IDLE), //       chunk 1
@@ -183,10 +205,12 @@ describe('dfuClient.flash — end-to-end', () => {
   it('writes multiple non-contiguous regions (the .hex case)', async () => {
     const mock = new MockUSBControl()
     // 2 regions × (set-address + 1 chunk poll), plus 1 erase, plus
-    // ensureIdle + manifest.
+    // ensureIdle + manifest. Erase does the dfuDNBUSY → dfuDNLOAD_IDLE
+    // two-poll dance per sector.
     queueStatuses(mock, [
       status(DFU_STATE.dfuIDLE), //              ensureIdle
-      status(DFU_STATE.dfuDNLOAD_IDLE), //       erase sec 0
+      status(DFU_STATE.dfuDNBUSY), //            erase sec 0, first poll
+      status(DFU_STATE.dfuDNLOAD_IDLE), //       erase sec 0, second poll
       status(DFU_STATE.dfuDNLOAD_IDLE), //       set-address (region 0)
       status(DFU_STATE.dfuDNLOAD_IDLE), //       chunk
       status(DFU_STATE.dfuDNLOAD_IDLE), //       set-address (region 1)

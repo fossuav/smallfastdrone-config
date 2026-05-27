@@ -27,29 +27,6 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   submodule at the merged commit. Currently the BLHeli-in-SITL support lives on
   a private branch (`vendor/smallfastdrone` @ `blheli-sitl`) that we bumped to
   for direction-correction testing — it needs to land in the SFD beta line.
-- `[firmware]` **Per-sector DFU erase wedges at sector 9 (0x08100000) on
-  STM32H743.** First seen during a `_with_bl.hex` flash with the new
-  "preserve settings" toggle: erase succeeds through 8 sectors of bank 1
-  then `GETSTATUS` after `ERASE_PAGE` for the first sector of bank 2
-  never returns (>60 s, our timeout). Mass erase works fine; per-sector
-  is the only path that hits this.
-  Investigated and ruled out: alt-setting tracking (operator confirmed
-  STM32CubeProgrammer flashes the *same* `_with_bl.hex` on the *same*
-  chip via per-sector erase succesfully — "Erasing internal memory
-  sectors [0 13]" in 20 s — so the protocol can do it on this chip),
-  ABORT-between-erases (didn't help, removed),
-  ABORT-during-pollUntilIdle (tried, no change), longer pollTimeout
-  cap (raised to 10 s, no change). Suspected cause: WebUSB-on-Windows
-  driver differs from STMicro's DfuSe driver in some subtle way (timing,
-  control-transfer framing) that the H7 ROM bootloader doesn't tolerate
-  past the bank boundary. The chip is fine; the access path is the
-  problem.
-  Workarounds in place: the per-sector error message points the operator
-  at the "Wipe whole chip" toggle, and the default for `.hex` flashes is
-  mass erase. Non-blocking for v1.
-  Further investigation would benefit from a Wireshark USB capture of
-  CubeProgrammer doing the same operation, to see what control transfers
-  / timing differ.
 
 ## 3D / visuals
 

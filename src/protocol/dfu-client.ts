@@ -206,14 +206,74 @@ export class DfuClient {
 
   // Erase a single page at the given address. Block size = sector size
   // for that region; the caller (workflow) walks segments + sector list.
-  // No ABORT between erases — DfuSe allows the next DNLOAD command
-  // directly from `dfuDNLOAD_IDLE`, and an earlier attempt to ABORT
-  // back to `dfuIDLE` between erases didn't help the dual-bank H7
-  // hang at 0x08100000 (per-sector erase still wedges there even
-  // though CubeProgrammer succeeds on the same chip). See TODO.md.
+  //
+  // Polling is hand-rolled (rather than via `pollUntilIdle`) so we can
+  // detect + handle an STM32H7 Rev.V silicon errata: after a sector
+  // erase the device stays in `dfuDNBUSY` indefinitely (even though
+  // the erase actually completed). CubeProgrammer and
+  // betaflight-configurator both work around it the same way — when
+  // `dfuDNBUSY` persists past the requested poll delay, drive the
+  // state machine to `dfuIDLE` via `drainToIdle()` (CLRSTATUS twice:
+  // dfuDNBUSY → dfuERROR (errUNKNOWN) → dfuIDLE) and treat the erase
+  // as successful. We were hitting this on every flash that crossed
+  // the H743 bank boundary at sector 9 / 0x08100000.
   async erasePage(address: number): Promise<void> {
     await this.dnloadCommand(buildErasePagePayload(address))
-    await this.pollUntilIdle('erase', OPERATION_TIMEOUT_MS)
+
+    const first = await this.getStatus()
+    if (first.status !== DFU_STATUS.OK) {
+      throw new Error(
+        `DFU erase failed: device reported ${statusLabel(first.status)} (state ${stateLabel(first.state)}).`,
+      )
+    }
+    if (first.state === DFU_STATE.dfuDNLOAD_IDLE || first.state === DFU_STATE.dfuIDLE)
+      return // already done (rare — typical path goes through dfuDNBUSY)
+    if (first.state !== DFU_STATE.dfuDNBUSY && first.state !== DFU_STATE.dfuDNLOAD_SYNC) {
+      throw new Error(`DFU erase ended in unexpected state ${stateLabel(first.state)}.`)
+    }
+
+    // Wait the device's requested time, then poll once more. Normal
+    // chips transition to dfuDNLOAD_IDLE; Rev.V chips stay dfuDNBUSY.
+    if (first.pollTimeoutMs > 0)
+      await sleep(Math.min(first.pollTimeoutMs, MAX_POLL_INTERVAL_MS))
+
+    const second = await this.getStatus()
+    if (second.status !== DFU_STATUS.OK) {
+      throw new Error(
+        `DFU erase failed: device reported ${statusLabel(second.status)} (state ${stateLabel(second.state)}).`,
+      )
+    }
+    if (second.state === DFU_STATE.dfuDNLOAD_IDLE || second.state === DFU_STATE.dfuIDLE)
+      return // normal completion
+    if (second.state === DFU_STATE.dfuDNBUSY) {
+      // The Rev.V silicon errata path: the erase is actually done, the
+      // chip's state machine just hasn't reflected that. Drain back
+      // to dfuIDLE via the double-CLRSTATUS sequence — `drainToIdle`
+      // loops "GETSTATUS, if dfuIDLE done, else CLRSTATUS" until it
+      // sees idle.
+      await this.drainToIdle()
+      return
+    }
+    throw new Error(`DFU erase ended in unexpected state ${stateLabel(second.state)}.`)
+  }
+
+  // Drive the device's state machine to `dfuIDLE` via repeated
+  // CLRSTATUS. Used by the H7 Rev.V erase workaround — on those chips
+  // the first CLRSTATUS transitions dfuDNBUSY → dfuERROR (errUNKNOWN),
+  // the second transitions dfuERROR → dfuIDLE. Other devices that get
+  // wedged in unexpected states benefit from the same routine.
+  // Mirrors betaflight-configurator's `clearStatus()` helper.
+  private async drainToIdle(): Promise<void> {
+    const MAX_DRAIN_ATTEMPTS = 5
+    for (let i = 0; i < MAX_DRAIN_ATTEMPTS; i++) {
+      const s = await this.getStatus()
+      if (s.state === DFU_STATE.dfuIDLE)
+        return
+      await this.clearStatus()
+      if (s.pollTimeoutMs > 0)
+        await sleep(Math.min(s.pollTimeoutMs, MAX_POLL_INTERVAL_MS))
+    }
+    throw new Error(`Couldn't drain device to dfuIDLE after ${MAX_DRAIN_ATTEMPTS} CLRSTATUS attempts.`)
   }
 
   // Mass erase — wipes the entire user flash region in one command.

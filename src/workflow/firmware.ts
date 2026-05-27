@@ -557,16 +557,7 @@ export function useFirmwareFlash() {
     }
     catch (e) {
       phase.value = 'error'
-      let message = e instanceof Error ? e.message : String(e)
-      // Dual-bank STM32H7 (the SmallFastDronev1's TBS_LUCID_H7 chief
-      // among them) hangs per-sector erase across the 0x08100000 bank
-      // boundary. We don't have a fix yet (needs per-sector
-      // alt-setting tracking), so steer the operator to the mass-
-      // erase workaround when we see the specific failure.
-      if (/Erase failed at sector 0x081[0-9a-f]{5}.*timed out/i.test(message)) {
-        message += ' — try toggling "Wipe whole chip" on; some chips (dual-bank H7) can\'t do per-sector erase across the flash bank boundary.'
-      }
-      error.value = message
+      error.value = e instanceof Error ? e.message : String(e)
       // Best-effort close — may already have happened in finally.
       await opened.control.close().catch(() => undefined)
       throw e
