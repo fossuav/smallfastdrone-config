@@ -121,12 +121,16 @@ export type DfuFlashSpec
 //                 param-storage area at the end of the chip.
 export type EraseStrategy = 'mass' | 'sectors'
 
-// Sensible default per file kind. `.hex` always carries bootloader-
-// plus-firmware (full replacement) → mass erase. `.apj` carries the
-// firmware only and *must* preserve the bootloader at the low sectors
-// → per-sector. The operator can override either way from the UI.
-export function recommendedEraseStrategy(specKind: DfuFlashSpec['kind']): EraseStrategy {
-  return specKind === 'hex' ? 'mass' : 'sectors'
+// Default erase strategy for any file kind: per-sector. Friendlier to
+// operators (preserves saved settings + bootloader on `.apj`) and
+// now reliable on dual-bank H7 thanks to the STM32H7 Rev.V silicon-
+// errata workaround in DfuClient.erasePage. The operator can flip the
+// "Wipe whole chip" switch when they want a clean slate. Function
+// signature keeps the file-kind parameter for future-proofing — if a
+// chip turns out to genuinely need mass-erase by default we can branch
+// here without changing the orchestrator + view call sites.
+export function recommendedEraseStrategy(_specKind: DfuFlashSpec['kind']): EraseStrategy {
+  return 'sectors'
 }
 
 export interface DfuFlashOptions {
