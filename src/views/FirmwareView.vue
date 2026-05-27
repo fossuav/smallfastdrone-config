@@ -343,7 +343,6 @@ const webUsbSupported = computed(() => 'usb' in navigator)
 // no security-seam compromise.
 
 type ApVehicle = 'Copter' | 'Plane' | 'Rover' | 'Sub' | 'Tracker' | 'Blimp'
-type ApChannel = 'stable' | 'beta' | 'latest'
 
 const AP_BINARY_NAME: Record<ApVehicle, string> = {
   Copter: 'arducopter',
@@ -375,7 +374,11 @@ function vehicleFromSessionLabel(label: string | null | undefined): ApVehicle {
 }
 
 const onlineVehicle = ref<ApVehicle>(vehicleFromSessionLabel(session.vehicleLabel))
-const onlineChannel = ref<ApChannel>('stable')
+// Channel is the path segment between /Copter/ and /board/ on the
+// firmware server. Common values: 'stable', 'beta', 'latest'; specific
+// stable releases are 'stable-4.6.3' etc. Free string so the operator
+// can also use the URL with any version we don't auto-list.
+const onlineChannel = ref<string>('stable')
 const onlineBoard = ref<string>('')
 
 // Re-pick the default vehicle whenever the connection lands on a new
@@ -416,11 +419,98 @@ async function copyOnlineUrl(url: string) {
 }
 
 const vehicleItems = (Object.keys(AP_BINARY_NAME) as ApVehicle[]).map(v => ({ label: v, value: v }))
-const channelItems = [
-  { label: 'Stable', value: 'stable' as const },
-  { label: 'Beta', value: 'beta' as const },
-  { label: 'Latest dev', value: 'latest' as const },
-]
+
+// Per-vehicle list of specific stable versions ("4.6.3", "4.6.2", …),
+// populated from ArduPilot's GitHub Releases on Firmware-page mount.
+// firmware.ardupilot.org channels for these are "stable-4.6.3" etc.
+// Tag prefix → vehicle mapping (only the ones we expose in the picker).
+const TAG_PREFIX_TO_VEHICLE: Record<string, ApVehicle> = {
+  Copter: 'Copter',
+  Plane: 'Plane',
+  Rover: 'Rover',
+  Sub: 'Sub',
+  Tracker: 'Tracker',
+  Blimp: 'Blimp',
+}
+const RELEASES_CACHE_KEY = 'sfdc.ardupilot-releases'
+const RELEASES_TTL_MS = 24 * 60 * 60 * 1000
+
+const versionsByVehicle = ref<Partial<Record<ApVehicle, string[]>>>({})
+
+interface CachedReleases {
+  fetched_at: number
+  versionsByVehicle: Partial<Record<ApVehicle, string[]>>
+}
+
+function readCachedReleases(): CachedReleases | null {
+  try {
+    const raw = localStorage.getItem(RELEASES_CACHE_KEY)
+    if (!raw)
+      return null
+    const parsed = JSON.parse(raw) as CachedReleases
+    if (typeof parsed.fetched_at !== 'number' || !parsed.versionsByVehicle)
+      return null
+    return parsed
+  }
+  catch {
+    return null
+  }
+}
+
+function writeCachedReleases(value: Partial<Record<ApVehicle, string[]>>): void {
+  try {
+    localStorage.setItem(RELEASES_CACHE_KEY, JSON.stringify({ fetched_at: Date.now(), versionsByVehicle: value }))
+  }
+  catch {
+    /* non-fatal */
+  }
+}
+
+async function fetchAndCacheReleases(): Promise<void> {
+  try {
+    // GitHub's /releases endpoint is sorted latest-first; 100 items
+    // covers ~the last 3 major releases per vehicle (more than enough
+    // for typical operator flashing). Older versions can still be
+    // reached by editing the URL manually.
+    const res = await fetch('https://api.github.com/repos/ArduPilot/ardupilot/releases?per_page=100')
+    if (!res.ok)
+      return
+    const releases = await res.json() as { tag_name: string }[]
+    const out: Partial<Record<ApVehicle, string[]>> = {}
+    for (const r of releases) {
+      const m = /^([a-z_]+)-(\d.+)$/i.exec(r.tag_name)
+      if (!m)
+        continue
+      const vehicle = TAG_PREFIX_TO_VEHICLE[m[1]!]
+      if (!vehicle)
+        continue
+      const version = m[2]!
+      const arr = out[vehicle] ?? []
+      if (!arr.includes(version))
+        arr.push(version)
+      out[vehicle] = arr
+    }
+    if (Object.keys(out).length === 0)
+      return
+    versionsByVehicle.value = out
+    writeCachedReleases(out)
+  }
+  catch {
+    /* network down or rate-limited — operator keeps the three default channels */
+  }
+}
+
+const channelItems = computed(() => {
+  const items: { label: string, value: string }[] = [
+    { label: 'Latest stable', value: 'stable' },
+    { label: 'Latest beta', value: 'beta' },
+    { label: 'Latest dev', value: 'latest' },
+  ]
+  const versions = versionsByVehicle.value[onlineVehicle.value] ?? []
+  for (const v of versions)
+    items.push({ label: `Stable ${v}`, value: `stable-${v}` })
+  return items
+})
 
 // Board list — fetched once from ArduPilot's GitHub repo (hwdef
 // directory names match firmware.ardupilot.org's board directory
@@ -500,19 +590,21 @@ async function fetchAndCacheBoardList(): Promise<void> {
 }
 
 onMounted(() => {
-  const cached = readCachedBoards()
-  if (cached && Date.now() - cached.fetched_at < BOARD_LIST_TTL_MS) {
-    boardList.value = cached.boards
-    boardListSource.value = 'cache'
-    return
-  }
-  // Stale or missing — load cached values immediately for instant UX,
-  // then refresh in the background.
-  if (cached) {
-    boardList.value = cached.boards
+  // Boards.
+  const cachedBoards = readCachedBoards()
+  if (cachedBoards) {
+    boardList.value = cachedBoards.boards
     boardListSource.value = 'cache'
   }
-  void fetchAndCacheBoardList()
+  if (!cachedBoards || Date.now() - cachedBoards.fetched_at >= BOARD_LIST_TTL_MS)
+    void fetchAndCacheBoardList()
+
+  // Releases (per-vehicle version list).
+  const cachedReleases = readCachedReleases()
+  if (cachedReleases)
+    versionsByVehicle.value = cachedReleases.versionsByVehicle
+  if (!cachedReleases || Date.now() - cachedReleases.fetched_at >= RELEASES_TTL_MS)
+    void fetchAndCacheReleases()
 })
 </script>
 
@@ -554,7 +646,14 @@ onMounted(() => {
         </div>
         <div>
           <label class="text-muted text-xs font-medium">Version</label>
-          <USelect v-model="onlineChannel" :items="channelItems" class="mt-1 w-full" />
+          <USelectMenu
+            v-model="onlineChannel"
+            :items="channelItems"
+            value-key="value"
+            searchable
+            searchable-placeholder="Filter versions…"
+            class="mt-1 w-full"
+          />
         </div>
         <div>
           <label class="text-muted text-xs font-medium">Board</label>
