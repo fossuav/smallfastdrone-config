@@ -27,20 +27,29 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   submodule at the merged commit. Currently the BLHeli-in-SITL support lives on
   a private branch (`vendor/smallfastdrone` @ `blheli-sitl`) that we bumped to
   for direction-correction testing — it needs to land in the SFD beta line.
-- `[firmware]` **Dual-bank H7 per-sector DFU erase wedges at 0x08100000.** On
-  STM32H743 the ROM DFU bootloader hangs (60 s+) when the host issues
-  `ERASE_PAGE` for the first sector of bank 2 after successfully erasing
-  bank 1 — even with ABORT-between-erases and 45 s GETSTATUS timeouts.
-  Mass erase works fine; only per-sector hits this. Suspected cause: the
-  device descriptor splits flash across multiple alt-settings (one per
-  bank) and we need to `selectAlternateInterface(iface, alt)` before
-  operating on sectors from a different alt. Workaround in place: the
-  DFU error message points the operator at the "Wipe whole chip" toggle.
-  Proper fix would track each sector's alt-setting in
-  `combineFlashLayouts`, expose `selectAlternateInterface` on the
-  USBControl interface, and have `DfuClient` switch alt before
-  erase/program of a sector from a non-current alt. Non-blocking for v1
-  — the mass-erase path covers the common `_with_bl.hex` case.
+- `[firmware]` **Per-sector DFU erase wedges at sector 9 (0x08100000) on
+  STM32H743.** First seen during a `_with_bl.hex` flash with the new
+  "preserve settings" toggle: erase succeeds through 8 sectors of bank 1
+  then `GETSTATUS` after `ERASE_PAGE` for the first sector of bank 2
+  never returns (>60 s, our timeout). Mass erase works fine; per-sector
+  is the only path that hits this.
+  Investigated and ruled out: alt-setting tracking (operator confirmed
+  STM32CubeProgrammer flashes the *same* `_with_bl.hex` on the *same*
+  chip via per-sector erase succesfully — "Erasing internal memory
+  sectors [0 13]" in 20 s — so the protocol can do it on this chip),
+  ABORT-between-erases (didn't help, removed),
+  ABORT-during-pollUntilIdle (tried, no change), longer pollTimeout
+  cap (raised to 10 s, no change). Suspected cause: WebUSB-on-Windows
+  driver differs from STMicro's DfuSe driver in some subtle way (timing,
+  control-transfer framing) that the H7 ROM bootloader doesn't tolerate
+  past the bank boundary. The chip is fine; the access path is the
+  problem.
+  Workarounds in place: the per-sector error message points the operator
+  at the "Wipe whole chip" toggle, and the default for `.hex` flashes is
+  mass erase. Non-blocking for v1.
+  Further investigation would benefit from a Wireshark USB capture of
+  CubeProgrammer doing the same operation, to see what control transfers
+  / timing differ.
 
 ## 3D / visuals
 

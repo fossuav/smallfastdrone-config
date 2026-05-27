@@ -206,26 +206,14 @@ export class DfuClient {
 
   // Erase a single page at the given address. Block size = sector size
   // for that region; the caller (workflow) walks segments + sector list.
-  //
-  // Returns to `dfuIDLE` after each erase via ABORT. Some STM32 ROM DFU
-  // bootloaders — particularly on dual-bank H7 across the bank boundary
-  // at 0x08100000 — wedge if the host issues a second DfuSe command
-  // (ERASE_PAGE / SET_ADDRESS) directly from `dfuDNLOAD_IDLE` (where
-  // we land after the previous erase) instead of `dfuIDLE`. The ABORT
-  // is a cheap round trip that ensures every erase starts from a known
-  // state, and is what dfu-util does between regions for the same
-  // reason.
+  // No ABORT between erases — DfuSe allows the next DNLOAD command
+  // directly from `dfuDNLOAD_IDLE`, and an earlier attempt to ABORT
+  // back to `dfuIDLE` between erases didn't help the dual-bank H7
+  // hang at 0x08100000 (per-sector erase still wedges there even
+  // though CubeProgrammer succeeds on the same chip). See TODO.md.
   async erasePage(address: number): Promise<void> {
     await this.dnloadCommand(buildErasePagePayload(address))
     await this.pollUntilIdle('erase', OPERATION_TIMEOUT_MS)
-    try {
-      await this.abort()
-    }
-    catch {
-      // Abort failure is non-fatal — the next op will surface any
-      // genuine state issue. Swallow so a flaky bus during the abort
-      // doesn't tank an otherwise-successful erase.
-    }
   }
 
   // Mass erase — wipes the entire user flash region in one command.
