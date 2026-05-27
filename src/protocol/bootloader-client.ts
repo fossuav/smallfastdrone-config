@@ -123,12 +123,37 @@ export class BootloaderClient {
   }
 
   // Erase the user-flash region. Slow — up to ~20s on large boards
-  // (H7 / F7). Throws on failure / timeout.
-  async chipErase(): Promise<void> {
+  // (H7 / F7). The bootloader sends INSYNC+OK only when the whole
+  // erase is complete; there's no per-sector ack to drive a real
+  // progress bar. So we animate a time-based estimate (capped at 95 %
+  // until the actual ack lands) — same approach uploader.py uses.
+  // Tuned for an H7's typical ~10 s erase. Throws on failure / timeout.
+  async chipErase(onProgress?: (fraction: number) => void): Promise<void> {
     await this.raw.write(buildChipErase())
-    const reply = await this.raw.readExact(2, ERASE_TIMEOUT_MS)
-    if (!isAck(reply))
-      throw new Error(`Chip erase failed (bootloader replied ${statusName(reply[1] ?? 0)})`)
+    let cancelled = false
+    let interval: ReturnType<typeof setInterval> | null = null
+    if (onProgress) {
+      const startedAt = Date.now()
+      const expectedMs = 10_000
+      onProgress(0)
+      interval = setInterval(() => {
+        if (cancelled)
+          return
+        const elapsed = Date.now() - startedAt
+        onProgress(Math.min(0.95, elapsed / expectedMs))
+      }, 250)
+    }
+    try {
+      const reply = await this.raw.readExact(2, ERASE_TIMEOUT_MS)
+      if (!isAck(reply))
+        throw new Error(`Chip erase failed (bootloader replied ${statusName(reply[1] ?? 0)})`)
+      onProgress?.(1)
+    }
+    finally {
+      cancelled = true
+      if (interval)
+        clearInterval(interval)
+    }
   }
 
   // Stream the image to the bootloader in PROG_MULTI_MAX-sized chunks
@@ -242,9 +267,12 @@ export class BootloaderClient {
     }
 
     onPhase('erasing')
-    await this.chipErase()
+    await this.chipErase(onProgress)
 
     onPhase('programming')
+    // Reset progress between phases so the bar restarts at 0 rather
+    // than jumping straight to whatever erase left it at.
+    onProgress?.(0)
     await this.program(image, onProgress)
 
     onPhase('verifying')

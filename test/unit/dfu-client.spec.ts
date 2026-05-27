@@ -158,8 +158,12 @@ describe('dfuClient.flash — end-to-end', () => {
 
     expect(phases).toEqual(['connecting', 'erasing', 'programming', 'manifesting', 'done'])
 
-    // Progress: after 2048, 4096, 5120 bytes of 5120 total.
-    expect(progress).toEqual([2048 / 5120, 4096 / 5120, 1])
+    // Progress fires:
+    //   - reset to 0 at the start of the erase phase
+    //   - 0.5, 1 as each of the 2 sectors finishes
+    //   - reset to 0 at the start of the program phase
+    //   - 0.4, 0.8, 1 as each of the 3 chunks finishes (5120 bytes total)
+    expect(progress).toEqual([0, 0.5, 1, 0, 2048 / 5120, 4096 / 5120, 1])
 
     // Count of DNLOAD operations on the wire (commands + chunks):
     //   2 erase commands + 1 set-address + 3 data chunks + 1 manifest = 7.

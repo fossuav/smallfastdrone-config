@@ -454,7 +454,7 @@ const webUsbSupported = computed(() => 'usb' in navigator)
               </span>
             </div>
             <UProgress
-              v-if="phase === 'programming' && progress !== null"
+              v-if="(phase === 'erasing' || phase === 'programming') && progress !== null"
               :model-value="Math.round((progress ?? 0) * 100)"
               color="primary"
               size="sm"
@@ -666,7 +666,7 @@ const webUsbSupported = computed(() => 'usb' in navigator)
               </span>
             </div>
             <UProgress
-              v-if="phase === 'programming' && progress !== null"
+              v-if="(phase === 'erasing' || phase === 'programming') && progress !== null"
               :model-value="Math.round((progress ?? 0) * 100)"
               color="primary"
               size="sm"

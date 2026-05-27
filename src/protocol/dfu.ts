@@ -263,3 +263,71 @@ export function planSectorErase(
   }
   return Array.from(out).sort((a, b) => a - b)
 }
+
+// Combine every writable sector ('g' / 'e' capability) from every
+// parsed alt-setting layout into a single virtual flash layout. Sorted
+// by address. Used by the orchestrator so a chip that exposes its
+// flash split across multiple alt-settings (e.g. dual-bank H7 where
+// each bank gets its own layout descriptor) still gets a complete
+// picture — we don't need each region to fit inside a single layout,
+// we just need the chip to expose enough writable sectors to cover it.
+export function combineFlashLayouts(layouts: DfuMemoryLayout[]): DfuMemoryLayout {
+  const sectors: DfuSector[] = []
+  for (const l of layouts) {
+    for (const s of l.sectors) {
+      if (s.capability === 'g' || s.capability === 'e')
+        sectors.push(s)
+    }
+  }
+  sectors.sort((a, b) => a.startAddress - b.startAddress)
+  return {
+    name: 'Combined flash',
+    startAddress: sectors.length > 0 ? sectors[0]!.startAddress : 0,
+    sectors,
+  }
+}
+
+// True iff the given region (address + length) is fully covered by
+// a contiguous run of sectors in `layout`. "Contiguous" means each
+// sector either contains our cursor or starts exactly where the
+// previous sector ended — gaps fail. Used as the DFU coverage check
+// instead of just "region fits inside [start, start+totalSize)"
+// because the latter assumes all sectors between are erase-writable;
+// this verifies that explicitly.
+export function regionCoveredBySectors(
+  layout: DfuMemoryLayout,
+  region: { address: number, length: number },
+): boolean {
+  const regionEnd = region.address + region.length
+  if (region.length === 0)
+    return true
+  let cursor = region.address
+  for (const s of layout.sectors) {
+    const sectorEnd = s.startAddress + s.size
+    if (sectorEnd <= cursor)
+      continue // sector ends before we need anything from it
+    if (s.startAddress > cursor)
+      return false // gap before this sector
+    cursor = sectorEnd
+    if (cursor >= regionEnd)
+      return true
+  }
+  return cursor >= regionEnd
+}
+
+// Operator-readable summary of what the device exposed — for the
+// "we can't cover your firmware" error. Format:
+//   "Internal Flash" 0x08000000-0x08200000 (2048 KB),
+//   "Option Bytes" 0x5200201c-0x5200203c (32 B)
+export function describeMemoryLayouts(layouts: DfuMemoryLayout[]): string {
+  if (layouts.length === 0)
+    return 'no memory layouts were exposed by the device'
+  return layouts.map((l) => {
+    const total = l.sectors.reduce((sum, s) => sum + s.size, 0)
+    const end = l.sectors.length > 0
+      ? l.sectors[l.sectors.length - 1]!.startAddress + l.sectors[l.sectors.length - 1]!.size
+      : l.startAddress
+    const sizeLabel = total >= 1024 ? `${Math.round(total / 1024)} KB` : `${total} B`
+    return `"${l.name}" 0x${l.startAddress.toString(16).padStart(8, '0')}-0x${end.toString(16).padStart(8, '0')} (${sizeLabel})`
+  }).join(', ')
+}

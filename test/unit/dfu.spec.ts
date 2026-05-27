@@ -22,11 +22,14 @@ import {
   buildErasePagePayload,
   buildMassErasePayload,
   buildSetAddressPayload,
+  combineFlashLayouts,
+  describeMemoryLayouts,
   DFU_STATE,
   DFU_STATUS,
   parseDfuseLayout,
   parseStatus,
   planSectorErase,
+  regionCoveredBySectors,
   stateLabel,
   statusLabel,
 } from '../../src/protocol/dfu'
@@ -160,5 +163,92 @@ describe('planSectorErase', () => {
       { address: 0x08020000, length: 32 * 1024 }, // sector 1
     ])
     expect(sectors).toEqual([0x08000000, 0x08020000, 0x08100000])
+  })
+})
+
+describe('combineFlashLayouts', () => {
+  it('merges all writable sectors across layouts, sorted by address', () => {
+    // Dual-bank H7 split across two alt-settings.
+    const bank0 = parseDfuseLayout('@Internal Flash Bank 0  /0x08000000/08*128Kg')!
+    const bank1 = parseDfuseLayout('@Internal Flash Bank 1  /0x08100000/08*128Kg')!
+    // Option bytes (read-only — should be excluded).
+    const opt = parseDfuseLayout('@Option Bytes  /0x5200201c/01*32 e')!
+
+    const combined = combineFlashLayouts([bank0, opt, bank1])
+    expect(combined.sectors).toHaveLength(16 + 1) // 8 + 8 flash + 1 option-bytes 'e'
+    expect(combined.startAddress).toBe(0x08000000)
+    // Sectors are sorted by address.
+    for (let i = 1; i < combined.sectors.length; i++) {
+      expect(combined.sectors[i]!.startAddress).toBeGreaterThanOrEqual(
+        combined.sectors[i - 1]!.startAddress,
+      )
+    }
+  })
+
+  it('drops read-only sectors (capability r / a)', () => {
+    const readonly = parseDfuseLayout('@Locked  /0x08000000/04*16Kr')!
+    const combined = combineFlashLayouts([readonly])
+    expect(combined.sectors).toHaveLength(0)
+  })
+
+  it('returns an empty layout when nothing is writable', () => {
+    const combined = combineFlashLayouts([])
+    expect(combined.sectors).toHaveLength(0)
+    expect(combined.startAddress).toBe(0)
+  })
+})
+
+describe('regionCoveredBySectors', () => {
+  it('returns true when a region fits inside a contiguous run of sectors', () => {
+    const h7 = parseDfuseLayout('@Internal Flash  /0x08000000/16*128Kg')!
+    expect(regionCoveredBySectors(h7, { address: 0x08020000, length: 1_500_000 })).toBe(true)
+  })
+
+  it('returns true when a region spans a dual-bank combined layout', () => {
+    // Bank 0: 0x08000000..0x08100000 (1MB). Bank 1: 0x08100000..0x08200000 (1MB).
+    const bank0 = parseDfuseLayout('@Internal Flash Bank 0  /0x08000000/08*128Kg')!
+    const bank1 = parseDfuseLayout('@Internal Flash Bank 1  /0x08100000/08*128Kg')!
+    const combined = combineFlashLayouts([bank0, bank1])
+    // 1.5 MB image starting at app offset 0x20000 — crosses the bank boundary.
+    expect(regionCoveredBySectors(combined, { address: 0x08020000, length: 1_500_000 })).toBe(true)
+  })
+
+  it('returns false when there is a gap between sectors covering the region', () => {
+    // Two flash regions with a gap between them.
+    const split = parseDfuseLayout('@Split  /0x08000000/04*16Kg')! // 0x08000000..0x08010000
+    const other = parseDfuseLayout('@Other  /0x08100000/04*16Kg')! // 0x08100000..0x08110000
+    const combined = combineFlashLayouts([split, other])
+    // Region straddles the gap (0x08010000..0x08100000 is unmapped).
+    expect(regionCoveredBySectors(combined, { address: 0x08000000, length: 0x110000 })).toBe(false)
+  })
+
+  it('returns false when the region starts before any sector', () => {
+    const h7 = parseDfuseLayout('@Internal Flash  /0x08000000/16*128Kg')!
+    expect(regionCoveredBySectors(h7, { address: 0x07000000, length: 100 })).toBe(false)
+  })
+
+  it('returns false when the region extends past the last sector', () => {
+    const small = parseDfuseLayout('@Small  /0x08000000/01*16Kg')!
+    expect(regionCoveredBySectors(small, { address: 0x08000000, length: 32 * 1024 })).toBe(false)
+  })
+
+  it('returns true for an empty region', () => {
+    const h7 = parseDfuseLayout('@Internal Flash  /0x08000000/16*128Kg')!
+    expect(regionCoveredBySectors(h7, { address: 0x08020000, length: 0 })).toBe(true)
+  })
+})
+
+describe('describeMemoryLayouts', () => {
+  it('produces a human-readable summary with address ranges + size', () => {
+    const h7 = parseDfuseLayout('@Internal Flash  /0x08000000/16*128Kg')!
+    const desc = describeMemoryLayouts([h7])
+    expect(desc).toContain('"Internal Flash"')
+    expect(desc).toContain('0x08000000')
+    expect(desc).toContain('0x08200000')
+    expect(desc).toContain('2048 KB')
+  })
+
+  it('handles the empty case', () => {
+    expect(describeMemoryLayouts([])).toMatch(/no memory layouts/)
   })
 })

@@ -41,7 +41,13 @@ import type { OpenedDfuDevice } from '../transport/webusb'
 import { ref } from 'vue'
 import { lookupBoardFlash } from '../protocol/board-flash-map'
 import { BootloaderClient } from '../protocol/bootloader-client'
-import { parseDfuseLayout, planSectorErase } from '../protocol/dfu'
+import {
+  combineFlashLayouts,
+  describeMemoryLayouts,
+  parseDfuseLayout,
+  planSectorErase,
+  regionCoveredBySectors,
+} from '../protocol/dfu'
 import { DfuClient } from '../protocol/dfu-client'
 import { defaultUploader } from '../security/uploader'
 import { useSessionStore } from '../stores/session'
@@ -437,22 +443,30 @@ export function useFirmwareFlash() {
         name = spec.filename
       }
 
-      // 2. Pick the right alt-setting layout — STM32 boards advertise
-      //    "@Internal Flash …" plus option-bytes / OTP / etc. We want
-      //    the one whose address span covers every region we plan to
-      //    write.
+      // 2. Combine every writable sector ('g'/'e' capability) from
+      //    every alt-setting the device exposes into one virtual flash
+      //    layout. STM32 boards advertise "@Internal Flash …" plus
+      //    "@Option Bytes" / "@OTP Memory" / etc.; on some chips the
+      //    flash itself is split across multiple alt-settings (dual-
+      //    bank H7). Coverage is checked sector-by-sector against this
+      //    combined view, not "does any single layout's address range
+      //    contain the whole region", so split flashes and chips with
+      //    sparse layouts both work.
       const layouts = opened.altSettingDescriptors
         .map(d => parseDfuseLayout(d))
         .filter((l): l is NonNullable<typeof l> => l !== null)
-      const flash = layouts.find((l) => {
-        const layoutEnd = l.sectors.reduce((end, s) => end + s.size, l.startAddress)
-        return regions.every(r =>
-          r.address >= l.startAddress
-          && r.address + r.data.length <= layoutEnd,
+      const flash = combineFlashLayouts(layouts)
+      for (const r of regions) {
+        if (!regionCoveredBySectors(flash, { address: r.address, length: r.data.length })) {
+          throw new Error(
+            `DFU device's flash doesn't cover 0x${r.address.toString(16).padStart(8, '0')} + ${r.data.length} bytes. Device exposed: ${describeMemoryLayouts(layouts)}.`,
+          )
+        }
+      }
+      if (flash.sectors.length === 0) {
+        throw new Error(
+          `DFU device didn't expose any writable flash sectors. Device exposed: ${describeMemoryLayouts(layouts)}.`,
         )
-      })
-      if (!flash) {
-        throw new Error('DFU device doesn\'t expose a flash region covering this firmware\'s addresses.')
       }
 
       // 3. Compute the unique sectors we need to erase across all regions.

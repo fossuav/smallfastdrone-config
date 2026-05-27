@@ -120,6 +120,18 @@ describe('bootloaderClient.chipErase', () => {
     const client = new BootloaderClient(raw)
     await expect(client.chipErase()).rejects.toThrow(/Chip erase failed/)
   })
+
+  it('emits progress while waiting (0 at start, 1 on success)', async () => {
+    const raw = new MockRawSerial(ACK)
+    const client = new BootloaderClient(raw)
+    const fractions: number[] = []
+    await client.chipErase(p => fractions.push(p))
+    // We always emit 0 at the start + 1 on completion; the intermediate
+    // ticker fires every 250 ms — for a MockRawSerial test the ack lands
+    // synchronously so we don't see ticker values.
+    expect(fractions[0]).toBe(0)
+    expect(fractions[fractions.length - 1]).toBe(1)
+  })
 })
 
 describe('bootloaderClient.program', () => {

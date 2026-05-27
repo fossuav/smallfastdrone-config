@@ -253,10 +253,14 @@ export class DfuClient {
     await this.ensureIdle()
 
     onPhase?.('erasing')
-    for (const sectorAddr of sectorsToErase)
-      await this.erasePage(sectorAddr)
+    onProgress?.(0)
+    for (let i = 0; i < sectorsToErase.length; i++) {
+      await this.erasePage(sectorsToErase[i]!)
+      onProgress?.((i + 1) / sectorsToErase.length)
+    }
 
     onPhase?.('programming')
+    onProgress?.(0)
     const totalBytes = regions.reduce((a, r) => a + r.data.length, 0)
     let writtenBytes = 0
 
