@@ -51,6 +51,7 @@ const {
   phase,
   progress,
   error: flashError,
+  wasSkipped,
   flash,
   flashViaBootloaderPort,
   flashDfu,
@@ -290,9 +291,12 @@ const phaseLabel = computed(() => {
     case 'verifying': return 'Verifying what was written…'
     case 'restarting': return 'Finishing up…'
     case 'reconnecting': return 'Reconnecting…'
-    case 'done': return pathKind.value === 'dfu'
-      ? 'Done. Unplug + replug your drone to start it.'
-      : 'Done — your drone is running the new firmware.'
+    case 'done':
+      if (pathKind.value === 'dfu')
+        return 'Done. Unplug + replug your drone to start it.'
+      if (wasSkipped.value)
+        return 'Already up to date — your drone is running this firmware.'
+      return 'Done — your drone is running the new firmware.'
     case 'error': return 'Something went wrong.'
   }
   return ''

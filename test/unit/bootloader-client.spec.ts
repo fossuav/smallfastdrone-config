@@ -226,8 +226,9 @@ describe('bootloaderClient.flash (end-to-end)', () => {
     ])
     const client = new BootloaderClient(raw)
     const phases: string[] = []
-    await client.flash(image, 50, p => phases.push(p))
+    const result = await client.flash(image, 50, p => phases.push(p))
     expect(phases).toEqual(['syncing', 'verifying', 'erasing', 'programming', 'verifying', 'restarting'])
+    expect(result.skipped).toBe(false)
   })
 
   it('skips erase + program when the flashed firmware already matches the image', async () => {
@@ -247,8 +248,9 @@ describe('bootloaderClient.flash (end-to-end)', () => {
     ])
     const client = new BootloaderClient(raw)
     const phases: string[] = []
-    await client.flash(image, 50, p => phases.push(p))
+    const result = await client.flash(image, 50, p => phases.push(p))
     expect(phases).toEqual(['syncing', 'verifying', 'restarting'])
+    expect(result.skipped).toBe(true)
     // Only the REBOOT command should have been written after the prereqs.
     // (We don't pin the exact byte sequence here — bootloader.spec already
     // covers the command bytes.)

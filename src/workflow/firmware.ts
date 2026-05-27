@@ -45,6 +45,10 @@ import { parseDfuseLayout, planSectorErase } from '../protocol/dfu'
 import { DfuClient } from '../protocol/dfu-client'
 import { defaultUploader } from '../security/uploader'
 import { useSessionStore } from '../stores/session'
+import {
+  findRememberedBootloaderPort,
+  rememberBootloaderPort,
+} from './bootloader-port-memory'
 
 // Operator-facing phase labels — what's happening right now. Drives the
 // UI's status copy. 'idle' = ready / not running; 'done' = success;
@@ -107,6 +111,11 @@ export function useFirmwareFlash() {
   // callback. Otherwise undefined (the UI hides the bar).
   const progress = ref<number | null>(null)
   const error = ref<string | null>(null)
+  // True after a `done` flash when the bootloader's pre-flash CRC
+  // matched the image — i.e. nothing was actually written, just a
+  // REBOOT. UI uses this to swap the 'done' copy from "running the
+  // new firmware" to "already up to date".
+  const wasSkipped = ref(false)
 
   // Set while the workflow is paused at 'awaiting-bootloader-port'. The
   // UI shows a picker button whose click handler calls
@@ -121,6 +130,7 @@ export function useFirmwareFlash() {
     phase.value = 'idle'
     progress.value = null
     error.value = null
+    wasSkipped.value = false
   }
 
   function assertIdle() {
@@ -189,6 +199,7 @@ export function useFirmwareFlash() {
 
     error.value = null
     progress.value = null
+    wasSkipped.value = false
 
     try {
       // 1. Capture the firmware port so we can reattach to it after
@@ -198,6 +209,7 @@ export function useFirmwareFlash() {
       //    down "Must be handling a user gesture" once the flash is
       //    done.
       const firmwarePort = transport.currentPort()
+      const firmwareInfo = firmwarePort?.getInfo() ?? null
 
       // 2. Tell the FC to reboot into its bootloader (MAVLink command
       //    on the still-open MAVLink session).
@@ -210,17 +222,29 @@ export function useFirmwareFlash() {
       await transport.detachMavlink()
       await sleep(POST_REBOOT_SETTLE_MS)
 
-      // 3. Surface the picker and wait for the operator to confirm
-      //    which port to flash through. Browser-side authorisation
-      //    persists across flashes, so on every flash after the first
-      //    the bootloader port is one click away in the picker dialog
-      //    (no extra permission grant). Cancel rejects the flash with
-      //    a friendly message.
-      phase.value = 'awaiting-bootloader-port'
-      const bootloaderPort = await new Promise<SerialPort>((resolve, reject) => {
-        portResolver = resolve
-        portRejecter = reject
-      })
+      // 4. Try the remembered bootloader port for this firmware board
+      //    first — once the operator has picked it for this VID:PID
+      //    of firmware port, we save the pairing and skip the picker
+      //    on every subsequent flash. If there's no remembered port,
+      //    or the remembered port isn't connected right now, fall
+      //    back to surfacing the picker.
+      let bootloaderPort: SerialPort | null = null
+      if (firmwareInfo) {
+        const ports = await navigator.serial.getPorts()
+        bootloaderPort = findRememberedBootloaderPort(firmwareInfo, ports)
+      }
+      if (!bootloaderPort) {
+        phase.value = 'awaiting-bootloader-port'
+        bootloaderPort = await new Promise<SerialPort>((resolve, reject) => {
+          portResolver = resolve
+          portRejecter = reject
+        })
+        // Operator picked one — remember it so the next flash to this
+        // board doesn't need the picker. (Only remember when we have
+        // a firmware port to key on; the recovery path doesn't.)
+        if (firmwareInfo)
+          rememberBootloaderPort(firmwareInfo, bootloaderPort.getInfo())
+      }
 
       // 5. Open the bootloader port at bootloader baud.
       phase.value = 'syncing'
@@ -231,7 +255,7 @@ export function useFirmwareFlash() {
       const client = new BootloaderClient(raw)
 
       try {
-        // 3. Run the upload through the security uploader seam. The
+        // 6. Run the upload through the security uploader seam. The
         //    seam (currently passthrough) is the chokepoint every
         //    artifact upload goes through; the per-byte work is the
         //    transport callback below.
@@ -239,7 +263,7 @@ export function useFirmwareFlash() {
           { kind: 'firmware', name: apj.summary ?? apj.description, bytes: apj.image },
           {
             runUpload: async (bytes, onProgress) => {
-              await client.flash(
+              const result = await client.flash(
                 bytes,
                 apj.boardId,
                 (p) => { phase.value = p },
@@ -248,6 +272,7 @@ export function useFirmwareFlash() {
                   onProgress?.(fraction)
                 },
               )
+              wasSkipped.value = result.skipped
             },
           },
         )
@@ -258,7 +283,7 @@ export function useFirmwareFlash() {
         await raw.close()
       }
 
-      // 4. Bootloader has been told to reboot. Wait for the firmware
+      // 7. Bootloader has been told to reboot. Wait for the firmware
       //    port to come back online, then reattach silently — no
       //    `requestPort()` gesture trap, no manual reconnect step.
       //    If the firmware port can't be found within the timeout the
@@ -302,6 +327,7 @@ export function useFirmwareFlash() {
 
     error.value = null
     progress.value = null
+    wasSkipped.value = false
 
     try {
       // Detach any live MAVLink session — though typically there isn't
@@ -309,6 +335,7 @@ export function useFirmwareFlash() {
       // currentPort() snapshot lets us auto-reconnect to the firmware
       // port after the flash, just like the normal path.
       const firmwarePort = transport.currentPort()
+      const firmwareInfo = firmwarePort?.getInfo() ?? null
       if (firmwarePort)
         await transport.detachMavlink()
 
@@ -324,7 +351,7 @@ export function useFirmwareFlash() {
           { kind: 'firmware', name: apj.summary ?? apj.description, bytes: apj.image },
           {
             runUpload: async (bytes, onProgress) => {
-              await client.flash(
+              const result = await client.flash(
                 bytes,
                 apj.boardId,
                 (p) => { phase.value = p },
@@ -333,6 +360,7 @@ export function useFirmwareFlash() {
                   onProgress?.(fraction)
                 },
               )
+              wasSkipped.value = result.skipped
             },
           },
         )
@@ -340,6 +368,14 @@ export function useFirmwareFlash() {
       finally {
         await raw.close()
       }
+
+      // Remember the bootloader port pairing if we have a firmware
+      // port to key on — so on a future normal-path flash for this
+      // board we can auto-pick. (No firmware port = the operator was
+      // on the recovery path with nothing previously connected; we
+      // can't pair without a key.)
+      if (firmwareInfo)
+        rememberBootloaderPort(firmwareInfo, bootloaderPort.getInfo())
 
       // Best-effort auto-reconnect — same as the normal path, but the
       // "original firmware port" is whatever we captured before
@@ -474,6 +510,7 @@ export function useFirmwareFlash() {
     phase,
     progress,
     error,
+    wasSkipped,
     flash,
     flashViaBootloaderPort,
     flashDfu,

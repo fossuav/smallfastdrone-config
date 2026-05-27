@@ -194,13 +194,15 @@ export class BootloaderClient {
 
   // Convenience: do an end-to-end flash. Returns when the bootloader
   // has been told to reboot; the caller (orchestrator) is responsible
-  // for re-establishing the MAVLink session afterwards.
+  // for re-establishing the MAVLink session afterwards. The `skipped`
+  // flag tells the caller whether the firmware was already what we'd
+  // have written (CRC match → straight to REBOOT, no chip cycle).
   async flash(
     image: Uint8Array,
     expectedBoardId: number,
     onPhase: (phase: 'syncing' | 'erasing' | 'programming' | 'verifying' | 'restarting') => void,
     onProgress?: (fraction: number) => void,
-  ): Promise<void> {
+  ): Promise<{ skipped: boolean }> {
     onPhase('syncing')
     await this.sync()
     // BL_REV must be queried before CHIP_ERASE / PROG_MULTI / GET_CRC
@@ -236,7 +238,7 @@ export class BootloaderClient {
     if (currentCrc === expectedCrc) {
       onPhase('restarting')
       await this.reboot()
-      return
+      return { skipped: true }
     }
 
     onPhase('erasing')
@@ -250,6 +252,7 @@ export class BootloaderClient {
 
     onPhase('restarting')
     await this.reboot()
+    return { skipped: false }
   }
 }
 
