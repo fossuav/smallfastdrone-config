@@ -32,6 +32,7 @@ import {
   buildGetSync,
   buildProgMulti,
   buildReboot,
+  INFO_BL_REV,
   INFO_BOARD_ID,
   INFO_FLASH_SIZE,
   INSYNC,
@@ -98,6 +99,15 @@ export class BootloaderClient {
     if (value === null)
       throw new Error(`Bootloader info reply was invalid (got ${formatBytes(reply)})`)
     return value
+  }
+
+  // Get the bootloader's protocol revision. Returning a value also
+  // marks bit 0 of `done_get_device_flags` in the bootloader — required
+  // (along with bits 1 and 3 from BOARD_ID + FLASH_SIZE) before the
+  // bootloader will accept CHIP_ERASE / PROG_MULTI / GET_CRC. Without
+  // this prerequisite call those commands reply INVALID.
+  async getBootloaderRev(): Promise<number> {
+    return this.getInfo(INFO_BL_REV)
   }
 
   // Get the bootloader's board id — what the .apj's `board_id` is
@@ -183,6 +193,13 @@ export class BootloaderClient {
   ): Promise<void> {
     onPhase('syncing')
     await this.sync()
+    // BL_REV must be queried before CHIP_ERASE / PROG_MULTI / GET_CRC
+    // are allowed — the bootloader tracks "tool has identified itself
+    // by asking the basics" via `done_get_device_flags` and refuses
+    // those commands until bits 0 (BL_REV), 1 (BOARD_ID), and 3
+    // (FLASH_SIZE) are set. We don't use the value yet, but the call
+    // itself is the prerequisite.
+    await this.getBootloaderRev()
     const boardId = await this.getBoardId()
     if (boardId !== expectedBoardId) {
       throw new Error(

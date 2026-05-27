@@ -203,7 +203,7 @@ describe('bootloaderClient.reboot', () => {
 })
 
 describe('bootloaderClient.flash (end-to-end)', () => {
-  it('walks sync → board-id → flash-size → erase → program → verify → reboot', async () => {
+  it('walks sync → bl-rev → board-id → flash-size → erase → program → verify → reboot', async () => {
     const image = new Uint8Array(256)
     for (let i = 0; i < image.length; i++) image[i] = i & 0xFF
     const flashSize = 1024
@@ -215,6 +215,7 @@ describe('bootloaderClient.flash (end-to-end)', () => {
 
     const raw = new MockRawSerial([
       ...ACK, //                              sync
+      ...infoReply(5), //                     bootloader rev (required prerequisite for erase)
       ...infoReply(50), //                    board id (matches)
       ...infoReply(flashSize), //             flash size
       ...ACK, //                              chip erase
@@ -232,6 +233,7 @@ describe('bootloaderClient.flash (end-to-end)', () => {
     const image = new Uint8Array([1, 2, 3, 4])
     const raw = new MockRawSerial([
       ...ACK, //                              sync
+      ...infoReply(5), //                     bl rev
       ...infoReply(50), //                    drone reports board 50
     ])
     const client = new BootloaderClient(raw)
@@ -242,6 +244,7 @@ describe('bootloaderClient.flash (end-to-end)', () => {
     const image = new Uint8Array(2048)
     const raw = new MockRawSerial([
       ...ACK,
+      ...infoReply(5), //                     bl rev
       ...infoReply(50),
       ...infoReply(1024), //                  flash is smaller than image
     ])

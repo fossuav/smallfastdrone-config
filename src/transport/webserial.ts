@@ -148,29 +148,6 @@ export class WebSerialTransport implements Transport {
     return () => bucket.delete(listener)
   }
 
-  // The currently-open MAVLink port (or null). Exposed so the firmware
-  // workflow can diff `getPorts()` snapshots against it — ArduPilot's
-  // bootloader enumerates as a *different* USB device (different VID:PID)
-  // than the running firmware on most boards, so the post-reboot port
-  // isn't the same object.
-  currentPort(): SerialPort | null {
-    return this.port
-  }
-
-  // Snapshot which authorised ports are currently *connected* (their
-  // underlying USB device is enumerated right now). Together with
-  // `currentPort()`, lets the workflow distinguish "this port was
-  // already physically plugged in before the reboot" from "this port
-  // just appeared, so it's the bootloader". `SerialPort.connected`
-  // tracks the underlying USB device's presence — false for any
-  // authorised port whose physical device isn't currently attached.
-  async snapshotConnectedPorts(): Promise<SerialPort[]> {
-    if (!('serial' in navigator))
-      return []
-    const ports = await navigator.serial.getPorts()
-    return ports.filter(p => p.connected)
-  }
-
   // Cancel the MAVLink read pump + close the originally-open port,
   // *without* trying to reopen anything. Used by the firmware workflow:
   // after the FC has been told to reboot into its bootloader, we let
