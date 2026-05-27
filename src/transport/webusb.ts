@@ -131,31 +131,47 @@ export async function openDfuDevice(device: USBDevice): Promise<OpenedDfuDevice>
     const interfaceNumber = dfuIface.interfaceNumber
     await device.claimInterface(interfaceNumber)
 
-    // Pull the alt-setting strings up-front — they encode the memory
-    // layout in DfuSe format. Some boards index strings starting from
-    // 1, some from 4; we just gather whatever each alt-setting declares.
+    // Read wTransferSize + the per-alt-setting `iInterface` string
+    // indices in one config-descriptor walk. We need the string indices
+    // because on Chrome/Windows `alt.interfaceName` is reliably null
+    // until someone issues a GET_DESCRIPTOR(string, iInterface) — and
+    // those strings are where the DfuSe layout lives. Without them the
+    // workflow throws "no memory layouts were exposed by the device".
+    const configDetails = await readDfuConfigDetails(device).catch(() =>
+      ({ transferSize: 2048, altInterfaceStringIndices: new Map<number, number>() }),
+    )
+    const { transferSize, altInterfaceStringIndices } = configDetails
+
+    const control = new WebUsbControl(device, interfaceNumber)
+
+    // Pull the alt-setting strings — they encode the memory layout in
+    // DfuSe format ("@Internal Flash /0x08000000/16*128Kg"). Prefer
+    // whatever WebUSB already resolved into `alt.interfaceName`; fall
+    // back to an explicit GET_DESCRIPTOR(string, iInterface) for
+    // platforms (Windows) where the browser doesn't pre-fetch them.
     const altSettingDescriptors: string[] = []
     for (const alt of dfuIface.alternates) {
-      const idx = alt.interfaceName ? null : alt.alternateSetting
-      // WebUSB exposes the resolved string as `interfaceName` once the
-      // descriptor's been read — we prefer that to a raw GET_DESCRIPTOR
-      // because the browser handles the langid dance for us.
       if (alt.interfaceName) {
         altSettingDescriptors.push(alt.interfaceName)
+        continue
       }
-      else if (idx !== null) {
-        // Fall back: empty string (DFU client treats as "no layout").
+      const stringIdx = altInterfaceStringIndices.get(alt.alternateSetting)
+      if (stringIdx && stringIdx > 0) {
+        try {
+          altSettingDescriptors.push(await control.readStringDescriptor(stringIdx))
+        }
+        catch {
+          // String descriptor read failed — push empty so the workflow's
+          // "no layouts" error names the right alt-setting count even
+          // if it can't name what they were.
+          altSettingDescriptors.push('')
+        }
+      }
+      else {
         altSettingDescriptors.push('')
       }
     }
 
-    // DFU functional descriptor — we want wTransferSize. Read the
-    // configuration descriptor and walk it. The browser caches the
-    // descriptor parse, but doesn't expose the parsed result; do the
-    // walk by hand.
-    const transferSize = await readDfuTransferSize(device).catch(() => 2048)
-
-    const control = new WebUsbControl(device, interfaceNumber)
     return { control, transferSize, altSettingDescriptors, interfaceNumber }
   }
   catch (e) {
@@ -171,10 +187,20 @@ export async function openDfuDevice(device: USBDevice): Promise<OpenedDfuDevice>
   }
 }
 
-// Walk the configuration descriptor for a class-specific DFU
-// functional descriptor (0x21) and pull wTransferSize. Returns 2048
-// (the STM32 default) if the descriptor isn't present.
-async function readDfuTransferSize(device: USBDevice): Promise<number> {
+// Standard USB descriptor type for interface descriptors.
+const USB_INTERFACE_DESCRIPTOR_TYPE = 0x04
+
+// Walk the configuration descriptor and pull:
+//   - wTransferSize from the DFU functional descriptor (0x21)
+//   - iInterface (string descriptor index) for each DFU alt-setting,
+//     keyed by `bAlternateSetting`. Used as a fallback when WebUSB
+//     hasn't pre-resolved `alt.interfaceName`.
+// Falls back to (2048, empty map) on read failure.
+async function readDfuConfigDetails(device: USBDevice): Promise<{
+  transferSize: number
+  altInterfaceStringIndices: Map<number, number>
+}> {
+  const altInterfaceStringIndices = new Map<number, number>()
   // GET_DESCRIPTOR (configuration). First read 9 bytes to learn the
   // total length; then read the full descriptor blob.
   const setup: ControlSetup = {
@@ -187,23 +213,36 @@ async function readDfuTransferSize(device: USBDevice): Promise<number> {
   }
   const result = await webusbControlIn(device, setup, 9)
   if (result.length < 9)
-    return 2048
+    return { transferSize: 2048, altInterfaceStringIndices }
   const wTotalLength = result[2]! | (result[3]! << 8)
   const full = await webusbControlIn(device, setup, wTotalLength)
-  // Walk descriptors looking for the DFU functional descriptor.
+
+  let transferSize = 2048
   let i = 0
   while (i < full.length) {
     const bLength = full[i]!
     const bType = full[i + 1]!
     if (bLength === 0)
       break
+    if (bType === USB_INTERFACE_DESCRIPTOR_TYPE && bLength >= 9) {
+      // Standard interface descriptor:
+      //   [2] bInterfaceNumber  [3] bAlternateSetting  [5] bInterfaceClass
+      //   [6] bInterfaceSubclass  [8] iInterface
+      const bAlternateSetting = full[i + 3]!
+      const bInterfaceClass = full[i + 5]!
+      const bInterfaceSubclass = full[i + 6]!
+      const iInterface = full[i + 8]!
+      if (bInterfaceClass === 0xFE && bInterfaceSubclass === 0x01) {
+        altInterfaceStringIndices.set(bAlternateSetting, iInterface)
+      }
+    }
     if (bType === DFU_FUNC_DESCRIPTOR_TYPE && bLength >= 9) {
       // wTransferSize is at bytes 5..6 of the DFU functional descriptor.
-      return full[i + 5]! | (full[i + 6]! << 8)
+      transferSize = full[i + 5]! | (full[i + 6]! << 8)
     }
     i += bLength
   }
-  return 2048
+  return { transferSize, altInterfaceStringIndices }
 }
 
 // Production USBControl backed by WebUSB. Sits below `dfu-client.ts`.
