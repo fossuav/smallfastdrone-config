@@ -333,6 +333,94 @@ const phaseLabel = computed(() => {
 })
 
 const webUsbSupported = computed(() => 'usb' in navigator)
+
+// ---- Online firmware URL builder ------------------------------------
+// firmware.ardupilot.org doesn't expose CORS, so we can't fetch the
+// firmware bytes from the browser directly. Instead build a download
+// URL and open it in a new tab — the browser handles the download to
+// the operator's filesystem, then the operator picks the file with
+// the existing picker below. One extra click, no third-party proxy,
+// no security-seam compromise.
+
+type ApVehicle = 'Copter' | 'Plane' | 'Rover' | 'Sub' | 'Tracker' | 'Blimp'
+type ApChannel = 'stable' | 'beta' | 'latest'
+
+const AP_BINARY_NAME: Record<ApVehicle, string> = {
+  Copter: 'arducopter',
+  Plane: 'arduplane',
+  Rover: 'ardurover',
+  Sub: 'ardusub',
+  Tracker: 'antennatracker',
+  Blimp: 'blimp',
+}
+
+// Default vehicle pre-selected from the connected drone when we can
+// (operator usually wants firmware for whatever vehicle they're flying);
+// falls back to Copter.
+function vehicleFromSessionLabel(label: string | null | undefined): ApVehicle {
+  if (!label)
+    return 'Copter'
+  const l = label.toLowerCase()
+  if (l.includes('plane') || l.includes('fixed wing'))
+    return 'Plane'
+  if (l.includes('rover') || l.includes('ground'))
+    return 'Rover'
+  if (l.includes('sub'))
+    return 'Sub'
+  if (l.includes('tracker') || l.includes('antenna'))
+    return 'Tracker'
+  if (l.includes('blimp'))
+    return 'Blimp'
+  return 'Copter'
+}
+
+const onlineVehicle = ref<ApVehicle>(vehicleFromSessionLabel(session.vehicleLabel))
+const onlineChannel = ref<ApChannel>('stable')
+const onlineBoard = ref<string>('')
+
+// Re-pick the default vehicle whenever the connection lands on a new
+// type — operator who plugs in Plane mid-session shouldn't have
+// "Copter" lingering as the default.
+watch(() => session.vehicleLabel, (next) => {
+  onlineVehicle.value = vehicleFromSessionLabel(next)
+})
+
+const onlineBaseUrl = computed(() => {
+  if (!onlineBoard.value)
+    return ''
+  return `https://firmware.ardupilot.org/${onlineVehicle.value}/${onlineChannel.value}/${encodeURIComponent(onlineBoard.value.trim())}`
+})
+const onlineApjUrl = computed(() => onlineBaseUrl.value ? `${onlineBaseUrl.value}/${AP_BINARY_NAME[onlineVehicle.value]}.apj` : '')
+const onlineHexUrl = computed(() => onlineBaseUrl.value ? `${onlineBaseUrl.value}/${AP_BINARY_NAME[onlineVehicle.value]}_with_bl.hex` : '')
+
+function openOnlineUrl(url: string) {
+  if (!url)
+    return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+const onlineCopyState = ref<'idle' | 'copied'>('idle')
+async function copyOnlineUrl(url: string) {
+  if (!url)
+    return
+  try {
+    await navigator.clipboard.writeText(url)
+    onlineCopyState.value = 'copied'
+    setTimeout(() => {
+      onlineCopyState.value = 'idle'
+    }, 1200)
+  }
+  catch {
+    /* clipboard blocked — operator can right-click the link instead */
+  }
+}
+
+const vehicleItems = (Object.keys(AP_BINARY_NAME) as ApVehicle[]).map(v => ({ label: v, value: v }))
+const channelItems = [
+  { label: 'Stable', value: 'stable' as const },
+  { label: 'Beta', value: 'beta' as const },
+  { label: 'Latest dev', value: 'latest' as const },
+]
 </script>
 
 <template>
@@ -348,6 +436,75 @@ const webUsbSupported = computed(() => 'usb' in navigator)
         </p>
       </div>
     </header>
+
+    <!-- Online firmware URL builder. firmware.ardupilot.org doesn't
+         expose CORS so we can't fetch directly — generate a download
+         URL, operator opens it in a new tab + the browser saves the
+         file, then they pick it with the file picker in the tab
+         below. One extra click; no proxy in the firmware path. -->
+    <UCard>
+      <div class="flex items-start gap-3">
+        <UIcon name="i-lucide-download-cloud" class="text-primary mt-1 size-5 shrink-0" />
+        <div class="flex-1">
+          <h2 class="text-highlighted font-semibold">
+            Grab a build from ArduPilot
+          </h2>
+          <p class="text-muted mt-1 text-sm">
+            Build a link to firmware.ardupilot.org, open it, then drop the downloaded file into the picker below.
+          </p>
+        </div>
+      </div>
+      <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div>
+          <label class="text-muted text-xs font-medium">Vehicle</label>
+          <USelect v-model="onlineVehicle" :items="vehicleItems" class="mt-1 w-full" />
+        </div>
+        <div>
+          <label class="text-muted text-xs font-medium">Version</label>
+          <USelect v-model="onlineChannel" :items="channelItems" class="mt-1 w-full" />
+        </div>
+        <div>
+          <label class="text-muted text-xs font-medium">Board</label>
+          <UInput v-model="onlineBoard" placeholder="e.g. CubeOrange" class="mt-1 w-full" />
+        </div>
+      </div>
+      <div v-if="onlineApjUrl" class="bg-muted/30 mt-3 break-all rounded-md px-2 py-1.5 font-mono text-xs">
+        {{ onlineApjUrl }}
+      </div>
+      <div class="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <UButton
+          :disabled="!onlineApjUrl"
+          variant="ghost"
+          size="sm"
+          icon="i-lucide-copy"
+          @click="copyOnlineUrl(onlineApjUrl)"
+        >
+          {{ onlineCopyState === 'copied' ? 'Copied' : 'Copy URL' }}
+        </UButton>
+        <UButton
+          :disabled="!onlineHexUrl"
+          color="neutral"
+          variant="soft"
+          size="sm"
+          icon="i-lucide-external-link"
+          @click="openOnlineUrl(onlineHexUrl)"
+        >
+          Download <code class="ml-1">_with_bl.hex</code>
+        </UButton>
+        <UButton
+          :disabled="!onlineApjUrl"
+          color="primary"
+          size="sm"
+          icon="i-lucide-external-link"
+          @click="openOnlineUrl(onlineApjUrl)"
+        >
+          Download <code class="ml-1">.apj</code>
+        </UButton>
+      </div>
+      <p class="text-muted mt-2 text-xs">
+        <code>.apj</code> = firmware only (use "Install over USB"). <code>_with_bl.hex</code> = firmware + bootloader (use "Recovery (DFU mode)").
+      </p>
+    </UCard>
 
     <!-- Path selector. The default ("over USB") covers 99% of the
          time; "DFU mode" is recovery / fresh-chip. -->
