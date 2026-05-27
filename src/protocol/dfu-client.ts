@@ -59,16 +59,17 @@ export const DEFAULT_TRANSFER_SIZE = 2048
 // actual wait.
 const MAX_STATUS_POLLS = 600
 
-// Ceiling on how long we sleep between GETSTATUS polls, regardless of
-// what `bwPollTimeout` the device requests. Some ST DFU devices return
-// bwPollTimeout values in the tens of seconds for an operation that
-// actually completes in well under a second — making the upload look
-// stalled because the host is honouring a generous device hint. We
-// still wait *at least* the device's reported time on each request,
-// just not more than this cap. Same approach dfu-util's `-t` option
-// uses; 500 ms is a comfortable middle ground (responsive bar + still
-// gentle on the USB stack).
-const MAX_POLL_INTERVAL_MS = 500
+// Ceiling on how long we sleep between GETSTATUS polls. Mostly a guard
+// against a 24-bit `bwPollTimeout` of hours that some buggy devices
+// might return. Otherwise we honour the device's request — polling
+// more aggressively than `bwPollTimeout` is a spec violation and has
+// been observed to wedge ST H7 ROM DFU bootloaders (the device asks
+// us to wait ~4-5 s during sector erase; capping at 500 ms made us
+// poll 10× too fast, which the bootloader treats as a state-machine
+// error). The smooth in-sector animation in `flash()` keeps the bar
+// moving independently, so a longer real-poll interval doesn't hurt
+// UX.
+const MAX_POLL_INTERVAL_MS = 10_000
 
 // Per-sector erase estimate for the progress-bar animation while we're
 // waiting on the device. H7 typical is ~1.3 s, max ~4 s. The bar
@@ -88,7 +89,7 @@ const SECTOR_ERASE_ESTIMATE_MS = 2_000
 //   - OPERATION_TIMEOUT_MS: total budget for one set-address / erase /
 //     program — H7 sector erase max is ~4 s, so 30 s is a 7× cushion.
 const GETSTATUS_TIMEOUT_MS = 5_000
-const OPERATION_TIMEOUT_MS = 30_000
+const OPERATION_TIMEOUT_MS = 60_000
 
 // DFU control transfer setup boilerplate — bmRequestType is always
 // class | interface, the request varies. Index is the bInterface (0
@@ -184,9 +185,26 @@ export class DfuClient {
 
   // Erase a single page at the given address. Block size = sector size
   // for that region; the caller (workflow) walks segments + sector list.
+  //
+  // Returns to `dfuIDLE` after each erase via ABORT. Some STM32 ROM DFU
+  // bootloaders — particularly on dual-bank H7 across the bank boundary
+  // at 0x08100000 — wedge if the host issues a second DfuSe command
+  // (ERASE_PAGE / SET_ADDRESS) directly from `dfuDNLOAD_IDLE` (where
+  // we land after the previous erase) instead of `dfuIDLE`. The ABORT
+  // is a cheap round trip that ensures every erase starts from a known
+  // state, and is what dfu-util does between regions for the same
+  // reason.
   async erasePage(address: number): Promise<void> {
     await this.dnloadCommand(buildErasePagePayload(address))
     await this.pollUntilIdle('erase')
+    try {
+      await this.abort()
+    }
+    catch {
+      // Abort failure is non-fatal — the next op will surface any
+      // genuine state issue. Swallow so a flaky bus during the abort
+      // doesn't tank an otherwise-successful erase.
+    }
   }
 
   // Push one chunk of data at the address sequence implied by the last
