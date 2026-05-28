@@ -28,6 +28,8 @@ import { ref, shallowRef } from 'vue'
 import { MavFtp } from '../protocol/ftp'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
+import { useReconnect } from './reconnect'
+import { buildEdit, presetById } from './serial-protocol-presets'
 import { protocolLabel } from './serial-protocols'
 import { classifyActivity, classifyFinding } from './uart-activity'
 import { parseUartsTxt } from './uart-info'
@@ -57,6 +59,13 @@ const PROGRESS_TICK_MS = 100
 // Sampling state. 'idle' = no findings yet; 'sampling' = window open,
 // progress.value is the 0..1 fraction; 'done' = findings populated.
 export type DetectPhase = 'idle' | 'sampling' | 'done'
+
+// Apply-pipeline phase when the operator commits staged protocol
+// edits. 'writing' = PARAM_SETs in flight; 'restarting' = waiting for
+// the FC to reboot; 'reconnecting' = waiting for a fresh heartbeat;
+// 'idle' = nothing in flight. 'reading' covers the post-apply
+// re-detect that confirms the new config is live.
+export type ApplyPhase = 'idle' | 'writing' | 'restarting' | 'reconnecting' | 'reading'
 
 // One row of the Connections panel — a UART from uarts.txt plus its
 // current protocol/baud from the params store. `active` is the cheap
@@ -103,10 +112,12 @@ export function buildConnectionRows(
 
 // Composable for the Connections panel. refresh() is the one-shot
 // fetch the panel mounts on; detect() runs the sampling window for the
-// "Check what's plugged in" flow.
+// "Check what's plugged in" flow; stageProtocol/apply edit the SERIAL
+// params per row and walk the reboot/reconnect/re-detect choreography.
 export function useConnections() {
   const session = useSessionStore()
   const params = useParamsStore()
+  const { autoReconnect } = useReconnect()
 
   // Loading state for the fetch button; rows reactive so the table
   // re-renders after refresh().
@@ -119,6 +130,14 @@ export function useConnections() {
   const detectPhase = ref<DetectPhase>('idle')
   const progress = ref(0)
   const findings = shallowRef<Map<string, Finding>>(new Map())
+
+  // Per-row pending edits. Keyed by uart.logical (SERIAL3 etc.) so the
+  // staging survives a refresh() that rebuilds the rows array. Value
+  // is a preset id from serial-protocol-presets.ts; the actual param
+  // names + values get resolved at apply() time.
+  const pendingEdits = shallowRef<Map<string, string>>(new Map())
+  const applyPhase = ref<ApplyPhase>('idle')
+  const applyError = shallowRef<string | null>(null)
 
   // Build the per-SERIAL param lookup maps from whatever's in the
   // params store right now. Cheap to do per call; the store's already
@@ -236,6 +255,108 @@ export function useConnections() {
     }
   }
 
+  // Stage / un-stage a protocol change for one row. Picking the
+  // preset that already matches the row's current protocol clears the
+  // edit (operator un-did their change) rather than staging a no-op.
+  function stageProtocol(rowKey: string, presetId: string | null) {
+    const next = new Map(pendingEdits.value)
+    if (presetId === null) {
+      next.delete(rowKey)
+      pendingEdits.value = next
+      return
+    }
+    // Don't stage if it matches the current value — that's an un-edit.
+    const row = rows.value.find(r => r.uart.logical === rowKey)
+    const preset = presetById(presetId)
+    if (row && preset && row.protocol === preset.protocol) {
+      next.delete(rowKey)
+      pendingEdits.value = next
+      return
+    }
+    next.set(rowKey, presetId)
+    pendingEdits.value = next
+  }
+
+  // Clear all staged edits without writing anything.
+  function discardEdits() {
+    pendingEdits.value = new Map()
+  }
+
+  // Walk the apply pipeline: PARAM_SET each staged edit via the params
+  // store, reboot the FC, wait for the heartbeat to come back, reload
+  // params, re-run detect so the operator sees the result of their
+  // change. Same write-then-reboot-then-reconnect rhythm as
+  // SettingsView (scripting toggle) and motor-check's auto-correction.
+  async function apply() {
+    if (applyPhase.value !== 'idle' || pendingEdits.value.size === 0)
+      return
+    if (!session.connected || session.sysid === null) {
+      applyError.value = 'Connect to your drone first.'
+      return
+    }
+    applyError.value = null
+
+    // Resolve every staged preset into the SERIAL{n}_PROTOCOL +
+    // SERIAL{n}_BAUD param writes. Stage all of them through the
+    // params store, then a single apply() does the PARAM_SET burst.
+    const rowMap = new Map(rows.value.map(r => [r.uart.logical, r]))
+    let staged = 0
+    for (const [rowKey, presetId] of pendingEdits.value) {
+      const row = rowMap.get(rowKey)
+      const preset = presetById(presetId)
+      if (!row || !preset)
+        continue
+      const edit = buildEdit(row, preset)
+      if (!edit)
+        continue
+      params.setEdit(edit.protocolParam, edit.protocolValue)
+      params.setEdit(edit.baudParam, edit.baudValue)
+      staged += 2
+    }
+    if (staged === 0) {
+      applyError.value = 'Nothing to write.'
+      return
+    }
+
+    applyPhase.value = 'writing'
+    try {
+      await params.apply()
+
+      // Reboot + reconnect. SERIALn_PROTOCOL is read once at boot —
+      // changing it live doesn't switch the protocol — so the FC must
+      // restart for the new mapping to take effect.
+      applyPhase.value = 'restarting'
+      await session.reboot()
+
+      applyPhase.value = 'reconnecting'
+      const back = await autoReconnect()
+      if (!back) {
+        applyError.value = 'Your drone didn\'t come back from its restart. Try unplugging and reconnecting.'
+        applyPhase.value = 'idle'
+        return
+      }
+
+      applyPhase.value = 'reading'
+      await params.load()
+
+      // Clear the staged edits — the writes either landed (in which
+      // case the new values are now in params) or were rejected by
+      // the FC (in which case the params store carries the
+      // mismatched state and the operator can re-edit).
+      pendingEdits.value = new Map()
+
+      // Re-run detect so the operator immediately sees whether the
+      // new protocol assignment is actually carrying traffic.
+      await detect()
+
+      applyPhase.value = 'idle'
+    }
+    catch (e) {
+      applyError.value = e instanceof Error ? e.message : String(e)
+      applyPhase.value = 'idle'
+    }
+  }
+
   return {
     rows,
     loading,
@@ -245,5 +366,11 @@ export function useConnections() {
     detectPhase,
     progress,
     findings,
+    pendingEdits,
+    stageProtocol,
+    discardEdits,
+    apply,
+    applyPhase,
+    applyError,
   }
 }

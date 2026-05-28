@@ -258,8 +258,14 @@ onMounted(() => {
           :findings="connections.findings.value"
           :detect-phase="connections.detectPhase.value"
           :progress="connections.progress.value"
+          :pending-edits="connections.pendingEdits.value"
+          :apply-phase="connections.applyPhase.value"
+          :apply-error="connections.applyError.value"
           @refresh="connections.refresh"
           @detect="connections.detect"
+          @stage="connections.stageProtocol"
+          @discard="connections.discardEdits"
+          @apply="connections.apply"
         />
 
         <!-- Other areas: read-only current-config fields. -->

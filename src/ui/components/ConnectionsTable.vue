@@ -18,12 +18,17 @@
 // its hardware identity, currently-assigned protocol, baud rate, and a
 // status column that reads either the live byte-flow indicator (slice
 // 1) or a per-port Finding (slice 2 once "Check what's plugged in" has
-// run). Presentational; rows + findings + sampling state come from
+// run). Slice 3 turns the Protocol cell into an inline picker on
+// editable rows (SERIAL1..N — SERIAL0 USB and IOMCU stay read-only)
+// and surfaces a Discard / Apply bar when there are staged edits.
+// Presentational; rows + findings + pending edits all come from
 // useConnections(). Shared between the bringup ribbon's "Connections"
 // tab and the standalone wizard view so they can't diverge.
 
-import type { ConnectionRow, DetectPhase } from '../../workflow/connections'
+import type { ApplyPhase, ConnectionRow, DetectPhase } from '../../workflow/connections'
 import type { Finding, FindingStatus } from '../../workflow/uart-activity'
+import { computed } from 'vue'
+import { isEditable, presetById, presetForRow, SERIAL_PRESETS } from '../../workflow/serial-protocol-presets'
 
 const props = defineProps<{
   rows: readonly ConnectionRow[]
@@ -36,9 +41,21 @@ const props = defineProps<{
   findings?: Map<string, Finding>
   detectPhase?: DetectPhase
   progress?: number
+  // Slice 3 — pending protocol edits keyed by row.uart.logical
+  // (e.g. 'SERIAL3' → 'gps'). The editable Protocol cell binds its
+  // v-model through stageProtocol().
+  pendingEdits?: Map<string, string>
+  applyPhase?: ApplyPhase
+  applyError?: string | null
 }>()
 
-defineEmits<{ refresh: [], detect: [] }>()
+const emit = defineEmits<{
+  refresh: []
+  detect: []
+  stage: [rowKey: string, presetId: string | null]
+  discard: []
+  apply: []
+}>()
 
 // Render the hardware column. ChibiOS exposes the chip-level label
 // (USART2, UART4, OTG1); SITL omits it and instead carries the SITL
@@ -90,6 +107,52 @@ function findingFor(row: ConnectionRow): Finding | null {
 function styleFor(status: FindingStatus): { color: string, icon: string } {
   return STATUS_STYLE[status]
 }
+
+// USelect items for the Protocol picker. Stable across renders so
+// dropdown state doesn't reset between row updates.
+const PRESET_ITEMS = SERIAL_PRESETS.map(p => ({ label: p.label, value: p.id }))
+
+// What value the row's Protocol picker should bind to. Order of
+// precedence: any staged edit, otherwise the preset that matches the
+// row's current protocol, otherwise nothing (a row whose protocol
+// isn't in our shortlist renders the raw label as a placeholder).
+function selectedValue(row: ConnectionRow): string | undefined {
+  const staged = props.pendingEdits?.get(row.uart.logical)
+  if (staged !== undefined)
+    return staged
+  const preset = presetForRow(row)
+  return preset?.id
+}
+
+// "Other" placeholder for protocols not in our shortlist. The picker
+// itself doesn't carry an "Other" option — operators can only choose
+// from the curated list — but the cell needs *something* to display
+// when the current protocol is e.g. Lua scripting (28). Showing the
+// raw label keeps the operator oriented.
+function otherLabel(row: ConnectionRow): string {
+  return `${row.protocolLabel} (other)`
+}
+
+function onSelectionChange(row: ConnectionRow, value: string | undefined) {
+  // USelect with no v-model match emits undefined; that's an un-stage.
+  emit('stage', row.uart.logical, value ?? null)
+}
+
+function isPending(row: ConnectionRow): boolean {
+  return props.pendingEdits?.has(row.uart.logical) ?? false
+}
+
+// Operator-friendly status line during the apply pipeline.
+const APPLY_STATUS_TEXT: Record<ApplyPhase, string> = {
+  idle: '',
+  writing: 'Saving your changes to your drone…',
+  restarting: 'Restarting your drone…',
+  reconnecting: 'Waiting for your drone to come back…',
+  reading: 'Checking the new settings…',
+}
+
+const isApplying = computed(() => (props.applyPhase ?? 'idle') !== 'idle')
+const pendingCount = computed(() => props.pendingEdits?.size ?? 0)
 </script>
 
 <template>
@@ -115,7 +178,7 @@ function styleFor(status: FindingStatus): { color: string, icon: string } {
           variant="ghost"
           icon="i-lucide-refresh-cw"
           :loading="loading"
-          :disabled="detectPhase === 'sampling'"
+          :disabled="detectPhase === 'sampling' || isApplying"
           @click="$emit('refresh')"
         >
           Refresh
@@ -125,7 +188,7 @@ function styleFor(status: FindingStatus): { color: string, icon: string } {
           color="primary"
           icon="i-lucide-search"
           :loading="detectPhase === 'sampling'"
-          :disabled="loading"
+          :disabled="loading || isApplying"
           @click="$emit('detect')"
         >
           Check what's plugged in
@@ -141,11 +204,56 @@ function styleFor(status: FindingStatus): { color: string, icon: string } {
       <UProgress :model-value="Math.round((progress ?? 0) * 100)" size="sm" />
     </div>
 
+    <!-- Apply bar: shown whenever there's a pending edit, or during
+         the apply pipeline. Tells the operator what's queued + what's
+         happening, and gives them the Discard / Apply controls. -->
+    <div
+      v-if="pendingCount > 0 || isApplying"
+      class="border-primary/40 bg-primary/10 flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+    >
+      <p class="text-default text-sm">
+        <template v-if="isApplying">
+          {{ APPLY_STATUS_TEXT[applyPhase ?? 'idle'] }}
+        </template>
+        <template v-else>
+          {{ pendingCount }} change{{ pendingCount === 1 ? '' : 's' }} staged.
+          Apply to save them and restart your drone.
+        </template>
+      </p>
+      <div class="flex shrink-0 items-center gap-2">
+        <UButton
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          :disabled="isApplying"
+          @click="$emit('discard')"
+        >
+          Discard
+        </UButton>
+        <UButton
+          size="xs"
+          color="primary"
+          icon="i-lucide-check"
+          :loading="isApplying"
+          :disabled="pendingCount === 0"
+          @click="$emit('apply')"
+        >
+          Apply
+        </UButton>
+      </div>
+    </div>
+
     <div
       v-if="error"
       class="border-error bg-error/10 text-error rounded-md border px-3 py-2 text-sm"
     >
       {{ error }}
+    </div>
+    <div
+      v-if="applyError"
+      class="border-error bg-error/10 text-error rounded-md border px-3 py-2 text-sm"
+    >
+      {{ applyError }}
     </div>
 
     <div
@@ -183,7 +291,10 @@ function styleFor(status: FindingStatus): { color: string, icon: string } {
           <tr
             v-for="row in rows"
             :key="row.uart.logical"
-            class="border-default border-t align-top"
+            class="border-default border-t border-l-4 align-top"
+            :class="isPending(row)
+              ? 'border-l-primary bg-primary/5'
+              : 'border-l-transparent'"
           >
             <td class="text-highlighted px-3 py-2 font-mono text-xs whitespace-nowrap">
               {{ row.uart.logical }}
@@ -192,15 +303,37 @@ function styleFor(status: FindingStatus): { color: string, icon: string } {
               {{ hardwareLabel(row) }}
             </td>
             <td class="px-3 py-2">
-              <span
-                v-if="row.protocol === null"
-                class="text-muted"
-              >—</span>
-              <span
-                v-else-if="row.protocol === -1"
-                class="text-muted italic"
-              >Off</span>
-              <span v-else>{{ row.protocolLabel }}</span>
+              <!-- Editable rows get the inline picker; read-only rows
+                   (SERIAL0 USB, IOMCU) show the static label like before. -->
+              <template v-if="isEditable(row) && !isApplying">
+                <USelect
+                  :model-value="selectedValue(row)"
+                  :items="PRESET_ITEMS"
+                  :placeholder="presetForRow(row) ? presetForRow(row)!.label : otherLabel(row)"
+                  size="xs"
+                  class="w-full max-w-[14rem]"
+                  @update:model-value="(v: string | undefined) => onSelectionChange(row, v)"
+                />
+                <p
+                  v-if="isPending(row)"
+                  class="text-primary mt-1 text-xs font-medium"
+                >
+                  {{ row.protocolLabel }}
+                  <UIcon name="i-lucide-arrow-right" class="size-3" />
+                  {{ presetById(pendingEdits!.get(row.uart.logical)!)?.label }}
+                </p>
+              </template>
+              <template v-else>
+                <span
+                  v-if="row.protocol === null"
+                  class="text-muted"
+                >—</span>
+                <span
+                  v-else-if="row.protocol === -1"
+                  class="text-muted italic"
+                >Off</span>
+                <span v-else>{{ row.protocolLabel }}</span>
+              </template>
             </td>
             <td class="text-default px-3 py-2 text-right text-xs whitespace-nowrap">
               {{ baudLabel(row.baud) }}

@@ -240,3 +240,44 @@ test('Connections "Check what\'s plugged in" classifies SITL ports into findings
   // as "Unused" — at least one row must read that.
   await expect(page.getByText('Unused').first()).toBeVisible()
 })
+
+test('Connections: picking GPS on a free port writes the params, reboots, and the row reflects it', async ({ page }) => {
+  // Apply path is write + reboot + reconnect + reload + re-detect — give
+  // the whole thing room (autoReconnect budget alone is 60s).
+  test.setTimeout(180_000)
+
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
+
+  await page.getByRole('link', { name: 'Bringup', exact: true }).click()
+  await page.getByRole('tab', { name: /Set up connections/ }).click()
+  await expect(page.getByRole('heading', { name: 'Set up connections', level: 2 })).toBeVisible({ timeout: 15_000 })
+
+  // SERIAL1 on SITL is an unused tcp slot — picking GPS here doesn't
+  // collide with whatever other specs set, and the row is editable
+  // (SERIAL0 is the GCS link, read-only).
+  const serial1Row = page.getByRole('row', { name: /SERIAL1/ })
+  await expect(serial1Row).toBeVisible({ timeout: 15_000 })
+
+  // USelect renders the picker as a combobox button per row.
+  await serial1Row.getByRole('combobox').click()
+  await page.getByRole('option', { name: 'GPS', exact: true }).click()
+
+  // Staged-edits bar appears with the pending count + Apply / Discard.
+  await expect(page.getByText('1 change staged.')).toBeVisible()
+  // The dirty highlight in the row carries the from → to summary.
+  await expect(serial1Row).toContainText('GPS')
+
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+
+  // Operator-facing status walks writing → restarting → reconnecting →
+  // reading. Any of these may be too fast to catch in a screenshot, but
+  // at least the writing phase appears before the reboot drops the link.
+  await expect(page.getByText(/Saving your changes|Restarting your drone|Waiting for your drone/)).toBeVisible({ timeout: 10_000 })
+
+  // After the apply pipeline settles, SERIAL1 reads GPS in the Protocol
+  // column. The row's picker also shows "GPS" as its selected value.
+  await expect(serial1Row).toContainText('GPS', { timeout: 90_000 })
+  await expect(page.getByText('1 change staged.')).toHaveCount(0)
+})

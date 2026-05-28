@@ -42,7 +42,22 @@ const session = useSessionStore()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
-const { rows, loading, error, refresh, detect, detectPhase, progress, findings } = useConnections()
+const {
+  rows,
+  loading,
+  error,
+  refresh,
+  detect,
+  detectPhase,
+  progress,
+  findings,
+  pendingEdits,
+  stageProtocol,
+  discardEdits,
+  apply,
+  applyPhase,
+  applyError,
+} = useConnections()
 
 const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
 
@@ -71,8 +86,14 @@ function cancel() {
       :findings="findings"
       :detect-phase="detectPhase"
       :progress="progress"
+      :pending-edits="pendingEdits"
+      :apply-phase="applyPhase"
+      :apply-error="applyError"
       @refresh="refresh"
       @detect="detect"
+      @stage="stageProtocol"
+      @discard="discardEdits"
+      @apply="apply"
     />
 
     <p v-if="props.skipOverview" class="text-muted text-sm">
