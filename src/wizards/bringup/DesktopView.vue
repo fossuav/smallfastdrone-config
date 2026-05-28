@@ -255,7 +255,11 @@ onMounted(() => {
           :rows="connections.rows.value"
           :loading="connections.loading.value"
           :error="connections.error.value"
+          :findings="connections.findings.value"
+          :detect-phase="connections.detectPhase.value"
+          :progress="connections.progress.value"
           @refresh="connections.refresh"
+          @detect="connections.detect"
         />
 
         <!-- Other areas: read-only current-config fields. -->

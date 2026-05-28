@@ -14,13 +14,14 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Connections setup wizard — operator-facing view. Slice 1 ships the
-// overview table only: read @SYS/uarts.txt + the SERIALn_PROTOCOL /
-// _BAUD params from the FC, render a Betaflight-Ports-style table.
-// Slice 2 will add a "Check what's plugged in" step that watches byte
-// counters to flag silent UARTs. Slice 3 adds per-row edit. The table
-// itself is the same component the bringup ribbon's Connections tab
-// renders so both surfaces stay identical.
+// Connections setup wizard — operator-facing view. Slice 1 shipped the
+// overview table (read @SYS/uarts.txt + SERIALn_PROTOCOL/_BAUD, render
+// Betaflight-Ports-style). Slice 2 adds the "Check what's plugged in"
+// flow: sample byte counters across a 4 s window, classify each port,
+// render green/yellow/red findings beside the existing rows. Slice 3
+// will add per-row inline editing. The table itself is the same
+// component the bringup ribbon's Connections tab renders so both
+// surfaces stay identical.
 //
 // Bringup-launched wizards honour ?returnTo=. See docs/WIZARDS.md.
 
@@ -41,7 +42,7 @@ const session = useSessionStore()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
-const { rows, loading, error, refresh } = useConnections()
+const { rows, loading, error, refresh, detect, detectPhase, progress, findings } = useConnections()
 
 const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
 
@@ -67,7 +68,11 @@ function cancel() {
       :rows="rows"
       :loading="loading"
       :error="error"
+      :findings="findings"
+      :detect-phase="detectPhase"
+      :progress="progress"
       @refresh="refresh"
+      @detect="detect"
     />
 
     <p v-if="props.skipOverview" class="text-muted text-sm">

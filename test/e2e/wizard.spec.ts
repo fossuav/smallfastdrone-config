@@ -133,10 +133,13 @@ test('Bringup ribbon walks preflight + frame-select + connections + motor-check 
   await page.getByRole('button', { name: 'Back to the wizard library' }).click()
 
   // Connections tab: the ribbon panel renders the live UART table from
-  // @SYS/uarts.txt + SERIALn_PROTOCOL params. Slice 1 only marks the
-  // tab done — slice 2 will add the detect-and-propose step.
+  // @SYS/uarts.txt + SERIALn_PROTOCOL params. We wait for the table
+  // AND the embedded wizard's Done button — the embedded view loads
+  // lazily and clicking before it mounts misses the button entirely.
   await expect(page.getByRole('cell', { name: 'SERIAL0' })).toBeVisible({ timeout: 15_000 })
-  await page.getByRole('button', { name: 'Done', exact: true }).click()
+  const connectionsDone = page.getByRole('button', { name: 'Done', exact: true })
+  await expect(connectionsDone).toBeVisible({ timeout: 15_000 })
+  await connectionsDone.click()
 
   // Motors tab: skipEsc → motor-check opens straight on the safety gate
   // (ESC config lives in the ribbon's panel above). Six-motor hexa walk
@@ -204,4 +207,36 @@ test('Connections tab reads @SYS/uarts.txt + SERIAL params from SITL into the li
   // Refresh re-reads without leaving.
   await page.getByRole('button', { name: 'Refresh' }).click()
   await expect(page.getByRole('row', { name: /SERIAL0/ })).toContainText('Active')
+})
+
+test('Connections "Check what\'s plugged in" classifies SITL ports into findings', async ({ page }) => {
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
+
+  await page.getByRole('link', { name: 'Bringup', exact: true }).click()
+  await page.getByRole('tab', { name: /Set up connections/ }).click()
+  await expect(page.getByRole('heading', { name: 'Set up connections', level: 2 })).toBeVisible({ timeout: 15_000 })
+
+  // Initial table is the static slice-1 view. Wait for the row to land
+  // before asserting against its text — the FTP fetch takes a moment.
+  const serial0InitialRow = page.getByRole('row', { name: /SERIAL0/ })
+  await expect(serial0InitialRow).toBeVisible({ timeout: 15_000 })
+  await expect(serial0InitialRow).toContainText('Active')
+
+  // Kick off the 4 s sampling window. The progress bar shows during
+  // the watch; findings populate when it closes.
+  await page.getByRole('button', { name: 'Check what\'s plugged in' }).click()
+
+  // Findings show with a generous timeout — sampling is ~4 s plus two
+  // FTP round trips. SERIAL0 is special-cased to "Talking to this tool"
+  // (it's the GCS link we're using), SERIAL3 is SITL's GPS port and
+  // streams continuously so it lands as "Working".
+  const serial0 = page.getByRole('row', { name: /SERIAL0/ })
+  await expect(serial0).toContainText('Talking to this tool', { timeout: 15_000 })
+  await expect(page.getByRole('row', { name: /SERIAL3/ })).toContainText('Working')
+
+  // A port with no peripheral and no protocol (SITL's empty slots) lands
+  // as "Unused" — at least one row must read that.
+  await expect(page.getByText('Unused').first()).toBeVisible()
 })
