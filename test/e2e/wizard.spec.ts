@@ -101,7 +101,7 @@ test('Recipes hosts Pro PID tune (the locked-gating seam on the recipes surface)
   await expect(page.getByRole('button', { name: 'Coming soon' })).toBeDisabled()
 })
 
-test('Bringup ribbon walks preflight + frame-select + motor-check and marks itself complete', async ({ page }) => {
+test('Bringup ribbon walks preflight + frame-select + connections + motor-check and marks itself complete', async ({ page }) => {
   // Two reboot-free reconfigs + a hexa motor walk — give it room.
   test.setTimeout(120_000)
 
@@ -131,6 +131,12 @@ test('Bringup ribbon walks preflight + frame-select + motor-check and marks itse
   await page.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByText('Done — your drone knows its motor layout.')).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: 'Back to the wizard library' }).click()
+
+  // Connections tab: the ribbon panel renders the live UART table from
+  // @SYS/uarts.txt + SERIALn_PROTOCOL params. Slice 1 only marks the
+  // tab done — slice 2 will add the detect-and-propose step.
+  await expect(page.getByRole('cell', { name: 'SERIAL0' })).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Done', exact: true }).click()
 
   // Motors tab: skipEsc → motor-check opens straight on the safety gate
   // (ESC config lives in the ribbon's panel above). Six-motor hexa walk
@@ -165,5 +171,37 @@ test('Bringup ribbon walks preflight + frame-select + motor-check and marks itse
   await page.getByRole('link', { name: 'All wizards' }).click()
   const bringupCard = page.getByRole('link', { name: /Open the Full bringup wizard/ })
   await expect(bringupCard.getByText('Done')).toBeVisible({ timeout: 15_000 })
-  await expect(bringupCard.getByText(/All 3 bringup steps complete/)).toBeVisible()
+  await expect(bringupCard.getByText(/All 4 bringup steps complete/)).toBeVisible()
+})
+
+test('Connections tab reads @SYS/uarts.txt + SERIAL params from SITL into the live table', async ({ page }) => {
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
+
+  // Navigate via SPA links so the session survives. The ribbon's tabs
+  // are deep-linkable (?area=...) but a fresh page.goto() reloads + drops
+  // Pinia state, so click the tab in-page instead.
+  await page.getByRole('link', { name: 'Bringup', exact: true }).click()
+  await page.getByRole('tab', { name: /Set up connections/ }).click()
+  await expect(page.getByRole('heading', { name: 'Set up connections', level: 2 })).toBeVisible({ timeout: 15_000 })
+
+  // Table reads from @SYS/uarts.txt — SITL exposes 9 SERIAL slots.
+  // SERIAL0 is the GCS link (USB / OTG on hardware) and is always
+  // active since we're talking on it; assert that signal is present.
+  const serial0 = page.getByRole('row', { name: /SERIAL0/ })
+  await expect(serial0).toBeVisible({ timeout: 15_000 })
+  await expect(serial0).toContainText(/MAVLink2|MAVLink/)
+  await expect(serial0).toContainText('Active')
+
+  // SERIAL3 on SITL is the GPS port — protocol cell reads "GPS".
+  await expect(page.getByRole('row', { name: /SERIAL3/ })).toContainText('GPS')
+
+  // The full SERIAL set the FC reported is in the table.
+  for (const id of ['SERIAL0', 'SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'])
+    await expect(page.getByRole('cell', { name: id, exact: true })).toBeVisible()
+
+  // Refresh re-reads without leaving.
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await expect(page.getByRole('row', { name: /SERIAL0/ })).toContainText('Active')
 })

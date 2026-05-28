@@ -35,9 +35,11 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
+import ConnectionsTable from '../../ui/components/ConnectionsTable.vue'
 import EscQuickControls from '../../ui/components/EscQuickControls.vue'
 import FieldEnabledToggle from '../../ui/components/FieldEnabledToggle.vue'
 import WizardRibbon from '../../ui/components/WizardRibbon.vue'
+import { useConnections } from '../../workflow/connections'
 import { frameGeometry } from '../../workflow/motor-geometry'
 import { getWizard } from '../../workflow/wizard-runtime'
 
@@ -50,7 +52,7 @@ const router = useRouter()
 // Ordered chain of bringup areas. Pre-arm readiness is deliberately NOT
 // surfaced here — that's a phase-05 (pre-first-flight) gate, not an
 // opening-step concern. See docs/BRINGUP.md.
-const AREA_IDS = ['preflight', 'frame-select', 'motor-check'] as const
+const AREA_IDS = ['preflight', 'frame-select', 'connections-setup', 'motor-check'] as const
 
 // Where this DesktopView lives, for routing tabs + returnTo.
 const RIBBON_PATH = '/wizard/bringup'
@@ -118,6 +120,11 @@ const motorDirectionStatus = computed(() =>
   progress.getCompletion(session.fcUid, 'motor-check') ? 'checked — all passing' : 'not checked yet',
 )
 
+// Live port table for the Connections panel. Fetched lazily on first
+// view of the tab; the table component owns its own Refresh button so
+// the operator can re-read without leaving.
+const connections = useConnections()
+
 // Selection comes from the URL so tabs are deep-linkable + back/forward works.
 function isAreaId(v: unknown): v is typeof AREA_IDS[number] {
   return typeof v === 'string' && (AREA_IDS as readonly string[]).includes(v)
@@ -152,6 +159,13 @@ const contentView = shallowRef<Component | null>(null)
 watch(selected, async (id) => {
   contentView.value = null
   contentView.value = (await getWizard(id)?.loadDesktopView()) ?? null
+}, { immediate: true })
+
+// Lazy-fetch the Connections panel data the first time the operator
+// lands on that tab.
+watch(selected, (id) => {
+  if (id === 'connections-setup' && connections.rows.value.length === 0 && !connections.loading.value)
+    void connections.refresh()
 }, { immediate: true })
 
 // Auto-mark bringup complete once every sub-wizard is complete.
@@ -235,6 +249,15 @@ onMounted(() => {
           </div>
         </template>
 
+        <!-- Connections: the panel IS the live port table. -->
+        <ConnectionsTable
+          v-else-if="selected === 'connections-setup'"
+          :rows="connections.rows.value"
+          :loading="connections.loading.value"
+          :error="connections.error.value"
+          @refresh="connections.refresh"
+        />
+
         <!-- Other areas: read-only current-config fields. -->
         <div v-else class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <span v-for="f in selectedArea.fields" :key="f.label">
@@ -248,7 +271,13 @@ onMounted(() => {
 
       <!-- The selected area's wizard, full width. Motors skips ESC setup
            since the panel above owns it. -->
-      <component :is="contentView" v-if="contentView" :key="selected" :skip-esc="selected === 'motor-check'" />
+      <component
+        :is="contentView"
+        v-if="contentView"
+        :key="selected"
+        :skip-esc="selected === 'motor-check'"
+        :skip-overview="selected === 'connections-setup'"
+      />
       <div v-else class="text-muted py-12 text-center text-sm">
         Loading…
       </div>
