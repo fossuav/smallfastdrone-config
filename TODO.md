@@ -62,8 +62,12 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 - `[wizard] [ux]` **"You are here" milestone track.** Show the operator where
   they are in the overall journey — configured drone → ready to fly → flying →
   tuned (etc.) — across the bringup sequence, not just per-step.
-- `[wizard] [infra]` **UART auto-config.** Detect and assign serial-port
-  protocols automatically instead of making the operator hand-map UARTs.
+- _Graduated 2026-05-28 → PROGRESS.md._ **UART auto-config / Connections
+  wizard.** Slice 1 has landed: live overview table read from
+  `@SYS/uarts.txt` + `SERIALn_PROTOCOL/_BAUD`, surfaced as a "Set up
+  connections" tab on the bringup ribbon. Slice 2 (detect-and-propose
+  via byte-counter deltas) + slice 3 (per-row protocol editor + apply +
+  reboot/reconnect) are queued in PROGRESS.md.
 - `[wizard]` **CAN bus toggle.** A drone-settings feature toggle to bring up
   the CAN bus (DroneCAN peripherals — GPS, compass, ESCs…), in the same
   write-param + reboot + reconnect pattern as the scripting toggle.
