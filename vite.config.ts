@@ -11,6 +11,26 @@ import { VitePWA } from 'vite-plugin-pwa'
 // actually needs HTTPS — see PLAN.md decisions row 13.
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        // Split the two big, rarely-changing data blobs out of the entry
+        // chunk: the SFD param metadata (~1.6 MB of JSON) and the MAVLink
+        // message definitions (~1.3 MB of generated classes). Together they
+        // pushed the entry chunk past workbox's 2 MiB precache limit, which
+        // fails the build. Both still ship in the precache — offline param
+        // docs are a requirement — but as their own long-lived chunks, so
+        // app-code changes no longer invalidate them in the operator's cache.
+        manualChunks(id) {
+          if (id.includes('src/protocol/param-metadata.json'))
+            return 'param-metadata'
+          if (id.includes('node_modules/mavlink-mappings'))
+            return 'mavlink-mappings'
+          return undefined
+        },
+      },
+    },
+  },
   // Pre-optimise node-mavlink + its polyfilled deps so the first browser
   // load doesn't trigger a "new dependencies optimized" reload mid-test
   // (Playwright sees it as a navigation race).

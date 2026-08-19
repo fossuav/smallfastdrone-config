@@ -168,6 +168,17 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   `--lua` stub defaults `PARAM_TABLE_KEY = 0` / prefix `WIZ_`. Fine for a single
   applet, but two installed field applets would collide. Revisit when the
   **scripting-lifecycle-manager** (below) exists, or hand out keys then.
+- `[infra]` **Bundle size — expert-only data is loaded eagerly.** The build now
+  splits `param-metadata.json` (~1.5 MB) and `mavlink-mappings` (~1.2 MB) into
+  their own chunks so the entry chunk stays under workbox's 2 MiB precache
+  limit (`vite.config.ts` → `build.rollupOptions.output.manualChunks`). Both are
+  still *static* imports, so the operator downloads them on first paint even
+  though the param blob only feeds the expert param browser. Making
+  `getParamMeta` & friends load their blob on demand would cut first-load
+  weight, but it makes the accessors async and ripples into `ParamsView.vue`.
+  Revisit if first-load time becomes a complaint. Related: the >500 kB
+  chunk-size warnings on `tres`, `mavlink-mappings` and `param-metadata` are
+  expected noise, not regressions.
 - `[tooling]` **Scripting-lifecycle-manager.** Move scripts between an
   active and a disabled subdirectory as they're enabled/disabled, show a menu of
   installed scripts — all via FTP, without touching the underlying scripting
