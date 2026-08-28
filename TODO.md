@@ -19,10 +19,18 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 ## Firmware / SITL
 
-- `[firmware]` **Firmware flashing / DFU.** Operators will need to flash SFD
-  firmware. Must route through the security uploader seam (`src/security/uploader.ts`)
-  — the primary v1 use case for that seam. This is a planned phase in
-  [PLAN.md](PLAN.md); listed here so it stays visible until it's scheduled.
+- _Done 2026-05-27 → PROGRESS.md._ **Firmware flashing / DFU.** Both paths
+  landed and are hardware-verified on TBS_LUCID_H7, routed through the security
+  uploader seam.
+- `[firmware]` **Bench-verify the DFU unlock (read-unprotect).** `DfuClient.readUnprotect()`
+  and the recovery tab's unlock disclosure are unit-tested only — there is no
+  SITL substitute for DFU, and the path has never been run against a genuinely
+  read-protected board. Needs a locked H7 to confirm, including that the
+  "success looks like a stall" reading holds on real silicon.
+- `[firmware]` **Wider-board hardware coverage for flashing.** Only TBS_LUCID_H7
+  has been exercised. MatekH743 / CubeOrange / CubeOrangePlus are wired in
+  `board-flash-map.ts` but unverified; non-H7 parts (F4, F7, H723 single-bank)
+  haven't been re-tested since the Rev.V workaround landed.
 - `[firmware]` **PR the `blheli-sitl` SFD branch upstream**, then re-point the
   submodule at the merged commit. Currently the BLHeli-in-SITL support lives on
   a private branch (`vendor/smallfastdrone` @ `blheli-sitl`) that we bumped to

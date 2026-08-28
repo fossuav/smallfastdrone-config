@@ -287,18 +287,18 @@ stops being true, it is a design regression, not a feature.
 Companion to this document, to land on the `pr-lua-encryption` branch in
 `../smallfastdrone/`. Ordered by dependency, not priority.
 
-| # | Change | Notes |
-|---|---|---|
-| F1 | Dedicated identity region in `.apsec_data` | Write-once; never returned by any MAVLink command; excluded from `check_signature()`; not subject to pack-toward-front |
-| F2 | Compile out `SET_PUBLIC_KEYS` / `REMOVE_PUBLIC_KEYS` on SFD builds | Unused once keys are build-time; pure attack surface |
-| F3 | Fail closed on empty key array | `all_zero_keys() → check_signature() == true` is right for stock, wrong for us |
-| F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY` | Identity only. Lock/unlock are `BRD_OPTIONS` bits, not commands — see F6. `GENERATE_IDENTITY` refused when an identity already exists. |
-| F5 | `.lxa` v2 loader — ECDH + UID prefix check | Replaces the symmetric slot-3 path |
-| F6 | RDP as `BRD_OPTIONS` bits, acting on next boot | Currently unconditional from `main_loop()` when `HAL_FLASH_READOUT_PROTECTION` is compiled in, which breaks the pattern the adjacent write-protection options already follow (bits 4/5/6 → `unlock_flash()` / `protect_bootloader()`). Use free bits (10+) so lock and unlock are ordinary parameters: no bespoke secure command, and next-boot semantics give the ceremony its sequencing for free — write identity, verify, *then* set the bit. Lock must still refuse when no verified identity exists. **Unlock caveat:** `flash.c` has no `__RAMFUNC__`, so `stm32_flash_set_rdp_flash(0xAA)` runs from the flash the regression is erasing; upstream ships that call commented out, i.e. unexercised. Likely wants to be a RAM function, and wants bench verification. |
-| F7 | Bootloader-side invariants | Keys never emptied; RDP raise-only except via `UNLOCK`; identity write-once. Invariants in the bootloader survive a buggy or hostile configurator. |
-| F8 | Fix `create_nonce()` | Called on the decrypt path where it overwrites the file's nonce; `nonce_len` passed uninitialised to `get_system_id_unformatted(buf, len)`, where `len` is in/out |
-| F9 | Confirm x25519 is not compiled out of the FC monocypher build | `crypto_key_exchange` / `crypto_x25519` are declared in `AP_CheckFirmware/monocypher.h` |
-| F10 | Optional: re-key `SCR_LD_ENCRYPT` | On-FC self-encryption still has value for a customer's *own* scripts, but under v2 it must ECDH to the drone's own public key. Low priority. |
+| # | Change | Where | Notes |
+|---|---|---|---|
+| F1 | Dedicated identity region in `.apsec_data` | `AP_CheckFirmware/AP_CheckFirmware.{h,cpp}` — `struct ap_secure_data`, and the `.apsec_data` section attribute | Write-once; never returned by any MAVLink command; excluded from `check_signature()`'s loop; not subject to `set_public_keys()`'s pack-toward-front. **Do this first** — F4 and F5 both build on it, and it closes a live disclosure hole today. |
+| F2 | Compile out `SET_PUBLIC_KEYS` / `REMOVE_PUBLIC_KEYS` on SFD builds | `AP_CheckFirmware/AP_CheckFirmware_secure_command.cpp` — the `SECURE_COMMAND_OP` switch | Unused once keys are build-time (decision 33); pure attack surface. |
+| F3 | Fail closed on an empty key array | same file — `all_zero_keys()` and its use in `check_signature()` | `all_zero_keys() → check_signature() == true` is a sensible convenience for stock ArduPilot and exactly wrong for us. Make the posture compile-time. |
+| F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY` | same file | Identity only — lock/unlock are `BRD_OPTIONS` bits, not commands (F6). `GENERATE_IDENTITY` refused when an identity already exists, so re-running enable can't silently orphan a customer's applets. |
+| F5 | `.lxa` v2 loader — ECDH + UID prefix check | `AP_Scripting/lua_scripts.cpp` — `load_encrypted_script()`, `decrypt_script()` | Replaces the symmetric slot-3 path. Check the nonce's UID prefix *before* attempting decryption, so a file for another airframe is refused cheaply. |
+| F6 | RDP as `BRD_OPTIONS` bits, acting on next boot | `AP_BoardConfig/AP_BoardConfig.cpp` (the `OPTIONS` bitmask), `AP_HAL_ChibiOS/HAL_ChibiOS_Class.cpp` (`main_loop()`), `hwdef/common/flash.c` (`stm32_flash_set_rdp_flash`) | Currently unconditional from `main_loop()` when `HAL_FLASH_READOUT_PROTECTION` is compiled in, which breaks the pattern the adjacent write-protection options already follow (bits 4/5/6 → `unlock_flash()` / `protect_bootloader()`). Use free bits (10+). Lock must refuse when no verified identity exists. **Open:** one bit or two — one bit makes clearing it a mass erase an operator could reach by "undoing" something. **Unlock caveat:** `flash.c` has no `__RAMFUNC__`, so `stm32_flash_set_rdp_flash(0xAA)` runs from the flash the regression is erasing; upstream ships that call commented out, i.e. unexercised. Likely wants to be a RAM function, and wants bench verification. |
+| F7 | Bootloader-side invariants | bootloader build of `AP_CheckFirmware` | Keys never emptied; RDP raise-only except through the deliberate unlock path; identity write-once unless the chip has been erased. Invariants held in the bootloader survive a buggy or hostile configurator; tool-side guards don't. |
+| F8 | Fix `create_nonce()` | `AP_Scripting/lua_scripts.cpp` — `create_nonce()` | Called on the *decrypt* path, where it overwrites the nonce read from the file; and `nonce_len` goes into `get_system_id_unformatted(buf, len)` uninitialised, where `len` is in/out (see `GCS_Common.cpp` for the correct pattern). Keep the file's nonce and *verify* its prefix. |
+| F9 | Confirm x25519 isn't compiled out of the FC monocypher build | `AP_CheckFirmware/monocypher.{h,cpp}` | `crypto_key_exchange` / `crypto_x25519` are declared; check they survive the build's feature trimming before F5 depends on them. |
+| F10 | Optional: re-key `SCR_LD_ENCRYPT` | `AP_Scripting/lua_scripts.cpp` — `encrypt_all_scripts_in_dir()` | On-FC self-encryption still has value for a customer's *own* scripts, but under v2 it must ECDH to the drone's own public key. Low priority. |
 
 **Bootloader changes get bench-verified on real hardware every time, not just
 SITL.** It is the one component where a bug bricks boards with no recovery
@@ -313,13 +313,13 @@ rebase burden is low.
 
 | # | Module | Purpose |
 |---|---|---|
-| T1 | `src/protocol/secure-command.ts` | `SECURE_COMMAND` client — session key, sequencing, reply handling |
-| T2 | `src/workflow/sfd-enable.ts` | Enable ceremony orchestrator |
-| T3 | `src/workflow/sfd-recover.ts` | Exit ceremony — backup → unlock → flash → restore |
+| T1 | `src/protocol/secure-command.ts` | `SECURE_COMMAND` client — session key, sequencing, reply handling. Blocked on F4. |
+| T2 | `src/workflow/sfd-enable.ts` | Enable ceremony orchestrator. Blocked on F1/F4/F6. |
+| T3 | `src/workflow/sfd-recover.ts` | Exit ceremony — backup → unlock → flash → restore. The unlock and the backup/restore halves both exist; this is the piece that sequences them. |
 | T4 | `DfuClient.readUnprotect()` | ✅ Landed. DfuSe `READ_UNPROTECT` for RDP regression on a dead drone, surfaced in the Firmware view's recovery tab. Bench verification pending — no SITL substitute for DFU. |
-| T5 | `src/workflow/param-backup.ts` | Full param snapshot + restore with a survivability report |
-| T6 | `src/workflow/drone-identity.ts` | Identity file read/write/export |
-| T7 | Views | SFD-enable and recovery wizards, both bringup-ribbon mountable |
+| T5 | `src/workflow/param-backup.ts` + `src/protocol/param-pack.ts` | ✅ Landed. Delta backup (changed-from-default, minus read-only) + restore planning with the not-reverted report. Defaults come from the drone via `@PARAM/param.pck?withdefaults=1`. |
+| T6 | `src/workflow/drone-identity.ts` | Identity file read/write/export. Blocked on F4. |
+| T7 | Views | SFD-enable and recovery wizards, both bringup-ribbon mountable. Blocked on T1–T3. |
 
 Encrypted applet install routes through the existing seam as
 `kind: 'lua_script'` — the tool moves an opaque blob and never inspects it.

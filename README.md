@@ -4,7 +4,7 @@ Browser-based configuration tool for [SmallFastDrone](https://github.com/fossuav
 
 Designed for **operators, not experts** — get a new drone configured and flying well in the shortest possible time, with the lowest possible risk.
 
-> **Status:** early development. Currently a Vite + Vue 3 + TypeScript scaffold; substantive features land slice-by-slice. See [PROGRESS.md](PROGRESS.md) for the current state.
+> **Status:** early development, but substantially past scaffold — connect, parameters, the bringup ribbon, firmware flashing and settings backup/restore all work today. Features land slice-by-slice. See [PROGRESS.md](PROGRESS.md) for the current state.
 
 ## Getting started
 
@@ -89,36 +89,50 @@ bun run lua:check src/wizards/motor-check/applet.lua src/wizards/motor-check/crs
 
 ## What's here right now
 
-A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV brand palette: purple `#4A1E80` + gold `#C9A35F`), ESLint via `@antfu/eslint-config`, and a 6-route shell with a navigation bar (SFD logo top-left):
+A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV brand palette: purple `#4A1E80` + gold `#C9A35F`), ESLint via `@antfu/eslint-config`, and a nav-bar shell (SFD logo top-left). Phases 0–2 are complete; Phase 3 (recipes + Lua engine), Phase 5 (firmware) and Phase 7 (SFD enablement) are in progress. See [PROGRESS.md](PROGRESS.md) for the detail.
 
-- **Connect** (`/`) — splash with a slowly rotating 3D X-quad and a live "Connect drone" button
-- **Bringup** (`/wizard`), **Recipes** (`/recipes`), **Logs** (`/logs`), **ESC tools** (`/esc`) — operator-friendly "Coming soon" placeholders
-- **Firmware** (`/firmware`) — full operator surface for the firmware-install flow. Tabbed "Install over USB" (bootloader path; requires a connected drone; takes a `.apj` and walks reboot-to-bootloader → erase → program → verify → reboot → reconnect) and "Recovery (DFU mode)" (WebUSB DFU; operator puts the chip in DFU mode by hand; accepts `.apj` for recovery or `_with_bl.hex` for a fresh chip). All upload paths route through the security uploader seam. The bootloader path is the daily-driver; DFU is the safety net for bricked boards or fresh chips. **Bench-hardware verification still pending** — no SITL substitute exists for either flash path.
-- **Settings** (`/settings`) — operator-facing drone settings. Feature toggles that write a parameter and handle the restart + reconnect for you (Lua scripting is the first), plus **Your drone's settings**: save and restore the drone's configuration. A backup holds only what's been changed from the firmware's own factory defaults, minus read-only parameters — the drone itself reports which those are, via `@PARAM/param.pck?withdefaults=1` over MAVLink-FTP. Restoring shows you what will change first (and what it *can't* put back), then writes, saves and restarts the drone in one action. Useful on its own for undoing a day's changes, and a prerequisite for the SFD recovery flow, where lowering readout protection mass-erases the board (see [docs/SECURITY.md](docs/SECURITY.md)).
-- **Expert mode** toggle (top-right of nav, off by default, per-session) reveals a **Parameters** (`/params`) route — auto-fetches the FC's full param set on mount, searchable table with descriptions + units pulled from the SFD source (regenerate after submodule bumps with `bun run params:rebuild`), click any value to edit inline (type-aware: dropdown for enum-style params like `RTL_ALT_TYPE`, decoded labels for bitmasks like `RTL_OPTIONS`, range hint in input tooltips), dirty tracking with row highlight + "was X" + per-row undo, Discard / **Apply** — Apply writes pending changes back to the drone (PARAM_SET + PREFLIGHT_STORAGE) with per-row ack indicators and a success / partial / failed summary.
+- **Connect** (`/`) — splash with a slowly rotating 3D X-quad and a live "Connect drone" button. Talks to a real USB drone (Web Serial) or SITL via the WebSocket bridge, parses heartbeats, and reports vehicle type, autopilot (with "SmallFastDrone" detection from the boot banner), firmware version and state.
+- **Bringup** (`/wizard/bringup`) — the bringup **ribbon**: tabs per area, each with a live config panel and its child wizard mounted inline. Walks pre-flight → frame → connections → motors, marking itself complete as it goes. The nav entry lands here directly; the older wizard library still lives at `/wizard` behind an "All wizards" link.
+  - **Set up connections** reads `@SYS/uarts.txt` over MAVLink-FTP into a live ports table, detects what's actually plugged in by watching byte counters, and lets you set a port's role from a short list of outcomes (GPS, RC receiver, telemetry radio…) — which writes both the protocol and its recommended baud, then restarts and reconnects for you.
+  - **Set up motors** covers ESC protocol + bidirectional DShot, then a props-off order/direction check that identifies mis-wiring and fixes it — preferring a single frame-type change over an output remap. Supports quad, hexa and octa. Also installable **on the radio** as a CRSF applet for no-laptop checks at the field.
+- **Field tools** (`/field`, radio icon in the header) — catalogue of applets you can install onto the drone to run from your transmitter, with per-tool install state and the paid-Pro gating seam.
+- **Recipes** (`/recipes`) — hosts tuning-flavoured wizards with the same unlocked/locked-Pro card model. Seed recipes (cinewhoop, throw mode, first-flight failsafes) are still to come.
+- **Firmware** (`/firmware`) — the firmware-install surface. An online picker builds a firmware.ardupilot.org download URL from vehicle/version/board dropdowns (board and version lists pulled live from GitHub). Then two tabs: "Install over USB" (the daily driver — reboots the drone to its bootloader and flashes a `.apj` over the same port) and "Recovery (DFU mode)" (WebUSB DFU for a bricked or fresh chip; takes `.apj` or `_with_bl.hex`). Both paths are **hardware-verified on TBS_LUCID_H7**, including the preserve-your-settings erase mode. The recovery tab also hides an **unlock** action for read-protected boards — destructive, and not yet bench-verified.
+- **Settings** (`/settings`) — feature toggles that write a parameter and handle the restart + reconnect for you (Lua scripting is the first), plus **Your drone's settings**: save and restore its configuration. A backup holds only what's changed from the firmware's own factory defaults, minus read-only parameters — the drone reports which those are via `@PARAM/param.pck?withdefaults=1`. Restoring shows what will change (and what it *can't* put back) before writing.
+- **Logs** (`/logs`) and **ESC tools** (`/esc`) — placeholders. Log download is Phase 4, ESC passthrough is Phase 6; neither has started.
+- **Expert mode** toggle (top-right, off by default, per-session) reveals **Parameters** (`/params`) — the full param table with metadata-driven descriptions, units, enum dropdowns and decoded bitmasks, inline editing with dirty tracking and per-row undo, and Apply (PARAM_SET + PREFLIGHT_STORAGE) with per-row ack indicators.
 
-Each route lazy-loads as its own chunk. State lives in Pinia setup stores (UI/expert-mode + drone session). SmallFastDrone is vendored as a git submodule with `sitl:build/start/stop` scripts. The Connect screen talks to either a real USB-attached drone (Web Serial) or SITL via a WebSocket bridge, parses MAVLink heartbeats, requests AUTOPILOT_VERSION + DO_SEND_BANNER on first heartbeat, and reports the vehicle type, autopilot (with "SmallFastDrone" detection from the boot banner), firmware version + git hash, system ID, and state (see [SITL](#sitl) below). Status messages with WARNING or worse severity surface as toasts; a bell icon in the nav opens a popover with the most recent ~50 messages, severity-coloured, with relative timestamps.
+Each route lazy-loads as its own chunk. State lives in Pinia setup stores. Status messages of WARNING or worse surface as toasts; a bell icon opens a popover with the most recent ~50, severity-coloured.
 
 The app is an installable PWA — `vite-plugin-pwa` generates a service worker, web manifest, and icons. Drop into Chrome's "Install" menu to get a standalone window.
 
-Phase 0 is now substantively complete. Next up: the actual feature work (param browser, recipe runner, tuning workflows). See [PROGRESS.md](PROGRESS.md).
-- First Playwright E2E test (drives SITL through a heartbeat connect)
-- HTTPS dev via mkcert + PWA shell via vite-plugin-pwa
-
-After Phase 0, the bigger pieces land in order: param browser, bringup wizard, recipe library, log download, DFU firmware flashing, BLHeli ESC passthrough.
-
-See [PLAN.md](PLAN.md) for the full plan and [PROGRESS.md](PROGRESS.md) for what's actually done.
+Still to come, in rough order: seed recipes, log download (Phase 4), the SFD enablement ceremonies (Phase 7, gated on firmware work), and BLHeli ESC passthrough (Phase 6). There is no CI workflow yet. See [PLAN.md](PLAN.md) for the full plan.
 
 ## Project layout
 
 ```
 .
-├── src/                 # Vue 3 + TS app
-├── scripts/             # dev-setup; future SITL build helpers
-├── docs/                # architecture, UX, testing, security, coding standards
+├── src/
+│   ├── protocol/        # MAVLink, FTP, params, bootloader, DFU, APJ/Intel-HEX
+│   ├── transport/       # Web Serial / WebUSB / WebSocket (test) + mocks
+│   ├── stores/          # Pinia setup stores (session, params, UI, field tools)
+│   ├── workflow/        # orchestration: wizard runtime, Lua engine, firmware,
+│   │                    #   motor check, connections, param backup
+│   ├── wizards/         # one directory per wizard: manifest + view (+ applet.lua)
+│   ├── security/        # the signed-artifact upload seam every upload routes through
+│   ├── views/           # one per route
+│   └── ui/              # shared components
+├── test/
+│   ├── unit/            # Vitest, pure logic (+ fixtures/)
+│   ├── e2e/             # Playwright, drives the app against SITL
+│   └── sitl/            # WebSocket↔TCP bridge, FTP smoke test
+├── scripts/             # dev-setup, SITL build/run, wizard scaffold, lua:check
+├── vendor/smallfastdrone/   # SFD firmware submodule, built into SITL for tests
+├── docs/                # architecture, UX, testing, security, firmware, wizards, lua
 ├── CLAUDE.md            # guidance for Claude Code when working in this repo
 ├── PLAN.md              # mission, decisions log, phase plan
 ├── PROGRESS.md          # current state of the build
+├── TODO.md              # deferred issues + papercuts
 └── README.md
 ```
 
@@ -128,8 +142,12 @@ See [PLAN.md](PLAN.md) for the full plan and [PROGRESS.md](PROGRESS.md) for what
 - **[PROGRESS.md](PROGRESS.md)** — current state, recent log
 - **[docs/UX.md](docs/UX.md)** — operator-first design principles
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — layered design, module layout
-- **[docs/BRINGUP.md](docs/BRINGUP.md)** — wizard contract, recipe library
-- **[docs/SECURITY.md](docs/SECURITY.md)** — security seam, threat model
+- **[TODO.md](TODO.md)** — deferred issues and papercuts (not the roadmap)
+- **[docs/WIZARDS.md](docs/WIZARDS.md)** — wizard runtime contract: manifest, engines, lifecycle
+- **[docs/BRINGUP.md](docs/BRINGUP.md)** — the bringup operator flow, phase by phase
+- **[docs/FIRMWARE.md](docs/FIRMWARE.md)** — the two firmware-install paths, APJ / Intel-HEX, bootloader + DFU protocols
+- **[docs/SECURITY.md](docs/SECURITY.md)** — SFD enablement: per-drone identity, lockdown, recovery, and the firmware work it needs
+- **[docs/lua/](docs/lua/)** — ArduPilot Lua playbooks, the authority for writing applets
 - **[docs/TESTING.md](docs/TESTING.md)** — test pyramid, SITL setup
 - **[docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md)** — Vue / TS standards, AI-slop anti-patterns
 - **[CLAUDE.md](CLAUDE.md)** — playbook for Claude Code working in this repo
