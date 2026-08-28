@@ -29,6 +29,7 @@ FIELD_MAP = (
     ("Values", "values"),
     ("User", "user"),
     ("RebootRequired", "rebootRequired"),
+    ("ReadOnly", "readOnly"),
 )
 
 

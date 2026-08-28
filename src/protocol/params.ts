@@ -149,6 +149,11 @@ export interface ParamMeta {
   values?: Record<string, string>
   user?: string
   rebootRequired?: string
+  // Present (as the string "True") on parameters the firmware treats as
+  // read-only — sensor device ids, ground-pressure references, boot
+  // counters. They report a value but writing one back is meaningless or
+  // wrong, so a settings backup leaves them out.
+  readOnly?: string
 }
 
 const metadata = metadataRaw as Record<string, ParamMeta>
@@ -159,6 +164,14 @@ const metadata = metadataRaw as Record<string, ParamMeta>
 // metadata generator didn't cover).
 export function getParamMeta(name: string): ParamMeta | undefined {
   return metadata[name]
+}
+
+// Whether the firmware marks this parameter read-only. Parameters absent
+// from the bundled metadata are treated as writable — the metadata is a
+// deny-list here, and a param it doesn't know about is more likely a
+// custom or newly-added one than a read-only one.
+export function isParamReadOnly(name: string): boolean {
+  return metadata[name]?.readOnly !== undefined
 }
 
 // If the param has `Values` metadata (enum-style) and the value matches a
