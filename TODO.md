@@ -119,12 +119,14 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 - `[ux]` **SFD logo as the favicon.** Use the SmallFastDrone logo as the
   browser-tab icon.
-- `[ux] [security]` **Field tools: real entitlement + custom upload + secure
-  path.** The Pro rows (`locked`) and "Add your own applet" (expert) are seams —
-  wire the real entitlement check (payment integration) and the custom-applet
-  upload when they exist, and confirm paid/custom uploads route through the
-  security uploader seam (`src/security/uploader.ts`), where signed/encrypted
-  Lua belongs.
+- `[ux] [security]` **Field tools: real entitlement + custom upload.** The Pro
+  rows (`locked`) and "Add your own applet" (expert) are seams — wire the real
+  entitlement check (payment integration) and the custom-applet upload when they
+  exist. _Secure-path half graduated 2026-08-27 → PLAN.md Phase 7 +
+  [docs/SECURITY.md](docs/SECURITY.md):_ encrypted applet install routes through
+  `src/security/uploader.ts` as `kind: 'lua_script'`, and the drone-side
+  decryption story is now designed (per-drone identity + ECDH). What's left here
+  is the commercial plumbing, not the crypto.
 - `[ux]` **Quieten the "Scripting: stopped" toast on restart.** Installing /
   removing a field tool calls `restartScripting()`, which emits a STATUSTEXT
   that surfaces as a red error toast — alarming for a normal, expected restart.

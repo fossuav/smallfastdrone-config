@@ -242,6 +242,20 @@ SITL has no bootloader and no DFU. Coverage breakdown:
   firmware.ardupilot.org — they'd need a CORS-friendly host (GitHub
   Releases is the obvious choice) and a small adapter in the picker
   that knows to look in both sources.
+- **DFU option-byte write, for RDP regression.** [SECURITY.md](SECURITY.md)'s
+  exit ceremony needs a way to lower STM32 readout protection on a drone
+  that won't boot — a DfuSe write to the option-byte region setting RDP
+  to `0xAA`, which triggers a silicon mass erase. That leaves a blank
+  chip, so recovery is the existing `_with_bl.hex` DFU path. This is the
+  only genuinely new protocol work in that ceremony; the rest of the DFU
+  stack already covers it. Planned as `src/protocol/dfu-options.ts` in
+  Phase 7.
+- **SFD-enabled boards change the flashing contract.** Once a drone is
+  SFD-enabled its bootloader accepts only SFD-signed firmware and its
+  bootloader sector is write-protected, so the "flash any `.apj`" flows
+  described above stop applying to it. The tool must detect the locked
+  state and route the operator to the exit ceremony rather than failing
+  an install with a confusing error. See [SECURITY.md](SECURITY.md).
 - **Direct fetch + flash** once firmware.ardupilot.org enables CORS —
   drop-in: replace `window.open(url)` with `fetch(url)` + auto-route
   into the existing `parseApj` / `parseIntelHex` pipeline.

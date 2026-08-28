@@ -4,7 +4,12 @@
 
 **Primary:** Get a new drone configured and flying well in the shortest possible time, with the lowest possible risk.
 
-**Secondary (design only in v1):** Provide a secured environment for uploading signed firmware, encrypted logs, and encrypted Lua scripts. Future objective: certain Lua features are installable only via this tool, requiring authentication by remote keys against a key held by the firmware. v1 must not preclude this; v1 ships the seam, not the implementation.
+**Secondary — now a primary differentiator:** Provide a secured environment for uploading signed firmware, encrypted logs, and encrypted Lua scripts. **SFD enablement** — provisioning a drone with a per-drone identity key so SFD can ship applets only that airframe can decrypt — is the mechanism, and this tool owns the ceremony. See [docs/SECURITY.md](docs/SECURITY.md).
+
+This was originally scoped as "design only in v1; ship the seam, not the implementation". That changed (2026-08-27): with a credible competing configurator emerging, the differentiation is not feature parity on generic configuration but the things only an SFD-enabled drone can do. Two consequences run through the whole plan:
+
+- **Configure, don't ask.** Where the tool can determine the right setting, it sets it. Operator-facing configuration is a fallback, not the default path.
+- **The wizard library is the product.** Particularly the on-drone (Lua) wizards, which are what enablement protects.
 
 ## Audience
 
@@ -41,7 +46,10 @@ See [docs/UX.md](docs/UX.md) for the operator-first design playbook.
 | 7 | Source of truth | Live FC | Tool is a viewer/editor. Snapshots are deliberate operator exports, not background sync. |
 | 8 | Fleet model | Single-drone session | Matches betaflight-configurator UX; cheapest. |
 | 9 | Workflow primitive | Pluggable wizards (recipes subsumed as degenerate wizards) | Single runtime, single contract. Wizards are independent units declared via manifest, bundled at build time, surfaced in a wizard library. Engine choice (Lua-on-FC / log-replay / desktop-pure) is internal — runtime picks per FC capability, operator never picks. Log-replay engine guarantees universal coverage for FCs without scripting. Pluggability enables a commercial gating seam (`locked: true` flag) for paid Pro wizards. Recipes become wizards with `engines: [desktop]`, one step, no live state. Bringup workflow becomes a meta-wizard that chains sub-wizards. See [docs/WIZARDS.md](docs/WIZARDS.md). |
-| 10 | Crypto in v1 | Tool-side seam only | Real crypto exists elsewhere. Don't re-implement; don't preclude. Web Crypto API only when needed. |
+| 10 | Crypto in this tool | **None — the tool orchestrates, never holds** | **Revised 2026-08-27** (was "tool-side seam only; real crypto exists elsewhere"). The seam stays, but SFD enablement is now in scope rather than deferred. The rule tightened rather than loosened: all cryptography lives on the FC or in SFD's offline build tooling, and the tool holds no key material of any kind — no master secret, no signing key, no per-drone key. It moves opaque blobs and drives ceremonies. If the tool ever needs to hold a key, the design has drifted. See [docs/SECURITY.md](docs/SECURITY.md). |
+| 32 | SFD enablement — key architecture | **Drone-generated per-drone X25519 identity; ephemeral-static ECDH per applet** | The customer's laptop is untrusted, so any key we *deliver* to a drone has passed through the customer's hands and they can decrypt with it. The only construction satisfying "customer presses SFD enable" + "customer cannot decrypt" + "no server" is one where the drone generates its own keypair and never emits the private half. Per-drone (not per-batch) so a compromise contains to one airframe. `crypto_key_exchange`/`crypto_x25519` and a hardware TRNG are already present in the firmware tree, so this is wiring, not new crypto. Applet ephemeral keys are *derived* from an SFD master secret + drone identity + applet content hash, making every shipped artefact reproducible without a key database — which is what lets the design stay serverless. |
+| 33 | SFD enablement — key custody | **Build time, via `--omit-ardupilot-keys`** | SFD builds bootloaders carrying only SFD's public signing key. The board therefore trusts nothing else from first boot, with no runtime key installation in any customer flow. This supersedes an earlier sketch that had the configurator `SET_PUBLIC_KEYS` then `REMOVE_PUBLIC_KEYS` at enable time — that would have required the customer's tool to hold an SFD *private* key, which is impossible. It also moots the upstream `all_zero_keys() → check_signature() == true` fail-open trap, since the key array is never mutated. `SET_PUBLIC_KEYS`/`REMOVE_PUBLIC_KEYS` get compiled out of SFD builds as dead attack surface. |
+| 34 | SFD enablement — the exit ceremony | **Unlock → mass erase → vanilla reflash → param restore; never SFD-signed** | STM32 RDP 1→0 mass-erases; that is silicon, not a choice, and it is also the security property (no state exists where the customer holds an unlocked chip *and* a live key). The unlock deliberately requires no SFD signature so a customer can exit unaided — that is what makes it an escape hatch rather than a hostage situation, and it is the crux of the GPLv3 §6 anti-tivoization position (engineering reading; needs a lawyer's eye). Two unlock routes: firmware-initiated for a healthy drone, DFU option-byte write for a dead one. RDP Level 2 must never be used — irreversible, and it would remove the exit entirely. Accepted risk: RDP1 is not a secure element and is vulnerable to fault injection with lab equipment; accepted by operator decision 2026-08-27. |
 | 11 | Package manager + runtime | Bun | Fast install, native TS execution, single tool. Vite still does the bundling. |
 | 12 | Lint + format | `@antfu/eslint-config` (ESLint flat config + stylistic formatter) | De facto standard in modern Vue/Vite/Nuxt ecosystem. Includes Vue Style Guide rules, TS rules, and a built-in formatter (no Prettier needed). Maintained by a Vue core team member. **Revised from earlier Biome choice** — Biome's Vue SFC support is not first-class in 2026. See [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md). |
 | 13 | HTTPS dev | vite-plugin-mkcert | Required for WebSerial in some browsers and WebAuthn later. |
@@ -103,6 +111,8 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
 **The plan is provisional.** Phases can split, merge, reorder, or be re-scoped as the operator discovers what's actually needed. Decision rows can flip. When that happens, update this file and `PROGRESS.md` — don't diverge silently and don't treat the plan as a contract.
 
 **Every phase has a paired automated test acceptance criterion** that drives SITL through the same path the operator would. See [docs/TESTING.md](docs/TESTING.md) "What we test, by phase" for the per-phase test contract.
+
+**Priority order changed 2026-08-27.** Phase 7 (SFD enablement) jumps ahead of Phase 4 (logs) and Phase 6 (MSP/BLHeli). Reason: a credible competing configurator means generic configuration is no longer where this tool wins, and enablement is the gate on everything that is SFD-only — encrypted on-drone wizards above all. Log handling and ESC passthrough are both well-served elsewhere; neither differentiates. Phases are still destinations, not commits.
 
 ### Phase 0 — Scaffolding (app + test infrastructure)
 - Initialise Vue 3.5+ + Vite 7 + Nuxt UI 4 + Tailwind 4 app, TypeScript end-to-end.
@@ -195,6 +205,24 @@ Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md)
 
 **Done when:** Operator can connect to an SFD-flashed FC, enter BLHeli passthrough, read all ESC settings, change a setting, and flash a BLHeli ESC firmware image — all without leaving the tool.
 
+### Phase 7 — SFD enablement (per-drone identity, lockdown, recovery)
+
+**Prioritised ahead of Phases 4 and 6.** The full architecture is [docs/SECURITY.md](docs/SECURITY.md); this phase is the tool half of it. The firmware half (F1–F10 in that document) lands on the `pr-lua-encryption` branch in `../smallfastdrone/` and gates most of this.
+
+- `src/protocol/secure-command.ts` — `SECURE_COMMAND` client: session key, sequencing, reply handling. Unit-testable against fixtures; SITL-testable once the firmware side exists.
+- `src/workflow/param-backup.ts` — full param snapshot to disk and restore, with an explicit report of anything that didn't survive a firmware change. **Useful on its own** ("save your drone's settings"), independent of enablement, and the natural first slice.
+- `src/protocol/dfu-options.ts` — DfuSe option-byte write for RDP regression on a drone that won't boot. The only genuinely new protocol work in the exit path; the rest of the DFU stack is already hardware-verified.
+- `src/workflow/sfd-enable.ts` + `src/workflow/sfd-recover.ts` — the two ceremonies.
+- `src/workflow/drone-identity.ts` — identity file read/write/export.
+- Enable and recovery wizards, both mountable in the bringup ribbon.
+- Encrypted applet install routed through `security/uploader.ts` as `kind: 'lua_script'` — the tool moves an opaque blob and never inspects it.
+
+**Ordering is load-bearing:** identity generated and *verified* before the lock; params backed up before anything destructive; the unlock never requires an SFD signature.
+
+**Done when:** An operator can connect a fresh drone, press "SFD enable", and end with a locked drone plus an exported identity file — then install an SFD-encrypted applet that runs on that drone and demonstrably fails to load on any other. And the exit works: params backed up, drone unlocked and wiped, vanilla SFD firmware reflashed, params restored, with a clear report of what changed.
+
+**Testing:** protocol layer against fixtures + SITL where the firmware supports it; both ceremonies are **bench-hardware verified** on TBS_LUCID_H7 — same posture as the firmware-flashing paths, since neither RDP nor DFU option bytes exist in SITL. Bootloader changes get hardware-verified every time.
+
 ## Open architectural questions / risks
 
 **Resolved (kept for the record):**
@@ -211,6 +239,10 @@ Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md)
 - **WebUSB device-claim conflicts (Phase 5).** FC enumerates as CDC-ACM (WebSerial) vs DFU (WebUSB) at different times; permission state may not transfer. Document the disconnect/reconnect dance.
 - **Protocol mode switching on a single port (Phase 6).** MAVLink → MSP → 4-way → MAVLink mid-session; need clean transitions + a guaranteed exit path so a half-finished BLHeli session doesn't strand the FC.
 - **ESC firmware blob source + provenance (Phase 6).** Bundle, fetch on demand, or operator-supplied? Decide at Phase 6 entry.
+- **Drone identity capture (Phase 7).** Does the identity file (UID + public key) get captured by SFD at order/manufacture time, or exported by the customer from the configurator and sent in? Doesn't change the crypto at all, but decides whether "SFD enable" is one click or a two-step with a wait in the middle — i.e. whether the flow has a support ticket in it. **Open; needs an operator decision before the enable wizard's UX is designed.**
+- **GPLv3 §6 anti-tivoization (Phase 7).** Locked bootloader + signed-only firmware is the shape that clause addresses. The exit ceremony looks like the answer — the customer can install modified GPL firmware on hardware they own, losing only the commercial applets. That is an engineering reading, **not a legal opinion**, and wants a qualified check before a product line depends on it.
+- **RDP is STM32H7-only** in the current firmware implementation (`stm32_flash_read_protect_flash()` is `#if defined(STM32H7)`). Accepted — SmallFastDronev1 is H7 — but it caps which boards can ever be SFD-enabled. Revisit if the board range widens.
+- **Fork delta in `AP_CheckFirmware` + bootloader (Phase 7).** F1–F7 in docs/SECURITY.md cannot be upstreamed; SFD-specific lockdown is the point. `AP_CheckFirmware` is small and stable so rebase burden is low, but the bootloader is the one component where a bug bricks boards with no recovery but BOOT0 + DFU. Bench-verify bootloader changes on real hardware every time.
 
 ## SITL test environment (quick reference for the next session)
 
