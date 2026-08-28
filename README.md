@@ -113,7 +113,7 @@ Still to come, in rough order: seed recipes, log download (Phase 4), the SFD ena
 ```
 .
 ├── src/
-│   ├── protocol/        # MAVLink, FTP, params, bootloader, DFU, APJ/Intel-HEX
+│   ├── protocol/        # MAVLink, FTP, params, secure command (SFD identity), bootloader, DFU, APJ/Intel-HEX
 │   ├── transport/       # Web Serial / WebUSB / WebSocket (test) + mocks
 │   ├── stores/          # Pinia setup stores (session, params, UI, field tools)
 │   ├── workflow/        # orchestration: wizard runtime, Lua engine, firmware,
