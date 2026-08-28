@@ -114,6 +114,17 @@ The identity private key lives in its **own region** — *not* a slot in the
 
 A separate region removes all three by construction rather than patching each.
 
+**As landed (F1):** `struct ap_identity_data { sig[8]; private_key[32] }` is
+the last member of `ap_secure_data`, after `public_key[10]`. Last matters:
+`make_secure_bl.py` patches keys in place straight after the key signature, and
+`set_public_keys()` / `check_signature()` / `GET_PUBLIC_KEYS` are all bounded by
+`AP_PUBLIC_KEY_MAX_KEYS`, so none of them can reach it. The region carries its
+**own 8-byte signature**, which `find_identity()` verifies — without it, on a
+bootloader built before the region existed, the bytes at that offset would be
+code and read as a non-zero "identity". All-zero means no identity has been
+written; `set_identity()` is write-once and rejects a zero key, so a second
+enable cannot silently orphan applets encrypted to the first key.
+
 ### Drone identity file
 
 The tool exports a small, **non-secret** artefact after enablement:
@@ -284,15 +295,18 @@ stops being true, it is a design regression, not a feature.
 
 ## Firmware work list
 
-Companion to this document, to land on the `pr-lua-encryption` branch in
-`../smallfastdrone/`. Ordered by dependency, not priority.
+Companion to this document, landing on the **`SmallFastDrone-4.7-config`**
+branch in `../smallfastdrone/` (origin `fossuav/smallfastdrone`) — that is
+`pr-lua-encryption` rebased onto the 4.7 beta line plus the BLHeli-in-SITL
+enablement, and it is the branch the `vendor/smallfastdrone/` submodule tracks.
+Ordered by dependency, not priority.
 
 | # | Change | Where | Notes |
 |---|---|---|---|
-| F1 | Dedicated identity region in `.apsec_data` | `AP_CheckFirmware/AP_CheckFirmware.{h,cpp}` — `struct ap_secure_data`, and the `.apsec_data` section attribute | Write-once; never returned by any MAVLink command; excluded from `check_signature()`'s loop; not subject to `set_public_keys()`'s pack-toward-front. **Do this first** — F4 and F5 both build on it, and it closes a live disclosure hole today. |
+| F1 | Dedicated identity region in `.apsec_data` | `AP_CheckFirmware/AP_CheckFirmware.h` — `struct ap_identity_data`, last member of `ap_secure_data`; accessors in `AP_CheckFirmware_secure_command.cpp` | ✅ **Landed 2026-08-28** (`AP_CheckFirmware: add a per-drone identity region to the secure data`). `find_identity()` (nullptr on a bootloader without the region), `identity_is_set()`, write-once `set_identity()` that rewrites the bootloader sector through the existing `read_bootloader()` / `write_bootloader()` path and wipes its RAM copy after. Never returned by any MAVLink command; excluded from `check_signature()` and `set_public_keys()` by construction (see "Per-drone identity"). Compile-verified on a signed TBS_LUCID_H7 bootloader + signed SmallFastDronev1 firmware, and the built image checked byte-for-byte: region present and zero, untouched by `make_secure_bl.py --omit-ardupilot-keys`. **Bench verification pending** with F4, when there is something to write. |
 | F2 | Compile out `SET_PUBLIC_KEYS` / `REMOVE_PUBLIC_KEYS` on SFD builds | `AP_CheckFirmware/AP_CheckFirmware_secure_command.cpp` — the `SECURE_COMMAND_OP` switch | Unused once keys are build-time (decision 33); pure attack surface. |
 | F3 | Fail closed on an empty key array | same file — `all_zero_keys()` and its use in `check_signature()` | `all_zero_keys() → check_signature() == true` is a sensible convenience for stock ArduPilot and exactly wrong for us. Make the posture compile-time. |
-| F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY` | same file | Identity only — lock/unlock are `BRD_OPTIONS` bits, not commands (F6). `GENERATE_IDENTITY` refused when an identity already exists, so re-running enable can't silently orphan a customer's applets. |
+| F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY` | same file | Identity only — lock/unlock are `BRD_OPTIONS` bits, not commands (F6). Generate from `hal.util->get_true_random_vals()`, clamp per X25519, store through `set_identity()` (F1), which already refuses when an identity exists, so re-running enable can't silently orphan a customer's applets; wipe the RAM copy after. `GET_IDENTITY` derives the public half with `crypto_x25519_public_key()` on demand rather than storing it. |
 | F5 | `.lxa` v2 loader — ECDH + UID prefix check | `AP_Scripting/lua_scripts.cpp` — `load_encrypted_script()`, `decrypt_script()` | Replaces the symmetric slot-3 path. Check the nonce's UID prefix *before* attempting decryption, so a file for another airframe is refused cheaply. |
 | F6 | RDP as `BRD_OPTIONS` bits, acting on next boot | `AP_BoardConfig/AP_BoardConfig.cpp` (the `OPTIONS` bitmask), `AP_HAL_ChibiOS/HAL_ChibiOS_Class.cpp` (`main_loop()`), `hwdef/common/flash.c` (`stm32_flash_set_rdp_flash`) | Currently unconditional from `main_loop()` when `HAL_FLASH_READOUT_PROTECTION` is compiled in, which breaks the pattern the adjacent write-protection options already follow (bits 4/5/6 → `unlock_flash()` / `protect_bootloader()`). Use free bits (10+). Lock must refuse when no verified identity exists. **Open:** one bit or two — one bit makes clearing it a mass erase an operator could reach by "undoing" something. **Unlock caveat:** `flash.c` has no `__RAMFUNC__`, so `stm32_flash_set_rdp_flash(0xAA)` runs from the flash the regression is erasing; upstream ships that call commented out, i.e. unexercised. Likely wants to be a RAM function, and wants bench verification. |
 | F7 | Bootloader-side invariants | bootloader build of `AP_CheckFirmware` | Keys never emptied; RDP raise-only except through the deliberate unlock path; identity write-once unless the chip has been erased. Invariants held in the bootloader survive a buggy or hostile configurator; tool-side guards don't. |

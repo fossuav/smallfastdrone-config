@@ -207,7 +207,7 @@ Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md)
 
 ### Phase 7 — SFD enablement (per-drone identity, lockdown, recovery)
 
-**Prioritised ahead of Phases 4 and 6.** The full architecture is [docs/SECURITY.md](docs/SECURITY.md); this phase is the tool half of it. The firmware half (F1–F10 in that document) lands on the `pr-lua-encryption` branch in `../smallfastdrone/` and gates most of this.
+**Prioritised ahead of Phases 4 and 6.** The full architecture is [docs/SECURITY.md](docs/SECURITY.md); this phase is the tool half of it. The firmware half (F1–F10 in that document) lands on the `SmallFastDrone-4.7-config` branch in `../smallfastdrone/` — `pr-lua-encryption` rebased onto the 4.7 beta line, and what the submodule tracks — and gates most of this. F1 landed 2026-08-28.
 
 - `src/protocol/secure-command.ts` — `SECURE_COMMAND` client: session key, sequencing, reply handling. Unit-testable against fixtures; SITL-testable once the firmware side exists.
 - ✅ `src/workflow/param-backup.ts` + `src/protocol/param-pack.ts` — backup and restore. A backup holds the *delta* (what the drone reports as changed from its own factory defaults, minus read-only), because that is what restores cleanly onto freshly-flashed firmware. Restore planning reports what it can't put back. Defaults come from the drone itself via `@PARAM/param.pck?withdefaults=1`; no static table can supply them.
@@ -248,7 +248,7 @@ Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md)
 ## SITL test environment (quick reference for the next session)
 
 - `bun run sitl:start` boots ArduCopter SITL on TCP 5760 as a **quad X** (FRAME_CLASS=1, FRAME_TYPE=1 via a defaults overlay; `--model X` physics), in a temp workdir, wrapped so `PREFLIGHT_REBOOT_SHUTDOWN` restarts it (for reboot flows). It symlinks `./scripts → APM/scripts` so Lua FTP uploads load.
-- **`blheli-sitl` SFD branch** (in `vendor/smallfastdrone/`, 2 commits) enables `HAL_SUPPORT_RCOUT_SERIAL` for SITL + makes AP_BLHeli compile off-hardware, so SITL exposes the `SERVO_BLH_*` params (the motor-check direction-reverse fix needs `SERVO_BLH_RVMASK`). It's pushed and the submodule is bumped to it (`b56facd3e5`), so CI/clones build SITL with the params. `.gitmodules` still tracks `SmallFastDrone-4.7-beta` (the `--remote` hint only); when the branch is PR'd into the beta line, re-point the submodule at the merge.
+- **`blheli-sitl` SFD branch** (in `vendor/smallfastdrone/`, 2 commits) enables `HAL_SUPPORT_RCOUT_SERIAL` for SITL + makes AP_BLHeli compile off-hardware, so SITL exposes the `SERVO_BLH_*` params (the motor-check direction-reverse fix needs `SERVO_BLH_RVMASK`). Those commits now live on **`SmallFastDrone-4.7-config`** (with the lua-encryption commits underneath), which is what the submodule is pinned to (`eee1ca44b0`) and where the Phase 7 firmware work (F1–F10) lands, so CI/clones build SITL with the params. `.gitmodules` still says `branch = SmallFastDrone-4.7-beta` (the `--remote` hint only); re-point it at the config branch or at the eventual merge into the beta line — operator's call.
 - Playwright auto-starts SITL + the WebSocket bridge (`scripts/test-sitl-bridge.sh`) and Vite; one shared SITL, serial execution — **specs leak FC state** (frame, scripting, params), so ordering matters (see notes in the spec headers).
 - `pymavlink` is available at `/home/andy/venv-ardupilot/` for ad-hoc probing against SITL.
 
