@@ -39,9 +39,17 @@
 
 import type { ParamValue } from 'mavlink-mappings/dist/lib/common'
 import { computed, onMounted, ref, watch } from 'vue'
-import { buildParamSet, MSGID_PARAM_VALUE } from '../protocol/params'
+import { MavFtp } from '../protocol/ftp'
+import { changedParamNames, parseParamPack } from '../protocol/param-pack'
+import { buildParamSet, isParamReadOnly, MSGID_PARAM_VALUE } from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
+import {
+  backupFilename,
+  backupParamCount,
+  buildBackup,
+  serializeBackup,
+} from '../workflow/param-backup'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../workflow/reconnect'
 
 // Hardcoded scripting toggle. When a second toggle lands this lifts
@@ -54,6 +62,9 @@ const TOGGLE = {
 } as const
 const COMP_ID_AUTOPILOT = 1
 const PARAM_ACK_TIMEOUT_MS = 1500
+// Packed parameter file, asked for with defaults so the firmware tells us
+// which parameters it considers changed. See src/protocol/param-pack.ts.
+const PARAM_PACK_PATH = '@PARAM/param.pck?withdefaults=1'
 
 const session = useSessionStore()
 const params = useParamsStore()
@@ -251,6 +262,97 @@ function cancel() {
   errorMessage.value = null
   phase.value = 'idle'
 }
+
+// --- Settings backup -------------------------------------------------
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+
+const saveState = ref<SaveState>('idle')
+const savedFilename = ref<string | null>(null)
+const savedCount = ref(0)
+const saveError = ref<string | null>(null)
+
+// Backing up needs a live drone: the vehicle block records which drone
+// and which firmware the snapshot came from, and the session clears that
+// detail on disconnect.
+const canSave = computed(() =>
+  session.connected && !params.loading && params.count > 0,
+)
+
+// Snapshot the operator's configuration and hand them a file.
+//
+// The drone is asked which of its parameters differ from its own factory
+// defaults — `@PARAM/param.pck?withdefaults=1` over MAVLink-FTP, where the
+// firmware attaches a default only to entries it has changed. That is the
+// only authoritative source: defaults are board- and frame-specific, and
+// the bundled metadata carries no defaults at all. Read-only parameters
+// are dropped on top, from the metadata that does know about those.
+//
+// A plain download rather than the File System Access API: this is a
+// one-shot export of a small document, and a save dialog would add a
+// permission prompt for no benefit — the result line names the file so
+// the operator knows what to look for.
+async function saveSettings() {
+  const sysid = session.sysid
+  if (sysid === null)
+    return
+
+  saveState.value = 'saving'
+  saveError.value = null
+  try {
+    const changed = await fetchChangedNames()
+
+    const backup = buildBackup(
+      params.params,
+      {
+        sysid,
+        firmwareVersion: session.firmwareVersion,
+        frameLabel: session.vehicleLabel,
+        uid: session.fcUid,
+      },
+      new Date().toISOString(),
+      { changed, isReadOnly: isParamReadOnly },
+    )
+    const filename = backupFilename(backup)
+    downloadText(serializeBackup(backup), filename)
+    savedFilename.value = filename
+    savedCount.value = backupParamCount(backup)
+    saveState.value = 'saved'
+  }
+  catch (err) {
+    saveError.value = err instanceof Error ? err.message : 'Couldn\'t save your settings.'
+    saveState.value = 'error'
+  }
+}
+
+// Ask the drone which of its parameters differ from its own factory
+// defaults. Shared by save and restore — save uses it to decide what to
+// write out, restore to spot changes the backup can't undo.
+async function fetchChangedNames(): Promise<Set<string>> {
+  const sysid = session.sysid
+  if (sysid === null)
+    throw new Error('Connect to your drone first.')
+  const ftp = new MavFtp(session.sendMessage, session.subscribeMessages, sysid, COMP_ID_AUTOPILOT)
+  // Clear any FTP slots a previous fetch left tied up; the firmware
+  // doesn't free them on its own and a second fetch would fail on
+  // OpenFileRO. Same reason useConnections() does it.
+  await ftp.resetSessions()
+  return changedParamNames(parseParamPack(await ftp.downloadFile(PARAM_PACK_PATH)))
+}
+
+// "1 setting" / "3 settings" — the counts below are frequently one.
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
+function downloadText(text: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
@@ -354,6 +456,69 @@ function cancel() {
         <div class="flex justify-end">
           <UButton color="primary" @click="retryReconnect">
             Reconnect
+          </UButton>
+        </div>
+      </div>
+    </UCard>
+
+    <UCard>
+      <template #header>
+        <div class="flex items-center gap-3">
+          <UIcon name="i-lucide-save" class="text-primary size-6" />
+          <h2 class="text-highlighted text-lg font-semibold">
+            Your drone's settings
+          </h2>
+        </div>
+      </template>
+
+      <p class="text-muted text-sm">
+        Save a copy of everything that's been changed on your drone from how it
+        left the factory — frame, motors, connections, tuning. If your drone ever
+        gets wiped, this is what puts it back the way you had it.
+      </p>
+
+      <div class="mt-4 space-y-3">
+        <UAlert
+          v-if="saveState === 'saved'"
+          color="success"
+          icon="i-lucide-check"
+          :title="`Saved ${plural(savedCount, 'setting')}`"
+        >
+          <template #description>
+            Everything you've changed from the factory setup, in
+            <span class="font-medium">{{ savedFilename }}</span> in your downloads.
+          </template>
+        </UAlert>
+
+        <UAlert
+          v-else-if="saveState === 'error'"
+          color="warning"
+          icon="i-lucide-triangle-alert"
+          title="Couldn't save your settings"
+        >
+          <template #description>
+            {{ saveError }}
+          </template>
+        </UAlert>
+
+        <p v-else-if="!canSave" class="text-muted text-sm">
+          <template v-if="!session.connected">
+            Connect your drone to save its settings.
+          </template>
+          <template v-else>
+            Reading your drone's settings…
+          </template>
+        </p>
+
+        <div class="flex justify-end">
+          <UButton
+            color="primary"
+            icon="i-lucide-download"
+            :disabled="!canSave"
+            :loading="saveState === 'saving'"
+            @click="saveSettings"
+          >
+            {{ saveState === 'saving' ? 'Saving…' : 'Save to my computer' }}
           </UButton>
         </div>
       </div>
