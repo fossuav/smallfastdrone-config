@@ -94,6 +94,11 @@ export const useSessionStore = defineStore('session', () => {
   // wizard resume snapshots) so that switching drones doesn't bleed
   // state from one into the other. Null until AUTOPILOT_VERSION arrives.
   const fcUid = ref<string | null>(null)
+  // APJ_BOARD_ID, which ArduPilot packs into AUTOPILOT_VERSION's
+  // board_version high half. Recorded in the drone identity file so SFD
+  // knows which firmware build the airframe runs. Null until
+  // AUTOPILOT_VERSION arrives; 0 on SITL, which has no board id.
+  const boardId = ref<number | null>(null)
 
   // Set true if any STATUSTEXT mentions "SFD" — the boot banner is the
   // primary place this comes through (e.g. "ArduCopter V4.7.0-beta4-SFD
@@ -219,6 +224,7 @@ export const useSessionStore = defineStore('session', () => {
       const v = msg.data as AutopilotVersion
       firmwareVersion.value = decodeFirmwareVersion(v.flightSwVersion, v.flightCustomVersion)
       fcUid.value = formatFcUid(v.uid, v.uid2)
+      boardId.value = v.boardVersion >>> 16
     }
     else if (msg.msgid === MSGID_STATUSTEXT) {
       const st = msg.data as StatusText
@@ -251,6 +257,7 @@ export const useSessionStore = defineStore('session', () => {
     lastHeartbeatAt.value = null
     firmwareVersion.value = null
     fcUid.value = null
+    boardId.value = null
     isSfd.value = false
     rebooting.value = false
     recentStatusTexts.value = []
@@ -414,6 +421,7 @@ export const useSessionStore = defineStore('session', () => {
     lastHeartbeatAt,
     firmwareVersion,
     fcUid,
+    boardId,
     isSfd,
     recentStatusTexts,
     statusReadAt,

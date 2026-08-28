@@ -106,7 +106,7 @@ Each route lazy-loads as its own chunk. State lives in Pinia setup stores. Statu
 
 The app is an installable PWA — `vite-plugin-pwa` generates a service worker, web manifest, and icons. Drop into Chrome's "Install" menu to get a standalone window.
 
-Still to come, in rough order: seed recipes, log download (Phase 4), the SFD enablement ceremonies (Phase 7, gated on firmware work), and BLHeli ESC passthrough (Phase 6). There is no CI workflow yet. See [PLAN.md](PLAN.md) for the full plan.
+Still to come, in rough order: seed recipes, log download (Phase 4), the SFD enablement ceremonies (Phase 7 — the enable ceremony's identity half exists as a workflow with no view yet; the lock and the exit ceremony are gated on firmware work), and BLHeli ESC passthrough (Phase 6). There is no CI workflow yet. See [PLAN.md](PLAN.md) for the full plan.
 
 ## Project layout
 
@@ -117,7 +117,7 @@ Still to come, in rough order: seed recipes, log download (Phase 4), the SFD ena
 │   ├── transport/       # Web Serial / WebUSB / WebSocket (test) + mocks
 │   ├── stores/          # Pinia setup stores (session, params, UI, field tools)
 │   ├── workflow/        # orchestration: wizard runtime, Lua engine, firmware,
-│   │                    #   motor check, connections, param backup
+│   │                    #   motor check, connections, param backup, SFD enable + identity file
 │   ├── wizards/         # one directory per wizard: manifest + view (+ applet.lua)
 │   ├── security/        # the signed-artifact upload seam every upload routes through
 │   ├── views/           # one per route

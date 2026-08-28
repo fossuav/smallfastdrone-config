@@ -213,8 +213,8 @@ Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md)
 - ✅ `src/protocol/secure-command.ts` — `SECURE_COMMAND` client: sequencing, reply matching; no session key or signing for the identity ops (decision 35). Unit-tested against a fake link; **not** SITL-testable — the handler only exists in signed builds — so bench is the integration test.
 - ✅ `src/workflow/param-backup.ts` + `src/protocol/param-pack.ts` — backup and restore. A backup holds the *delta* (what the drone reports as changed from its own factory defaults, minus read-only), because that is what restores cleanly onto freshly-flashed firmware. Restore planning reports what it can't put back. Defaults come from the drone itself via `@PARAM/param.pck?withdefaults=1`; no static table can supply them.
 - ✅ `DfuClient.readUnprotect()` — DfuSe `READ_UNPROTECT` for RDP regression on a drone that won't boot, surfaced in the Firmware view's recovery tab. Was the only genuinely new protocol work in the exit path; the rest of the DFU stack was already hardware-verified.
-- `src/workflow/sfd-enable.ts` + `src/workflow/sfd-recover.ts` — the two ceremonies. Both blocked on the firmware half.
-- `src/workflow/drone-identity.ts` — identity file read/write/export.
+- ✅ (identity half) `src/workflow/sfd-enable.ts` — pure enable ceremony (check → generate-or-read → verify by fresh read → file), with `use-sfd-enable.ts` wiring it to the session; the lock step waits on firmware F6. `src/workflow/sfd-recover.ts` — the exit ceremony — not started.
+- ✅ `src/workflow/drone-identity.ts` — identity file build/serialise/parse/compare, byte-compatible with the firmware repo's `sfd_identity.py`.
 - Enable and recovery wizards, both mountable in the bringup ribbon.
 - Encrypted applet install routed through `security/uploader.ts` as `kind: 'lua_script'` — the tool moves an opaque blob and never inspects it.
 

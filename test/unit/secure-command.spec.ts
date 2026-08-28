@@ -181,6 +181,7 @@ describe('secureCommandClient.getIdentity', () => {
     const err = await pending.catch(e => e)
     expect(err).toBeInstanceOf(SecureCommandError)
     expect((err as SecureCommandError).result).toBeNull()
+    expect((err as SecureCommandError).timedOut).toBe(false)
   })
 })
 
@@ -241,6 +242,7 @@ describe('secureCommandClient.request', () => {
     expect(err).toBeInstanceOf(SecureCommandError)
     expect((err as SecureCommandError).result).toBeNull()
     expect((err as SecureCommandError).message).toMatch(/didn't answer/)
+    expect((err as SecureCommandError).timedOut).toBe(true)
     expect(link.handlers.size).toBe(0)
   })
 

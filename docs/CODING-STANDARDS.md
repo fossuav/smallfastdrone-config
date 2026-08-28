@@ -71,7 +71,7 @@ No single canonical TS style guide is universally adopted; we use `@antfu/eslint
 
 ### Vue ecosystem specifics
 
-- **Composables** live in `src/composables/` and start with `use` (`useDroneSession`, `useParamWrite`).
+- **Composables** start with `use` and live in `src/workflow/` beside the workflow they drive (`useFirmwareFlash` in `firmware.ts`, `useReconnect` in `reconnect.ts`). When the workflow's logic is pure and unit-tested, the composable goes in its own file next to it (`sfd-enable.ts` + `use-sfd-enable.ts`) — the session store can't load in Vitest's node runtime, so a module that imports it can't be unit-tested.
 - **Auto-imports off** — explicit imports only. AI tools tend to assume auto-import is on and produce code that looks magic; we don't do that.
 - **Component registration is per-file via direct import** — no global registration.
 - **Style scoping via Tailwind utilities first.** `<style scoped>` blocks only when Tailwind genuinely can't express it.

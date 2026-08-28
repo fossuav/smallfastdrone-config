@@ -78,13 +78,14 @@ export interface SecureCommandResponse {
 // nothing answers, or when a reply doesn't decode. `result` is the
 // drone's verdict (DENIED = armed or identity already exists,
 // UNSUPPORTED = firmware without the identity commands) so a workflow
-// can branch on it; null means there was no verdict — a timeout or a
-// malformed reply.
+// can branch on it; null means there was no verdict — a timeout
+// (`timedOut`) or a malformed reply.
 export class SecureCommandError extends Error {
   constructor(
     public readonly operation: number,
     public readonly result: MavResult | null,
     message: string,
+    public readonly timedOut = false,
   ) {
     super(message)
     this.name = 'SecureCommandError'
@@ -178,7 +179,7 @@ export class SecureCommandClient {
 
       timer = setTimeout(() => {
         cleanup()
-        reject(new SecureCommandError(operation, null, 'The drone didn\'t answer. Its firmware may not support SFD enablement.'))
+        reject(new SecureCommandError(operation, null, 'The drone didn\'t answer. Its firmware may not support SFD enablement.', true))
       }, timeoutMs)
 
       this.send(msg).catch((e) => {
