@@ -117,6 +117,8 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 
 - Commit prefixes by area: `wizard:`, `recipe:`, `mavlink:`, `msp:`, `dfu:`, `fourway:`, `params:`, `ui:`, `transport:`, `security:`, `docs:`, `deps:`. Match betaflight-configurator commit style where unclear.
 - One concern per commit.
+- **Commit straight to `main`.** No feature branches for ordinary slice work — this is a single-maintainer repo and the whole history is linear. Don't create a branch and ask for a fast-forward; just commit.
+- **Commit on a feature basis.** A slice that spans protocol, workflow, UI and docs is still one commit if it's one feature; two features that happen to share a file are still two commits. When splitting, each commit must be independently runnable — reconstruct the honest intermediate state (including `PROGRESS.md` / `README.md` describing only what exists at that commit) rather than staging a half-file that never built.
 - Update `PROGRESS.md` when you complete a milestone or change scope.
 - Do **not** list Claude as author or co-author — author lines are human only. (Same rule as `../smallfastdrone/CLAUDE.md`.)
 
