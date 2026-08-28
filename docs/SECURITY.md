@@ -190,7 +190,7 @@ is what the tool does behind that.
 | 4 | `GENERATE_IDENTITY` | Drone makes its keypair, stores the private half, returns UID + public key. Refused if an identity already exists. |
 | 5 | **Verify** — read the identity back | Must succeed before step 6. Never lock a drone whose identity is unconfirmed. |
 | 6 | Export identity file | Operator saves it; this is what reaches SFD |
-| 7 | `LOCK` | Firmware raises RDP on next boot |
+| 7 | Set the lock bit in `BRD_OPTIONS` | Firmware raises RDP on next boot |
 | 8 | Reboot, confirm locked state | Tool reports "SFD enabled" |
 
 **Ordering is load-bearing.** Identity must exist and be verified before the
@@ -217,10 +217,15 @@ it.
 
 **Two unlock routes, and we need both:**
 
-- **Firmware-initiated** — a secure command on a healthy drone. Convenient.
+- **Firmware-initiated** — a `BRD_OPTIONS` bit acting on next boot, the same
+  shape the flash write-protection options already use. Convenient, and an
+  ordinary parameter rather than a custom command. Requires a drone that
+  still boots and still talks.
 - **DFU read-unprotect** — the DfuSe `READ_UNPROTECT` command (`0x92`), which
   asks the ST bootloader to drop RDP itself. Works on a drone that will not
-  boot, which makes it the real get-out-of-jail card.
+  boot, which makes it the real get-out-of-jail card — and that is the case
+  you are usually in when you need to unlock at all, so the parameter route
+  above cannot replace it.
 
   Deliberately **not** an option-byte write. Programming the RDP field by hand
   means getting a chip-specific register offset right, and writing `0xCC` there
@@ -287,9 +292,9 @@ Companion to this document, to land on the `pr-lua-encryption` branch in
 | F1 | Dedicated identity region in `.apsec_data` | Write-once; never returned by any MAVLink command; excluded from `check_signature()`; not subject to pack-toward-front |
 | F2 | Compile out `SET_PUBLIC_KEYS` / `REMOVE_PUBLIC_KEYS` on SFD builds | Unused once keys are build-time; pure attack surface |
 | F3 | Fail closed on empty key array | `all_zero_keys() → check_signature() == true` is right for stock, wrong for us |
-| F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY`, `LOCK`, `UNLOCK` | `UNLOCK` deliberately unsigned; `GENERATE_IDENTITY` refused when an identity exists |
+| F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY` | Identity only. Lock/unlock are `BRD_OPTIONS` bits, not commands — see F6. `GENERATE_IDENTITY` refused when an identity already exists. |
 | F5 | `.lxa` v2 loader — ECDH + UID prefix check | Replaces the symmetric slot-3 path |
-| F6 | Runtime-gated RDP | Currently unconditional from `main_loop()` when `HAL_FLASH_READOUT_PROTECTION` is compiled in. Must require a verified identity first. |
+| F6 | RDP as `BRD_OPTIONS` bits, acting on next boot | Currently unconditional from `main_loop()` when `HAL_FLASH_READOUT_PROTECTION` is compiled in, which breaks the pattern the adjacent write-protection options already follow (bits 4/5/6 → `unlock_flash()` / `protect_bootloader()`). Use free bits (10+) so lock and unlock are ordinary parameters: no bespoke secure command, and next-boot semantics give the ceremony its sequencing for free — write identity, verify, *then* set the bit. Lock must still refuse when no verified identity exists. **Unlock caveat:** `flash.c` has no `__RAMFUNC__`, so `stm32_flash_set_rdp_flash(0xAA)` runs from the flash the regression is erasing; upstream ships that call commented out, i.e. unexercised. Likely wants to be a RAM function, and wants bench verification. |
 | F7 | Bootloader-side invariants | Keys never emptied; RDP raise-only except via `UNLOCK`; identity write-once. Invariants in the bootloader survive a buggy or hostile configurator. |
 | F8 | Fix `create_nonce()` | Called on the decrypt path where it overwrites the file's nonce; `nonce_len` passed uninitialised to `get_system_id_unformatted(buf, len)`, where `len` is in/out |
 | F9 | Confirm x25519 is not compiled out of the FC monocypher build | `crypto_key_exchange` / `crypto_x25519` are declared in `AP_CheckFirmware/monocypher.h` |
