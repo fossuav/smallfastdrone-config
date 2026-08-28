@@ -70,6 +70,8 @@ export type FlashPhase
     //                              that calls `provideBootloaderPort()`.
     | 'syncing' //                  bootloader path: GET_SYNC retries
     | 'verifying-board' //          bootloader path: GET_DEVICE check
+    | 'unlocking' //                DFU path: dropping readout protection,
+    //                              which mass-erases the chip
     | 'erasing' //                  CHIP_ERASE (bootloader) / sector-erase (DFU)
     | 'programming' //              PROG_MULTI loop / DNLOAD chunks
     | 'verifying' //                bootloader path: GET_CRC
@@ -568,6 +570,41 @@ export function useFirmwareFlash() {
     }
   }
 
+  // Drop readout protection on a locked board over DFU.
+  //
+  // The recovery half of the SFD exit ceremony (docs/SECURITY.md), and
+  // the only route that works when the board won't boot far enough to
+  // unlock itself. It mass-erases: firmware, bootloader and the drone's
+  // identity key all go, and the board comes back blank needing a
+  // `_with_bl.hex` flash. The caller must have already told the operator
+  // that, and must tell them to unplug and replug afterwards — the chip
+  // resets itself and re-enumerates.
+  async function unlockDfu(opened: OpenedDfuDevice): Promise<void> {
+    assertIdle()
+    error.value = null
+    progress.value = null
+
+    try {
+      phase.value = 'unlocking'
+      const client = new DfuClient(opened.control, { interfaceNumber: opened.interfaceNumber })
+      await client.readUnprotect((f) => {
+        progress.value = f
+      })
+      phase.value = 'done'
+      progress.value = 1
+    }
+    catch (e) {
+      phase.value = 'error'
+      error.value = e instanceof Error ? e.message : String(e)
+      throw e
+    }
+    finally {
+      // The device has almost certainly reset itself out from under us;
+      // drop our handle either way so a replug isn't fighting a stale claim.
+      await opened.control.close().catch(() => undefined)
+    }
+  }
+
   return {
     phase,
     progress,
@@ -576,6 +613,7 @@ export function useFirmwareFlash() {
     flash,
     flashViaBootloaderPort,
     flashDfu,
+    unlockDfu,
     reset,
     provideBootloaderPort,
     cancelBootloaderPick,

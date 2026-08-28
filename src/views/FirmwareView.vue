@@ -55,6 +55,7 @@ const {
   flash,
   flashViaBootloaderPort,
   flashDfu,
+  unlockDfu,
   reset,
   provideBootloaderPort,
   cancelBootloaderPick,
@@ -284,15 +285,41 @@ const eraseStrategyWarning = computed(() => {
   return null
 })
 
+// Which DFU action produced the current terminal state — the done copy
+// differs sharply between "your firmware is installed" and "your board is
+// now blank and needs one".
+const lastDfuAction = ref<'flash' | 'unlock'>('flash')
+
+// Whether the locked-board disclosure is open. Collapsed by default so a
+// destructive, rarely-needed action doesn't compete with the primary
+// install button.
+const showUnlock = ref(false)
+
 async function startDfuFlash(handle: DfuDeviceHandle) {
   if (!dfuFile.value)
     return
+  lastDfuAction.value = 'flash'
   try {
     const opened = await openDfuDevice(handle.device)
     const spec: DfuFlashSpec = dfuFile.value.kind === 'apj'
       ? { kind: 'apj', apj: dfuFile.value.apj }
       : { kind: 'hex', hex: dfuFile.value.hex, filename: dfuFile.value.filename }
     await flashDfu(spec, opened, { eraseStrategy: eraseStrategy.value })
+  }
+  catch {
+    /* flashError populated, UI reads from it */
+  }
+}
+
+// Drop readout protection on a locked board. Destructive: the chip
+// mass-erases as part of the unlock, so the board comes back blank and
+// needs a `_with_bl.hex` install. No file is required to run it — a
+// locked board is exactly the case where nothing else works.
+async function startDfuUnlock(handle: DfuDeviceHandle) {
+  lastDfuAction.value = 'unlock'
+  try {
+    const opened = await openDfuDevice(handle.device)
+    await unlockDfu(opened)
   }
   catch {
     /* flashError populated, UI reads from it */
@@ -316,12 +343,15 @@ const phaseLabel = computed(() => {
     case 'awaiting-bootloader-port': return 'Waiting for you to pick the upload-mode port…'
     case 'syncing': return 'Reaching the drone…'
     case 'verifying-board': return 'Checking this firmware matches your drone…'
+    case 'unlocking': return 'Unlocking the board — this erases it and takes a while. Don\'t unplug it.'
     case 'erasing': return 'Erasing the old firmware…'
     case 'programming': return 'Writing the new firmware…'
     case 'verifying': return 'Verifying what was written…'
     case 'restarting': return 'Finishing up…'
     case 'reconnecting': return 'Reconnecting…'
     case 'done':
+      if (lastDfuAction.value === 'unlock')
+        return 'Unlocked and erased. Unplug + replug the board, then install a "_with_bl.hex" file.'
       if (pathKind.value === 'dfu')
         return 'Done. Unplug + replug your drone to start it.'
       if (wasSkipped.value)
@@ -1055,6 +1085,56 @@ onMounted(() => {
             icon="i-lucide-triangle-alert"
             :description="eraseStrategyWarning"
           />
+
+          <!-- Locked-board recovery. Collapsed by default: destructive,
+               rarely needed, and it must not compete with Install. -->
+          <div v-if="dfuDevices.length > 0" class="mt-4">
+            <UButton
+              variant="link"
+              color="neutral"
+              size="xs"
+              class="px-0"
+              :icon="showUnlock ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+              @click="showUnlock = !showUnlock"
+            >
+              This board won't accept firmware — is it locked?
+            </UButton>
+
+            <div v-if="showUnlock" class="mt-2 space-y-3">
+              <UAlert
+                color="warning"
+                icon="i-lucide-shield-off"
+                title="Unlocking erases the whole board"
+              >
+                <template #description>
+                  Some boards are locked so their firmware can't be copied off them.
+                  Unlocking is the only way back in, and the board wipes itself
+                  completely as part of it — firmware, start-up code and every
+                  setting. Afterwards you'll need a <span class="font-medium">_with_bl.hex</span>
+                  file to get it running again, and your settings back from a
+                  saved backup. This can take a minute; don't unplug it.
+                </template>
+              </UAlert>
+
+              <div
+                v-for="(d, i) in dfuDevices"
+                :key="`unlock-${i}`"
+                class="flex flex-wrap items-center justify-between gap-3"
+              >
+                <span class="text-muted text-sm">{{ d.label }}</span>
+                <UButton
+                  color="warning"
+                  variant="subtle"
+                  icon="i-lucide-shield-off"
+                  :loading="isRunning"
+                  :disabled="isRunning"
+                  @click="startDfuUnlock(d)"
+                >
+                  Unlock and erase this board
+                </UButton>
+              </div>
+            </div>
+          </div>
 
           <div v-if="phaseLabel" class="mt-4 space-y-2">
             <div class="flex items-center gap-2 text-sm">

@@ -21,7 +21,7 @@
 // would send for the sequence under test, then asserts the bytes the
 // client wrote out.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   DFU_REQ,
   DFU_STATE,
@@ -329,5 +329,115 @@ describe('dfuClient.flash — end-to-end', () => {
       { transferSize: 2048 },
     )
     // Reached end without throwing.
+  })
+})
+
+describe('dfuClient.readUnprotect', () => {
+  // The wait is deliberately long (the device's estimate plus a 20s
+  // margin), so every case here drives fake timers past it.
+  // Capture the outcome rather than holding a rejectable promise across
+  // the clock advance: the fail-fast paths reject before any timer runs,
+  // which would otherwise surface as an unhandled rejection.
+  async function runWithTimers<T>(fn: () => Promise<T>, advanceMs = 60_000): Promise<T> {
+    vi.useFakeTimers()
+    try {
+      const outcome = fn().then(
+        v => ({ ok: true as const, v }),
+        e => ({ ok: false as const, e }),
+      )
+      await vi.advanceTimersByTimeAsync(advanceMs)
+      const result = await outcome
+      if (!result.ok)
+        throw result.e
+      return result.v
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  }
+
+  it('sends the bare 0x92 command as a wBlockNum=0 download', async () => {
+    const mock = new MockUSBControl()
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuIDLE),
+      status(DFU_STATE.dfuDNBUSY, DFU_STATUS.OK, 5000),
+    ])
+    const client = new DfuClient(mock)
+
+    await runWithTimers(() => client.readUnprotect())
+
+    const dnload = mock.log.find(e => e.kind === 'out' && e.setup.request === DFU_REQ.DNLOAD)
+    expect(dnload).toBeDefined()
+    expect(dnload!.setup.value).toBe(0)
+    expect([...dnload!.data!]).toEqual([DFUSE_CMD.READ_UNPROTECT])
+  })
+
+  it('treats the device going away as success, because that is what a reset looks like', async () => {
+    const mock = new MockUSBControl()
+    // No third status queued: the mock throws, standing in for the
+    // bootloader having reset itself mid-erase.
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuIDLE),
+      status(DFU_STATE.dfuDNBUSY, DFU_STATUS.OK, 5000),
+    ])
+    const client = new DfuClient(mock)
+
+    await expect(runWithTimers(() => client.readUnprotect())).resolves.toBeUndefined()
+  })
+
+  it('reports completion through the progress callback', async () => {
+    const mock = new MockUSBControl()
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuIDLE),
+      status(DFU_STATE.dfuDNBUSY, DFU_STATUS.OK, 5000),
+    ])
+    const client = new DfuClient(mock)
+    const seen: number[] = []
+
+    await runWithTimers(() => client.readUnprotect(f => seen.push(f)))
+
+    expect(seen[0]).toBe(0)
+    expect(seen.at(-1)).toBe(1)
+    expect(Math.max(...seen.slice(0, -1))).toBeLessThanOrEqual(0.95)
+  })
+
+  it('fails when the device answers afterwards, meaning it never reset', async () => {
+    const mock = new MockUSBControl()
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuIDLE),
+      status(DFU_STATE.dfuDNBUSY, DFU_STATUS.OK, 5000),
+      status(DFU_STATE.dfuIDLE),
+    ])
+    const client = new DfuClient(mock)
+
+    await expect(runWithTimers(() => client.readUnprotect()))
+      .rejects
+      .toThrow(/didn't restart after unlocking/)
+  })
+
+  it('fails fast when the board never starts unlocking', async () => {
+    const mock = new MockUSBControl()
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuIDLE),
+      status(DFU_STATE.dfuIDLE), // not dfuDNBUSY — nothing happened
+    ])
+    const client = new DfuClient(mock)
+
+    await expect(runWithTimers(() => client.readUnprotect()))
+      .rejects
+      .toThrow(/didn't start unlocking/)
+  })
+
+  it('surfaces an error status from the command itself', async () => {
+    const mock = new MockUSBControl()
+    queueStatuses(mock, [
+      status(DFU_STATE.dfuIDLE),
+      status(DFU_STATE.dfuERROR, DFU_STATUS.errVENDOR),
+    ])
+    const client = new DfuClient(mock)
+
+    await expect(runWithTimers(() => client.readUnprotect()))
+      .rejects
+      .toThrow(/Couldn't unlock this board/)
   })
 })

@@ -218,10 +218,18 @@ it.
 **Two unlock routes, and we need both:**
 
 - **Firmware-initiated** — a secure command on a healthy drone. Convenient.
-- **DFU option-byte write** — writes RDP `0xAA` via DfuSe. Works on a drone that
-  will not boot, which makes it the real get-out-of-jail card. `src/protocol/dfu.ts`
-  does not write option bytes yet; this is the one genuinely new piece of
-  protocol work in the exit path.
+- **DFU read-unprotect** — the DfuSe `READ_UNPROTECT` command (`0x92`), which
+  asks the ST bootloader to drop RDP itself. Works on a drone that will not
+  boot, which makes it the real get-out-of-jail card.
+
+  Deliberately **not** an option-byte write. Programming the RDP field by hand
+  means getting a chip-specific register offset right, and writing `0xCC` there
+  sets Level 2 — irreversible, and the board is scrap. Handing the request to
+  the bootloader means that value is never encoded anywhere in this codebase.
+
+  Note the inverted success condition: the bootloader resets itself the moment
+  the transition completes, so the final status read is *expected* to fail. A
+  device that answers did **not** unprotect.
 
 The unlock **must not** require an SFD signature. The customer must be able to
 exit unaided — that is what makes it an escape hatch rather than a hostage
@@ -262,7 +270,7 @@ now and expensive to discover later.
 | Concern | Where | Why |
 |---|---|---|
 | Identity keygen, ECDH, decrypt | SFD firmware | Only place the private key may exist |
-| RDP raise / lower | SFD firmware + DFU option bytes | Needs privileged flash access |
+| RDP raise / lower | SFD firmware + DfuSe `READ_UNPROTECT` | Needs privileged flash access |
 | Ceremony orchestration, param backup/restore, UX | This tool | Already owns flashing, Lua install, params |
 | Applet encryption, key custody | SFD offline build tooling | Master secret must never ship |
 
@@ -303,7 +311,7 @@ rebase burden is low.
 | T1 | `src/protocol/secure-command.ts` | `SECURE_COMMAND` client — session key, sequencing, reply handling |
 | T2 | `src/workflow/sfd-enable.ts` | Enable ceremony orchestrator |
 | T3 | `src/workflow/sfd-recover.ts` | Exit ceremony — backup → unlock → flash → restore |
-| T4 | `src/protocol/dfu-options.ts` | DfuSe option-byte write for RDP regression on a dead drone |
+| T4 | `DfuClient.readUnprotect()` | ✅ Landed. DfuSe `READ_UNPROTECT` for RDP regression on a dead drone, surfaced in the Firmware view's recovery tab. Bench verification pending — no SITL substitute for DFU. |
 | T5 | `src/workflow/param-backup.ts` | Full param snapshot + restore with a survivability report |
 | T6 | `src/workflow/drone-identity.ts` | Identity file read/write/export |
 | T7 | Views | SFD-enable and recovery wizards, both bringup-ribbon mountable |

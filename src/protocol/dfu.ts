@@ -110,7 +110,7 @@ export function stateLabel(state: number): string {
 export const DFUSE_CMD = {
   SET_ADDRESS: 0x21,
   ERASE_PAGE: 0x41, // (1-byte payload → mass erase; +addr → page)
-  READ_UNPROTECT: 0x92, // not used in v1
+  READ_UNPROTECT: 0x92, // drop readout protection — implies a mass erase
 } as const
 
 // Status reply layout returned by GETSTATUS. Always 6 bytes.
@@ -154,6 +154,23 @@ export function buildErasePagePayload(address: number): Uint8Array {
   out[3] = (address >>> 16) & 0xFF
   out[4] = (address >>> 24) & 0xFF
   return out
+}
+
+// Build the DfuSe READ_UNPROTECT payload (the lone 0x92 byte).
+//
+// This asks the ST bootloader to drop the chip's readout protection from
+// Level 1 to Level 0. The silicon makes that transition mass-erase flash,
+// which is the whole point when recovering a locked board: it is also
+// what destroys the drone's identity key (see docs/SECURITY.md), and
+// there is no way to have one without the other.
+//
+// Deliberately *not* an option-byte write. Programming the option
+// registers by hand means getting a chip-specific RDP field offset right,
+// and writing 0xCC there sets Level 2, which is irreversible and bricks
+// the board permanently. Handing the request to the bootloader avoids
+// ever encoding that value.
+export function buildReadUnprotectPayload(): Uint8Array {
+  return new Uint8Array([DFUSE_CMD.READ_UNPROTECT])
 }
 
 // Build the DfuSe mass-erase payload (the lone 0x41 byte).

@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildErasePagePayload,
   buildMassErasePayload,
+  buildReadUnprotectPayload,
   buildSetAddressPayload,
   combineFlashLayouts,
   describeMemoryLayouts,
@@ -250,5 +251,14 @@ describe('describeMemoryLayouts', () => {
 
   it('handles the empty case', () => {
     expect(describeMemoryLayouts([])).toMatch(/no memory layouts/)
+  })
+})
+
+describe('buildReadUnprotectPayload', () => {
+  it('is the lone 0x92 command byte, never an option-byte write', () => {
+    // Programming the RDP field by hand risks writing 0xCC (Level 2),
+    // which is irreversible. Handing the request to the bootloader means
+    // that value is never encoded anywhere in this codebase.
+    expect([...buildReadUnprotectPayload()]).toEqual([0x92])
   })
 })

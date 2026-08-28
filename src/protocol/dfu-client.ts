@@ -40,6 +40,7 @@ import type { ControlSetup, USBControl } from '../transport/usb-control'
 import {
   buildErasePagePayload,
   buildMassErasePayload,
+  buildReadUnprotectPayload,
   buildSetAddressPayload,
   DFU_REQ,
   DFU_STATE,
@@ -104,6 +105,29 @@ const MASS_ERASE_TIMEOUT_MS = 120_000
 //     program — H7 sector erase max is ~4 s, so 60 s is a 15× cushion.
 const GETSTATUS_TIMEOUT_MS = 45_000
 const OPERATION_TIMEOUT_MS = 60_000
+
+// Extra wait on top of the device's own estimate before we check whether
+// a read-unprotect landed. The RDP 1 -> 0 mass erase is long and must not
+// be interrupted, and the device stops answering USB while it runs, so
+// asking too early looks like failure. betaflight-configurator uses the
+// same 20 s margin for the same reason.
+const READ_UNPROTECT_MARGIN_MS = 20_000
+
+// Drive a progress callback from 0 towards 0.95 over `durationMs`, and
+// return a stop function. Used where the device goes silent for a long
+// stretch and the only honest thing to show the operator is elapsed time
+// against an estimate. Caps below 1 so the bar never claims completion
+// the device hasn't confirmed.
+function animateProgress(durationMs: number, onProgress?: (fraction: number) => void): () => void {
+  if (!onProgress)
+    return () => {}
+  const startedAt = Date.now()
+  onProgress(0)
+  const interval = setInterval(() => {
+    onProgress(Math.min(0.95, (Date.now() - startedAt) / durationMs))
+  }, 100)
+  return () => clearInterval(interval)
+}
 
 // DFU control transfer setup boilerplate — bmRequestType is always
 // class | interface, the request varies. Index is the bInterface (0
@@ -458,6 +482,73 @@ export class DfuClient {
       // The device dropping the bus mid-manifest is a normal exit on
       // boards that aren't manifestation-tolerant.
     }
+  }
+
+  // Drop the chip's readout protection, which mass-erases flash.
+  //
+  // The recovery half of the SFD exit ceremony (docs/SECURITY.md): when a
+  // board is locked and won't boot, nothing on the MAVLink side can ask
+  // it to unlock itself, so the request goes to the ST bootloader over
+  // DFU instead. The silicon erases flash as part of the RDP 1 -> 0
+  // transition — firmware, bootloader and the drone's identity key all
+  // go. That is not a side effect to work around; it is what makes the
+  // lock trustworthy in the first place.
+  //
+  // **Success looks like failure.** The bootloader resets itself the
+  // moment the transition completes, so the final GETSTATUS is expected
+  // to stall or throw. A device that answers it did *not* unprotect. The
+  // inverted condition is the whole subtlety of this command, and it
+  // matches how betaflight-configurator reads the same sequence.
+  //
+  // The caller must tell the operator to unplug and replug afterwards:
+  // the chip re-enumerates blank, and only then can it be flashed.
+  async readUnprotect(onProgress?: (fraction: number) => void): Promise<void> {
+    await this.ensureIdle()
+    await this.dnloadCommand(buildReadUnprotectPayload())
+
+    // The device must report dfuDNBUSY here. Anything else means the
+    // bootloader refused the command outright — most likely the chip
+    // isn't actually read-protected, so there is nothing to undo.
+    const first = await this.getStatus()
+    if (first.status !== DFU_STATUS.OK) {
+      throw new Error(
+        `Couldn't unlock this board: it reported ${statusLabel(first.status)} (state ${stateLabel(first.state)}).`,
+      )
+    }
+    if (first.state !== DFU_STATE.dfuDNBUSY) {
+      throw new Error(
+        `This board didn't start unlocking (state ${stateLabel(first.state)}). It may not be locked.`,
+      )
+    }
+
+    // Wait out the erase. The device's own estimate is the floor, but we
+    // add a wide margin: the operator must not unplug mid-erase, and an
+    // interrupted RDP regression can leave the chip in a state that needs
+    // a full recovery flash to escape.
+    const waitMs = Math.max(first.pollTimeoutMs, 0) + READ_UNPROTECT_MARGIN_MS
+    const stopAnimation = animateProgress(waitMs, onProgress)
+    try {
+      await sleep(waitMs)
+    }
+    finally {
+      stopAnimation()
+    }
+
+    // Now the inversion: a throw means the device reset itself, which is
+    // what we want. A successful reply means it is still sitting there
+    // answering us, so the transition never happened.
+    let stillAlive: Awaited<ReturnType<DfuClient['getStatus']>>
+    try {
+      stillAlive = await this.getStatus()
+    }
+    catch {
+      onProgress?.(1)
+      return // device reset — unprotect succeeded
+    }
+    throw new Error(
+      `This board didn't restart after unlocking (state ${stateLabel(stillAlive.state)}), `
+      + `so its protection is probably unchanged. Unplug it, put it back in recovery mode, and try again.`,
+    )
   }
 
   // The whole sequence for one or more flash regions:

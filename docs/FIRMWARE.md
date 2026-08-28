@@ -242,14 +242,16 @@ SITL has no bootloader and no DFU. Coverage breakdown:
   firmware.ardupilot.org — they'd need a CORS-friendly host (GitHub
   Releases is the obvious choice) and a small adapter in the picker
   that knows to look in both sources.
-- **DFU option-byte write, for RDP regression.** [SECURITY.md](SECURITY.md)'s
-  exit ceremony needs a way to lower STM32 readout protection on a drone
-  that won't boot — a DfuSe write to the option-byte region setting RDP
-  to `0xAA`, which triggers a silicon mass erase. That leaves a blank
-  chip, so recovery is the existing `_with_bl.hex` DFU path. This is the
-  only genuinely new protocol work in that ceremony; the rest of the DFU
-  stack already covers it. Planned as `src/protocol/dfu-options.ts` in
-  Phase 7.
+- **Locked-board recovery (landed).** [SECURITY.md](SECURITY.md)'s exit
+  ceremony needs a way to drop STM32 readout protection on a board that
+  won't boot. `DfuClient.readUnprotect()` sends the DfuSe
+  `READ_UNPROTECT` command (`0x92`) and lets the ST bootloader do the
+  RDP 1 → 0 transition, which the silicon mass-erases as part of. Not an
+  option-byte write: hand-programming the RDP field risks writing `0xCC`
+  (Level 2), which is permanent. Surfaced in the recovery tab behind a
+  collapsed disclosure, since it is destructive and rarely needed. The
+  board comes back blank, so recovery is the existing `_with_bl.hex`
+  path. **Bench verification pending** — no SITL substitute exists.
 - **SFD-enabled boards change the flashing contract.** Once a drone is
   SFD-enabled its bootloader accepts only SFD-signed firmware and its
   bootloader sector is write-protected, so the "flash any `.apj`" flows
