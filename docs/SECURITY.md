@@ -87,14 +87,20 @@ first boot with nothing to add or remove at runtime.
 **Consequences, all of them good:**
 
 - `SECURE_COMMAND_SET_PUBLIC_KEYS` and `SECURE_COMMAND_REMOVE_PUBLIC_KEYS` are
-  never used in any customer flow. They should be **compiled out** of SFD
-  builds — they are attack surface with no remaining purpose.
+  never used in any customer flow. They are **compiled out** of SFD builds (F2)
+  — attack surface with no remaining purpose.
 - The `all_zero_keys() → check_signature() == true` fail-open path (an
   intentional upstream convenience) can never be reached with an empty array,
-  because the array is never mutated. It should still be made **fail-closed** on
-  SFD builds as belt and braces.
+  because the array is never mutated. It is **fail-closed** on SFD builds
+  anyway (F3), as belt and braces.
 - The customer ceremony reduces to identity generation plus lock, neither of
   which requires a signature from a key the customer would have to hold.
+
+Both are governed by one compile-time posture, **`AP_CHECK_FIRMWARE_FIXED_KEYS`**
+(`AP_CheckFirmware_config.h`, default 0), which `SmallFastDronev1/hwdef.dat`
+sets to 1 so a product build cannot forget it. It only has an effect on
+`--signed-fw` builds; unsigned builds compile none of the command handling.
+`AP_CHECK_FIRMWARE_IDENTITY_ENABLED` (the identity commands, F4) follows it.
 
 ## Per-drone identity
 
@@ -197,12 +203,42 @@ is what the tool does behind that.
 |---|---|---|
 | 1 | Flash SFD firmware (`_with_bl.hex`, DFU) | Bootloader carries only SFD's key. Uses the existing hardware-verified DFU path. |
 | 2 | Reconnect on MAVLink | Existing `useReconnect()` |
-| 3 | `GET_SESSION_KEY` | Opens the secure-command session |
-| 4 | `GENERATE_IDENTITY` | Drone makes its keypair, stores the private half, returns UID + public key. Refused if an identity already exists. |
-| 5 | **Verify** — read the identity back | Must succeed before step 6. Never lock a drone whose identity is unconfirmed. |
-| 6 | Export identity file | Operator saves it; this is what reaches SFD |
-| 7 | Set the lock bit in `BRD_OPTIONS` | Firmware raises RDP on next boot |
-| 8 | Reboot, confirm locked state | Tool reports "SFD enabled" |
+| 3 | `GENERATE_IDENTITY` | Drone makes its keypair from the hardware TRNG, stores the private half, replies with UID + public key derived from what it just wrote. Denied while armed or if an identity already exists — the latter is not an error for the tool: fall through to step 4. No session key, no signature (see below). |
+| 4 | **Verify** — `GET_IDENTITY`, a fresh read | Must succeed and match step 3 before step 6. Never lock a drone whose identity is unconfirmed. |
+| 5 | Export identity file | Operator saves it; this is what reaches SFD |
+| 6 | Set the lock bit in `BRD_OPTIONS` | Firmware raises RDP on next boot |
+| 7 | Reboot, confirm locked state | Tool reports "SFD enabled" |
+
+### Why the identity commands are unsigned
+
+Upstream `SECURE_COMMAND` requires every operation to be signed by a private key
+matching one of the bootloader's public keys. On an SFD build the only such key
+is SFD's, and the tool must not hold it (decision 10). So `GENERATE_IDENTITY`
+and `GET_IDENTITY` bypass `check_signature()` **by design**, and need no
+`GET_SESSION_KEY` first. That costs nothing: generation is write-once and its
+reply is public data; a stranger with link access to a fresh drone who
+"pre-empts" generation has produced exactly the identity the customer would
+have — the private half never leaves the chip either way. Every other operation
+(`GET_PUBLIC_KEYS`, `GET_SESSION_KEY`, …) stays signed; on a fixed-key build
+that means SFD-only.
+
+Wire details, as landed (F4):
+
+- Operations are **vendor-private numbers**, not additions to the MAVLink XML:
+  `GENERATE_IDENTITY = 0x53464401`, `GET_IDENTITY = 0x53464402` ("SFD" + n),
+  clear of the `SECURE_COMMAND_OP` enum (0–7). `data_length` and `sig_length`
+  are both 0.
+- Both reply with `data_length = 44`: bytes 0–11 the STM32 UID (the same bytes
+  the `.lxa` v2 nonce prefix must match), bytes 12–43 the X25519 public key.
+  The public half is never stored — it is derived from the private key in flash
+  on each call, so the two cannot disagree, and a `GENERATE` reply is therefore
+  already a read-back of what landed in flash.
+- Results: `ACCEPTED`; `DENIED` = armed or identity already exists;
+  `FAILED` = no identity to return / RNG or flash failure; `UNSUPPORTED` =
+  firmware without the identity commands.
+- `Tools/scripts/signing/sfd_identity.py` in the firmware repo is the bench and
+  factory counterpart of the tool's ceremony — read, `--generate`, read back,
+  compare, write the `sfd-identity/1` file. pymavlink only, no key material.
 
 **Ordering is load-bearing.** Identity must exist and be verified before the
 lock. Locking first strands the drone — recoverable only via the exit ceremony,
@@ -304,14 +340,14 @@ Ordered by dependency, not priority.
 | # | Change | Where | Notes |
 |---|---|---|---|
 | F1 | Dedicated identity region in `.apsec_data` | `AP_CheckFirmware/AP_CheckFirmware.h` — `struct ap_identity_data`, last member of `ap_secure_data`; accessors in `AP_CheckFirmware_secure_command.cpp` | ✅ **Landed 2026-08-28** (`AP_CheckFirmware: add a per-drone identity region to the secure data`). `find_identity()` (nullptr on a bootloader without the region), `identity_is_set()`, write-once `set_identity()` that rewrites the bootloader sector through the existing `read_bootloader()` / `write_bootloader()` path and wipes its RAM copy after. Never returned by any MAVLink command; excluded from `check_signature()` and `set_public_keys()` by construction (see "Per-drone identity"). Compile-verified on a signed TBS_LUCID_H7 bootloader + signed SmallFastDronev1 firmware, and the built image checked byte-for-byte: region present and zero, untouched by `make_secure_bl.py --omit-ardupilot-keys`. **Bench verification pending** with F4, when there is something to write. |
-| F2 | Compile out `SET_PUBLIC_KEYS` / `REMOVE_PUBLIC_KEYS` on SFD builds | `AP_CheckFirmware/AP_CheckFirmware_secure_command.cpp` — the `SECURE_COMMAND_OP` switch | Unused once keys are build-time (decision 33); pure attack surface. |
-| F3 | Fail closed on an empty key array | same file — `all_zero_keys()` and its use in `check_signature()` | `all_zero_keys() → check_signature() == true` is a sensible convenience for stock ArduPilot and exactly wrong for us. Make the posture compile-time. |
-| F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY` | same file | Identity only — lock/unlock are `BRD_OPTIONS` bits, not commands (F6). Generate from `hal.util->get_true_random_vals()`, clamp per X25519, store through `set_identity()` (F1), which already refuses when an identity exists, so re-running enable can't silently orphan a customer's applets; wipe the RAM copy after. `GET_IDENTITY` derives the public half with `crypto_x25519_public_key()` on demand rather than storing it. |
+| F2 | Compile out `SET_PUBLIC_KEYS` / `REMOVE_PUBLIC_KEYS` on SFD builds | `AP_CheckFirmware/AP_CheckFirmware_secure_command.cpp` — the `SECURE_COMMAND_OP` switch | ✅ **Landed 2026-08-28** (`AP_CheckFirmware: compile out MAVLink key management on fixed-key builds`). Under `AP_CHECK_FIRMWARE_FIXED_KEYS` both operations and `set_public_keys()` itself — the only writer of `public_key[]` — are gone; `read_bootloader()` / `write_bootloader()` remain for the identity region. Confirmed absent from the SmallFastDronev1 ELF. |
+| F3 | Fail closed on an empty key array | same file — `all_zero_keys()` and its use in `check_signature()` | ✅ **Landed 2026-08-28** (`AP_CheckFirmware: fail closed on an empty key set when keys are fixed`). `check_signature()` returns false on an all-zero set under the same define. The bootloader's own `all_zero_public_keys()` fail-open in `check_good_firmware()` is untouched here — that is F7, and a bootloader change. |
+| F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY` | same file | ✅ **Landed 2026-08-28** (`AP_CheckFirmware: add GENERATE_IDENTITY and GET_IDENTITY secure commands`). Identity only — lock/unlock are `BRD_OPTIONS` bits, not commands (F6). Generate: `hal.util->get_true_random_vals()` (100 ms timeout), X25519 clamp, `set_identity()` (write-once from F1), `crypto_wipe` the stack copy; denied while armed. Get: UID + `crypto_x25519_public_key()` of the key in flash. Both **unsigned** — see "Why the identity commands are unsigned". Gated by `AP_CHECK_FIRMWARE_IDENTITY_ENABLED`. Compile-verified on both posture paths; **bench verification pending** — `sfd_identity.py --generate` against a TBS_LUCID_H7 running a signed bootloader + signed SmallFastDronev1 build is the test. |
 | F5 | `.lxa` v2 loader — ECDH + UID prefix check | `AP_Scripting/lua_scripts.cpp` — `load_encrypted_script()`, `decrypt_script()` | Replaces the symmetric slot-3 path. Check the nonce's UID prefix *before* attempting decryption, so a file for another airframe is refused cheaply. |
 | F6 | RDP as `BRD_OPTIONS` bits, acting on next boot | `AP_BoardConfig/AP_BoardConfig.cpp` (the `OPTIONS` bitmask), `AP_HAL_ChibiOS/HAL_ChibiOS_Class.cpp` (`main_loop()`), `hwdef/common/flash.c` (`stm32_flash_set_rdp_flash`) | Currently unconditional from `main_loop()` when `HAL_FLASH_READOUT_PROTECTION` is compiled in, which breaks the pattern the adjacent write-protection options already follow (bits 4/5/6 → `unlock_flash()` / `protect_bootloader()`). Use free bits (10+). Lock must refuse when no verified identity exists. **Open:** one bit or two — one bit makes clearing it a mass erase an operator could reach by "undoing" something. **Unlock caveat:** `flash.c` has no `__RAMFUNC__`, so `stm32_flash_set_rdp_flash(0xAA)` runs from the flash the regression is erasing; upstream ships that call commented out, i.e. unexercised. Likely wants to be a RAM function, and wants bench verification. |
 | F7 | Bootloader-side invariants | bootloader build of `AP_CheckFirmware` | Keys never emptied; RDP raise-only except through the deliberate unlock path; identity write-once unless the chip has been erased. Invariants held in the bootloader survive a buggy or hostile configurator; tool-side guards don't. |
 | F8 | Fix `create_nonce()` | `AP_Scripting/lua_scripts.cpp` — `create_nonce()` | Called on the *decrypt* path, where it overwrites the nonce read from the file; and `nonce_len` goes into `get_system_id_unformatted(buf, len)` uninitialised, where `len` is in/out (see `GCS_Common.cpp` for the correct pattern). Keep the file's nonce and *verify* its prefix. |
-| F9 | Confirm x25519 isn't compiled out of the FC monocypher build | `AP_CheckFirmware/monocypher.{h,cpp}` | `crypto_key_exchange` / `crypto_x25519` are declared; check they survive the build's feature trimming before F5 depends on them. |
+| F9 | Confirm x25519 isn't compiled out of the FC monocypher build | `AP_CheckFirmware/monocypher.{h,cpp}` | ✅ **Resolved 2026-08-28.** Nothing trims it — the only conditionals in `monocypher.cpp` are BLAKE2 unrolling and Argon2. It was merely linker-GC'd for lack of a caller; F4's `crypto_x25519_public_key()` now links (`nm` on the SmallFastDronev1 ELF shows it). F5 can rely on `crypto_key_exchange`. |
 | F10 | Optional: re-key `SCR_LD_ENCRYPT` | `AP_Scripting/lua_scripts.cpp` — `encrypt_all_scripts_in_dir()` | On-FC self-encryption still has value for a customer's *own* scripts, but under v2 it must ECDH to the drone's own public key. Low priority. |
 
 **Bootloader changes get bench-verified on real hardware every time, not just
@@ -327,7 +363,7 @@ rebase burden is low.
 
 | # | Module | Purpose |
 |---|---|---|
-| T1 | `src/protocol/secure-command.ts` | `SECURE_COMMAND` client — session key, sequencing, reply handling. Blocked on F4. |
+| T1 | `src/protocol/secure-command.ts` | `SECURE_COMMAND` client — sequencing and reply matching. **Unblocked by F4.** The identity half needs no session key and no signing (see "Why the identity commands are unsigned"), so the client holds no key material; ops `0x53464401` / `0x53464402`, `data_length = sig_length = 0`, 44-byte reply. Not SITL-testable — `SECURE_COMMAND` handling is compiled only into signed builds — so unit tests against fixtures plus bench. |
 | T2 | `src/workflow/sfd-enable.ts` | Enable ceremony orchestrator. Blocked on F1/F4/F6. |
 | T3 | `src/workflow/sfd-recover.ts` | Exit ceremony — backup → unlock → flash → restore. The unlock and the backup/restore halves both exist; this is the piece that sequences them. |
 | T4 | `DfuClient.readUnprotect()` | ✅ Landed. DfuSe `READ_UNPROTECT` for RDP regression on a dead drone, surfaced in the Firmware view's recovery tab. Bench verification pending — no SITL substitute for DFU. |
@@ -373,6 +409,8 @@ not** assume cleartext-only — design the pipeline to allow a
   escape hatch and the GPL position depends on it.
 - **Don't set RDP Level 2.** Irreversible; removes the exit ceremony entirely.
 - **Don't lock a drone before its identity is verified.**
+- **Don't make `GENERATE_IDENTITY` or `GET_IDENTITY` require a signature.** The
+  tool has no key to sign with, and nothing either command does needs one.
 - **Don't add direct firmware-upload paths in UI components or views.** DFU is no
   exception — `protocol/dfu.ts` exposes the primitive; `security/uploader.ts` is
   the only legitimate caller.
