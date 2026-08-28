@@ -28,6 +28,7 @@ import {
   backupParamCount,
   buildBackup,
   parseBackup,
+  planRestore,
   serializeBackup,
 } from '../../src/workflow/param-backup'
 
@@ -259,5 +260,115 @@ describe('backupFilename', () => {
     const evening = backupFilename(buildBackup(SAMPLE, VEHICLE, '2026-08-28T21:30:00.000Z', keepAll(SAMPLE)))
 
     expect([evening, morning].sort()).toEqual([morning, evening])
+  })
+})
+
+describe('planRestore', () => {
+  const live = paramMap([
+    ['ATC_RAT_PIT_P', 0.135, 9],
+    ['FRAME_CLASS', 1, 2],
+    ['FRAME_TYPE', 12, 2],
+    ['SERIAL3_BAUD', 57600, 6],
+  ])
+
+  function backupOf(entries: Array<[string, number, number]>) {
+    const map = paramMap(entries)
+    return buildBackup(map, VEHICLE, CREATED_AT, keepAll(map))
+  }
+
+  it('writes only the parameters whose value differs', () => {
+    const plan = planRestore(
+      backupOf([['FRAME_TYPE', 1, 2], ['FRAME_CLASS', 1, 2]]),
+      live,
+      { changed: new Set(), isReadOnly: () => false },
+    )
+
+    expect(plan.toWrite.map(i => i.name)).toEqual(['FRAME_TYPE'])
+    expect(plan.unchanged.map(i => i.name)).toEqual(['FRAME_CLASS'])
+  })
+
+  it('carries the drone\'s type for the write, not the backup\'s', () => {
+    const plan = planRestore(
+      backupOf([['SERIAL3_BAUD', 230400, 99]]),
+      live,
+      { changed: new Set(), isReadOnly: () => false },
+    )
+
+    expect(plan.toWrite[0]).toMatchObject({ name: 'SERIAL3_BAUD', type: 6, backupValue: 230400 })
+  })
+
+  it('reports parameters this firmware no longer has', () => {
+    const plan = planRestore(
+      backupOf([['GONE_PARAM', 5, 2]]),
+      live,
+      { changed: new Set(), isReadOnly: () => false },
+    )
+
+    expect(plan.missing.map(i => i.name)).toEqual(['GONE_PARAM'])
+    expect(plan.missing[0]!.currentValue).toBeNull()
+    expect(plan.toWrite).toHaveLength(0)
+  })
+
+  it('refuses to write parameters that are read-only on this drone', () => {
+    const plan = planRestore(
+      backupOf([['FRAME_TYPE', 1, 2]]),
+      live,
+      { changed: new Set(), isReadOnly: name => name === 'FRAME_TYPE' },
+    )
+
+    expect(plan.readOnly.map(i => i.name)).toEqual(['FRAME_TYPE'])
+    expect(plan.toWrite).toHaveLength(0)
+  })
+
+  it('treats an integer that round-tripped through a float as unchanged', () => {
+    const drifted = paramMap([['FRAME_TYPE', 12.0000000001, 2]])
+    const plan = planRestore(
+      backupOf([['FRAME_TYPE', 12, 2]]),
+      drifted,
+      { changed: new Set(), isReadOnly: () => false },
+    )
+
+    expect(plan.unchanged.map(i => i.name)).toEqual(['FRAME_TYPE'])
+  })
+
+  it('warns about drone changes the backup cannot revert', () => {
+    // SERIAL3_BAUD was changed on the drone after the backup was taken,
+    // so the backup has no saved value to put it back to.
+    const plan = planRestore(
+      backupOf([['FRAME_TYPE', 1, 2]]),
+      live,
+      { changed: new Set(['FRAME_TYPE', 'SERIAL3_BAUD']), isReadOnly: () => false },
+    )
+
+    expect(plan.notReverted).toEqual(['SERIAL3_BAUD'])
+  })
+
+  it('does not warn about read-only drone changes, which were never restorable', () => {
+    const plan = planRestore(
+      backupOf([['FRAME_TYPE', 1, 2]]),
+      live,
+      { changed: new Set(['FRAME_TYPE', 'SERIAL3_BAUD']), isReadOnly: n => n === 'SERIAL3_BAUD' },
+    )
+
+    expect(plan.notReverted).toEqual([])
+  })
+
+  it('lists every saved parameter exactly once, sorted', () => {
+    const plan = planRestore(
+      backupOf([['SERIAL3_BAUD', 1, 6], ['ATC_RAT_PIT_P', 9, 9], ['FRAME_CLASS', 1, 2]]),
+      live,
+      { changed: new Set(), isReadOnly: () => false },
+    )
+
+    expect(plan.items.map(i => i.name)).toEqual(['ATC_RAT_PIT_P', 'FRAME_CLASS', 'SERIAL3_BAUD'])
+    expect(plan.toWrite.length + plan.unchanged.length + plan.missing.length + plan.readOnly.length)
+      .toBe(plan.items.length)
+  })
+
+  it('plans nothing from an empty backup', () => {
+    const plan = planRestore(backupOf([]), live, { changed: new Set(), isReadOnly: () => false })
+
+    expect(plan.items).toHaveLength(0)
+    expect(plan.toWrite).toHaveLength(0)
   })
 })

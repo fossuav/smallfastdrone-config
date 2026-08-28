@@ -38,6 +38,7 @@
 // up; manual Reconnect offered as a fallback).
 
 import type { ParamValue } from 'mavlink-mappings/dist/lib/common'
+import type { RestorePlan } from '../workflow/param-backup'
 import { computed, onMounted, ref, watch } from 'vue'
 import { MavFtp } from '../protocol/ftp'
 import { changedParamNames, parseParamPack } from '../protocol/param-pack'
@@ -48,6 +49,8 @@ import {
   backupFilename,
   backupParamCount,
   buildBackup,
+  parseBackup,
+  planRestore,
   serializeBackup,
 } from '../workflow/param-backup'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../workflow/reconnect'
@@ -325,6 +328,94 @@ async function saveSettings() {
   }
 }
 
+// --- Settings restore ------------------------------------------------
+
+type RestorePhase = 'idle' | 'reading' | 'review' | 'applying' | 'restarting' | 'done' | 'error'
+
+const restorePhase = ref<RestorePhase>('idle')
+const restorePlan = ref<RestorePlan | null>(null)
+const restoreError = ref<string | null>(null)
+const restoreWritten = ref(0)
+const backupInput = ref<HTMLInputElement | null>(null)
+
+const restoreBusy = computed(() =>
+  restorePhase.value === 'reading'
+  || restorePhase.value === 'applying'
+  || restorePhase.value === 'restarting',
+)
+
+function pickBackup() {
+  backupInput.value?.click()
+}
+
+// Read the picked file and work out what restoring it would do. Nothing
+// is written yet — the operator sees the plan first, because a restore
+// changes a drone they're about to fly.
+async function onBackupPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // Clear the input so picking the same file twice still fires a change.
+  input.value = ''
+  if (!file)
+    return
+
+  restorePhase.value = 'reading'
+  restoreError.value = null
+  restorePlan.value = null
+  try {
+    const backup = parseBackup(await file.text())
+    const changed = await fetchChangedNames()
+    restorePlan.value = planRestore(backup, params.params, { changed, isReadOnly: isParamReadOnly })
+    restorePhase.value = 'review'
+  }
+  catch (err) {
+    restoreError.value = err instanceof Error ? err.message : 'Couldn\'t read that backup.'
+    restorePhase.value = 'error'
+  }
+}
+
+// Write the planned changes, save them, then restart and reconnect. One
+// confirmation drives the whole thing — the operator doesn't babysit the
+// reboot.
+async function applyRestore() {
+  const plan = restorePlan.value
+  if (plan === null || plan.toWrite.length === 0)
+    return
+
+  restorePhase.value = 'applying'
+  restoreError.value = null
+  try {
+    for (const item of plan.toWrite)
+      params.setEdit(item.name, item.backupValue)
+
+    await params.apply()
+    if (params.applyError !== null)
+      throw new Error(params.applyError)
+
+    restoreWritten.value = plan.toWrite.length
+    await sleep(STORAGE_SETTLE_MS)
+
+    restorePhase.value = 'restarting'
+    await session.reboot()
+    if (!await autoReconnect())
+      throw new Error('Your settings were saved, but the drone didn\'t come back on its own. Power-cycle it and reconnect.')
+
+    params.clear()
+    await params.load()
+    restorePhase.value = 'done'
+  }
+  catch (err) {
+    restoreError.value = err instanceof Error ? err.message : 'Couldn\'t restore your settings.'
+    restorePhase.value = 'error'
+  }
+}
+
+function cancelRestore() {
+  restorePlan.value = null
+  restoreError.value = null
+  restorePhase.value = 'idle'
+}
+
 // Ask the drone which of its parameters differ from its own factory
 // defaults. Shared by save and restore — save uses it to decide what to
 // write out, restore to spot changes the backup can't undo.
@@ -519,6 +610,130 @@ function downloadText(text: string, filename: string) {
             @click="saveSettings"
           >
             {{ saveState === 'saving' ? 'Saving…' : 'Save to my computer' }}
+          </UButton>
+        </div>
+      </div>
+
+      <USeparator class="my-6" />
+
+      <h3 class="text-highlighted text-sm font-semibold">
+        Put settings back
+      </h3>
+      <p class="text-muted mt-1 text-sm">
+        Load a file you saved earlier. We'll show you what will change before
+        anything is written.
+      </p>
+
+      <input
+        ref="backupInput"
+        type="file"
+        accept="application/json,.json"
+        class="hidden"
+        @change="onBackupPicked"
+      >
+
+      <div class="mt-4 space-y-3">
+        <!-- reading: parse the file + ask the drone what it has changed -->
+        <p v-if="restorePhase === 'reading'" class="text-muted flex items-center gap-2 text-sm">
+          <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+          Reading your backup…
+        </p>
+
+        <!-- review: the plan, before anything is written -->
+        <template v-else-if="restorePhase === 'review' && restorePlan">
+          <UAlert
+            v-if="restorePlan.toWrite.length === 0"
+            color="success"
+            icon="i-lucide-circle-check"
+            title="Nothing to change"
+            description="Your drone already matches this backup."
+          />
+          <UAlert
+            v-else
+            color="warning"
+            icon="i-lucide-triangle-alert"
+            :title="`${plural(restorePlan.toWrite.length, 'setting')} will change`"
+            :description="`This writes ${plural(restorePlan.toWrite.length, 'setting')} to your drone and restarts it. It won't be ready to fly for about ten seconds.`"
+          />
+
+          <ul class="text-muted space-y-1 text-sm">
+            <li v-if="restorePlan.unchanged.length > 0" class="flex items-center gap-2">
+              <UIcon name="i-lucide-check" class="text-success size-4 shrink-0" />
+              {{ restorePlan.unchanged.length }} already match
+            </li>
+            <li v-if="restorePlan.missing.length > 0" class="flex items-start gap-2">
+              <UIcon name="i-lucide-circle-help" class="mt-0.5 size-4 shrink-0" />
+              <span>
+                {{ restorePlan.missing.length }} aren't on this drone's firmware and will be skipped
+              </span>
+            </li>
+            <li v-if="restorePlan.readOnly.length > 0" class="flex items-start gap-2">
+              <UIcon name="i-lucide-lock" class="mt-0.5 size-4 shrink-0" />
+              <span>
+                {{ restorePlan.readOnly.length }} can't be changed on this drone and will be skipped
+              </span>
+            </li>
+            <li v-if="restorePlan.notReverted.length > 0" class="flex items-start gap-2">
+              <UIcon name="i-lucide-info" class="text-warning mt-0.5 size-4 shrink-0" />
+              <span>
+                {{ restorePlan.notReverted.length }} settings changed since this backup was saved
+                won't be put back — the backup has no earlier value for them.
+              </span>
+            </li>
+          </ul>
+
+          <div class="flex justify-end gap-2">
+            <UButton color="neutral" variant="ghost" @click="cancelRestore">
+              Cancel
+            </UButton>
+            <UButton
+              v-if="restorePlan.toWrite.length > 0"
+              color="primary"
+              @click="applyRestore"
+            >
+              Put these settings back
+            </UButton>
+          </div>
+        </template>
+
+        <!-- applying / restarting -->
+        <p v-else-if="restorePhase === 'applying'" class="text-muted flex items-center gap-2 text-sm">
+          <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+          Writing your settings to your drone…
+        </p>
+        <p v-else-if="restorePhase === 'restarting'" class="text-muted flex items-center gap-2 text-sm">
+          <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+          Restarting your drone…
+        </p>
+
+        <UAlert
+          v-else-if="restorePhase === 'done'"
+          color="success"
+          icon="i-lucide-check"
+          :title="`${plural(restoreWritten, 'setting')} put back`"
+          description="Your drone has restarted and is running your saved setup."
+        />
+
+        <UAlert
+          v-else-if="restorePhase === 'error'"
+          color="warning"
+          icon="i-lucide-triangle-alert"
+          title="Couldn't restore your settings"
+        >
+          <template #description>
+            {{ restoreError }}
+          </template>
+        </UAlert>
+
+        <div v-if="restorePhase === 'idle' || restorePhase === 'done' || restorePhase === 'error'" class="flex justify-end">
+          <UButton
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-upload"
+            :disabled="!canSave || restoreBusy"
+            @click="pickBackup"
+          >
+            Load a backup file
           </UButton>
         </div>
       </div>

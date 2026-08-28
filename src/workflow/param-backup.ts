@@ -180,6 +180,102 @@ export function parseBackup(text: string): ParamBackup {
   }
 }
 
+// What restoring one saved parameter would do to the connected drone.
+//
+//   write      — the drone has it and holds a different value
+//   unchanged  — the drone already matches; nothing to do
+//   missing    — the drone's firmware doesn't have this parameter at all
+//   readOnly   — the drone has it but won't accept a write
+export type RestoreAction = 'write' | 'unchanged' | 'missing' | 'readOnly'
+
+export interface RestoreItem {
+  name: string
+  backupValue: number
+  // What the drone holds now; null when the parameter isn't on this
+  // firmware.
+  currentValue: number | null
+  // The drone's type for this parameter, used for the write. The FC is
+  // truth: if a firmware changed a parameter's type, the backup's record
+  // of the old type is history, not instruction.
+  type: number | null
+  action: RestoreAction
+}
+
+export interface RestorePlan {
+  items: RestoreItem[]
+  toWrite: RestoreItem[]
+  unchanged: RestoreItem[]
+  missing: RestoreItem[]
+  readOnly: RestoreItem[]
+  // Parameters the drone currently holds away from its factory default
+  // that the backup has nothing to say about. Restoring will NOT put
+  // these back — a backup records only what had been changed when it was
+  // taken, so a setting altered afterwards has no saved value to return
+  // to. This is the honest cost of a delta backup and the operator is
+  // told, not left to find out.
+  notReverted: string[]
+}
+
+// Almost-equal threshold for parameter comparison. Integer parameters
+// travel as floats through PARAM_VALUE, so an exact === would report
+// spurious differences on the round trip. Mirrors the epsilon the params
+// store applies to write acknowledgements; duplicated rather than
+// imported so this module stays free of the Pinia/Vue graph.
+const VALUE_EQ_EPS = 1e-6
+
+function valuesMatch(a: number, b: number): boolean {
+  return Math.abs(a - b) <= VALUE_EQ_EPS * Math.max(1, Math.abs(a))
+}
+
+// Work out what restoring a backup onto the connected drone would change,
+// and what it can't. `current` is the drone's live parameter map;
+// `filter.changed` names the parameters the drone reports as away from its
+// factory defaults, which is what makes the notReverted report possible.
+//
+// Nothing is written here — this is the plan the operator confirms.
+export function planRestore(
+  backup: ParamBackup,
+  current: Map<string, ParamRecord>,
+  filter: BackupFilter,
+): RestorePlan {
+  const items: RestoreItem[] = []
+
+  for (const name of Object.keys(backup.params).sort()) {
+    const saved = backup.params[name]!
+    const live = current.get(name)
+
+    if (live === undefined) {
+      items.push({ name, backupValue: saved.value, currentValue: null, type: null, action: 'missing' })
+      continue
+    }
+    if (filter.isReadOnly(name)) {
+      items.push({ name, backupValue: saved.value, currentValue: live.value, type: live.type, action: 'readOnly' })
+      continue
+    }
+    items.push({
+      name,
+      backupValue: saved.value,
+      currentValue: live.value,
+      type: live.type,
+      action: valuesMatch(saved.value, live.value) ? 'unchanged' : 'write',
+    })
+  }
+
+  const saved = new Set(Object.keys(backup.params))
+  const notReverted = [...filter.changed]
+    .filter(name => !saved.has(name) && !filter.isReadOnly(name))
+    .sort()
+
+  return {
+    items,
+    toWrite: items.filter(i => i.action === 'write'),
+    unchanged: items.filter(i => i.action === 'unchanged'),
+    missing: items.filter(i => i.action === 'missing'),
+    readOnly: items.filter(i => i.action === 'readOnly'),
+    notReverted,
+  }
+}
+
 // How many settings a backup holds — what the operator sees on screen
 // ("482 settings saved"), and the one number that makes an empty or
 // truncated backup obvious at a glance.
