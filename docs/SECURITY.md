@@ -335,7 +335,7 @@ Companion to this document, landing on the **`SmallFastDrone-4.7-config`**
 branch in `../smallfastdrone/` (origin `fossuav/smallfastdrone`) — that is
 `pr-lua-encryption` rebased onto the 4.7 beta line plus the BLHeli-in-SITL
 enablement, and it is the branch the `vendor/smallfastdrone/` submodule tracks.
-Ordered by dependency, not priority.
+Ordered by dependency, not priority. **Status 2026-08-28:** F1–F4 and F9 landed (six commits, tip `630cce8d46`); F5–F8 and F10 open; nothing bench-verified.
 
 | # | Change | Where | Notes |
 |---|---|---|---|
@@ -360,6 +360,8 @@ lockdown is the whole point. `AP_CheckFirmware` is small and stable, so the
 rebase burden is low.
 
 ## Tool work list
+
+**Status 2026-08-28:** T1, T4, T5, T6 landed, T2's identity half landed; T3, T7 and the lock step open.
 
 | # | Module | Purpose |
 |---|---|---|

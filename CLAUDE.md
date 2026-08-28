@@ -75,11 +75,11 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 
 **Do not** introduce other frontend frameworks, alternative MAVLink libraries, alternative state stores, alternative bundlers/test runners/linters, or a backend service without an explicit PLAN.md decision. Adding a runtime dep requires a PLAN.md row — see the "v1 dependency budget" section there.
 
-## Sibling repos (read-only context)
+## Sibling repos
 
 | Path | Purpose |
 |---|---|
-| `../smallfastdrone/` | The ArduPilot fork this tool configures. Source of MAVLink XML, build options, param defs, vehicle CLAUDE.md files. **Also vendored** as a git submodule at `vendor/smallfastdrone/` for SITL-based testing — see [docs/TESTING.md](docs/TESTING.md). |
+| `../smallfastdrone/` | The ArduPilot fork this tool configures. Source of MAVLink XML, build options, param defs, vehicle CLAUDE.md files. **Also vendored** as a git submodule at `vendor/smallfastdrone/` for SITL-based testing — see [docs/TESTING.md](docs/TESTING.md). **Not read-only:** the Phase 7 firmware work (F1–F10 in [docs/SECURITY.md](docs/SECURITY.md)) is done in this clone on the `SmallFastDrone-4.7-config` branch, under *that* repo's CLAUDE.md (one library per commit, library-name prefixes, ASCII comments, pushes need `/prepare-for-push`). After a push, bump the submodule here with a `vendor:` commit. |
 | `../ardupilot-beta/` | Upstream beta; useful for diffing what's SFD-specific vs upstream behaviour. |
 | `../betaflight-configurator/` | Reference implementation. Same shell, different protocol (MSP). When stuck on Vue/Vite/Pinia/Tauri patterns, look here. |
 | `../analysis-private/` | Log analysis sibling. Future log-handoff target after Phase 4. |

@@ -31,10 +31,27 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   has been exercised. MatekH743 / CubeOrange / CubeOrangePlus are wired in
   `board-flash-map.ts` but unverified; non-H7 parts (F4, F7, H723 single-bank)
   haven't been re-tested since the Rev.V workaround landed.
-- `[firmware]` **PR the `blheli-sitl` SFD branch upstream**, then re-point the
-  submodule at the merged commit. Currently the BLHeli-in-SITL support lives on
-  a private branch (`vendor/smallfastdrone` @ `blheli-sitl`) that we bumped to
-  for direction-correction testing — it needs to land in the SFD beta line.
+- `[firmware]` **Merge `SmallFastDrone-4.7-config` into the SFD beta line
+  eventually, and re-point `.gitmodules`.** The submodule tracks the config
+  branch (BLHeli-in-SITL + lua-encryption + the Phase 7 firmware commits) while
+  `.gitmodules` `branch` still says `SmallFastDrone-4.7-beta` — only the
+  `--remote` hint, but a fresh `git submodule update --remote` would follow the
+  wrong branch. Re-point it at the config branch, or at the merge when there
+  is one. Operator's call.
+- `[firmware]` **Bench-verify the identity path.** F1–F4 (identity region,
+  fixed-key posture, `GENERATE_IDENTITY` / `GET_IDENTITY`) and T1/T2 are
+  compile- and unit-verified only; nothing SFD-specific runs in SITL because
+  `SECURE_COMMAND` handling exists only in signed builds. Needs a Lucid H7 with
+  a signed bootloader + signed SmallFastDronev1 build, then
+  `Tools/scripts/signing/sfd_identity.py --generate` and the enable view.
+  Also confirms the sector-0 rewrite in `set_identity()` doesn't trip the
+  watchdog and that a GET after GENERATE reads the key back from flash.
+- `[firmware]` **Identity ops are vendor-private op numbers, not dialect
+  entries.** `0x53464401` / `0x53464402` live as C++ constants and as
+  `SECURE_OP` in the tool, outside the `SECURE_COMMAND_OP` enum. Fine for the
+  tool and `sfd_identity.py`; if SFD ever wants them in MAVProxy or generated
+  docs, add them to `ardupilotmega.xml` in the mavlink submodule and switch
+  both sides to the enum. Low priority.
 
 ## 3D / visuals
 
@@ -189,6 +206,14 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   Revisit if first-load time becomes a complaint. Related: the >500 kB
   chunk-size warnings on `tres`, `mavlink-mappings` and `param-metadata` are
   expected noise, not regressions.
+- `[test]` **Composables can't be unit-tested.** Anything importing the
+  session store fails to load in Vitest's node env with `Package import
+  specifier "#imports" is not defined` — Nuxt UI's `useToast` reached from the
+  store. That is why `useFirmwareFlash`, `useLuaEngine`, `useConnections` and
+  `useSfdEnable` have no unit tests and why pure workflow logic is split into
+  its own file (`sfd-enable.ts` vs `use-sfd-enable.ts`). A Vitest alias that
+  stubs `#imports` (or moving toast emission out of the store) would unlock
+  composable tests against a fake session.
 - `[tooling]` **Scripting-lifecycle-manager.** Move scripts between an
   active and a disabled subdirectory as they're enabled/disabled, show a menu of
   installed scripts — all via FTP, without touching the underlying scripting

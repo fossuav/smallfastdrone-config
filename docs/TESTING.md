@@ -101,11 +101,15 @@ The "scripting isn't enabled" fallback path is covered inside the Field tools ca
 
 ## BLHeli params in SITL
 
-Stock SITL doesn't compile AP_BLHeli (`HAVE_AP_BLHELI_SUPPORT = HAL_SUPPORT_RCOUT_SERIAL`, 0 for the sim), so the `SERVO_BLH_*` parameters — including `SERVO_BLH_RVMASK`, which the motor-check wizard uses to reverse a motor's spin direction — don't exist there. The motor-check direction-reverse fix therefore can't be exercised on the pinned submodule.
+Stock SITL doesn't compile AP_BLHeli (`HAVE_AP_BLHELI_SUPPORT = HAL_SUPPORT_RCOUT_SERIAL`, 0 for the sim), so the `SERVO_BLH_*` parameters — including `SERVO_BLH_RVMASK`, which the motor-check wizard uses to reverse a motor's spin direction — don't exist there. The motor-check direction-reverse fix therefore can't be exercised on stock SITL.
 
-The **`blheli-sitl` SFD branch** (in `vendor/smallfastdrone/`) turns it on: it defines `HAL_SUPPORT_RCOUT_SERIAL` for SITL and makes AP_BLHeli compile off-hardware (guarding `UDID_START`, fixing a non-portable `%08lx`). Build SITL from that branch and `SERVO_BLH_RVMASK` appears. The branch is **unpushed and the submodule pointer is not bumped to it** — so CI and fresh clones build stock SITL without the params. Until the branch is pushed and the submodule bumped, the direction-reverse fix is only verified locally.
+The SFD fork turns it on: the `SmallFastDrone-4.7-config` branch (which `vendor/smallfastdrone/` tracks) defines `HAL_SUPPORT_RCOUT_SERIAL` and `HAL_WITH_BIDIR_DSHOT` for SITL and makes AP_BLHeli compile off-hardware (guarding `UDID_START`, fixing a non-portable `%08lx`). Build SITL from the pinned submodule and `SERVO_BLH_RVMASK` / `SERVO_BLH_BDMASK` appear, so CI and fresh clones get them too. (`.gitmodules` `branch` still names the beta line — only the `--remote` hint; see TODO.md.)
 
 Tests are written to tolerate both: the motor-check direction spec (`wizard-motor-check.spec.ts`) asserts *either* the software-reverse fix is offered (BLHeli build) *or* the manual-fix guidance is shown (stock). Props-out correction is a plain `FRAME_TYPE` change needing no reverse mask, so that path is testable on stock SITL.
+
+## SFD identity in SITL — it isn't
+
+`SECURE_COMMAND` handling is compiled only into signed firmware builds (`GCS_Common.cpp` dispatches it under `#if AP_SIGNED_FIRMWARE`), and `AP_CheckFirmware::find_public_keys()` returns null off ChibiOS anyway, so SITL never answers the SFD identity operations — a `GENERATE_IDENTITY` sent to SITL simply times out, which is also what a non-SFD drone looks like. The identity path is therefore tested at two layers only: **unit** (`secure-command.spec.ts`, `drone-identity.spec.ts`, `sfd-enable.spec.ts` against fakes) and **bench** on a Lucid H7 running a signed bootloader + signed SmallFastDronev1 build, with `Tools/scripts/signing/sfd_identity.py` in the firmware repo as the reference client. Don't write a SITL integration or E2E test for it; it can't pass.
 
 ## SITL bridge
 
