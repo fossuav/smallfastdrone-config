@@ -285,6 +285,28 @@ Before the fix the ceremony read `FAILED` as "no identity yet", generated,
 failed, and dead-ended the operator with "The drone couldn't complete the
 identity operation." — a dead end for a situation with an obvious next step.
 
+### The padlock in the UI, and what it claims
+
+A connected drone gets one `GET_IDENTITY` read on connect, and its four
+possible answers are four different things to tell an operator
+(`src/workflow/drone-security.ts`): silence means an unsigned build, `NO_REGION`
+means signed firmware on startup software too old to hold an identity,
+`NOT_SET` means secured startup software with no identity yet, and a 44-byte
+reply means the drone has its own identity.
+
+**The padlock claims what the drone is running, never what it would refuse.**
+The identity region exists only in a bootloader built as a signed one from the
+SFD tree, so seeing it does establish the startup software is SFD's secured
+build. It does *not* establish that the bootloader carries public keys and
+would therefore reject unsigned firmware — asking that means `GET_PUBLIC_KEYS`,
+which needs a signature by a bootloader key, and decision 10 says the tool holds
+none. A unit test pins the copy against ever promising otherwise.
+
+The badge is deliberately quiet: absent entirely on an ordinary drone rather
+than a crossed-out lock declaring a perfectly good ArduPilot board "not
+secure". The one unsecured state it does show is the part-way-upgraded one,
+because that is the only one with a next step the operator can take.
+
 ### Telling whether a secure bootloader is installed
 
 Harder than it looks, and worth writing down because the first two attempts

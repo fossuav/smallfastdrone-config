@@ -23,6 +23,7 @@
 import { computed } from 'vue'
 import { useSessionStore } from '../stores/session'
 import { useUiStore } from '../stores/ui'
+import SecurityBadge from '../ui/components/SecurityBadge.vue'
 import SystemStatus from '../ui/components/SystemStatus.vue'
 import Drone3D from '../ui/visuals/Drone3D.vue'
 
@@ -84,6 +85,9 @@ function toggle() {
           <p class="text-highlighted text-base font-medium">
             Connected to your {{ session.vehicleLabel }}
           </p>
+          <div class="mt-1 flex justify-center">
+            <SecurityBadge />
+          </div>
           <dl class="mt-2 inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-1 text-left text-xs text-muted">
             <dt>Autopilot:</dt><dd class="text-default">
               {{ autopilotLine }}

@@ -27,6 +27,7 @@ import { useFieldToolsStore } from './stores/fieldTools'
 import { useSessionStore } from './stores/session'
 import { useUiStore } from './stores/ui'
 import MessageBell from './ui/components/MessageBell.vue'
+import SecurityBadge from './ui/components/SecurityBadge.vue'
 
 const ui = useUiStore()
 const session = useSessionStore()
@@ -80,6 +81,10 @@ const navItems = computed(() =>
           </div>
 
           <div class="flex items-center gap-3">
+            <!-- Whether this drone is secured follows the operator across
+                 every page, so it belongs in the chrome rather than on one
+                 view. Renders nothing on an ordinary drone. -->
+            <SecurityBadge compact />
             <MessageBell />
             <!-- Entry point to the field-tools catalogue (run wizards from the
                  radio). Cross-cutting, so it lives in the chrome; the page

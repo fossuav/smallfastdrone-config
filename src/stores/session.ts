@@ -37,6 +37,7 @@ import type { AutopilotVersion } from 'mavlink-mappings/dist/lib/standard'
 import type { MessageHandler, SubsystemStatus } from '../protocol/mavlink'
 import type { Transport } from '../transport/types'
 import type { WebSerialTransport } from '../transport/webserial'
+import type { SecurityPosture } from '../workflow/drone-security'
 import { useToast } from '@nuxt/ui/composables/useToast'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -60,7 +61,9 @@ import {
   systemStatusLabel,
   vehicleTypeLabel,
 } from '../protocol/mavlink'
+import { SecureCommandClient } from '../protocol/secure-command'
 import { resolveTransport } from '../transport/select'
+import { probeSecurityPosture } from '../workflow/drone-security'
 
 // MAV_COMP_ID_AUTOPILOT1 — the FC's component id, which is what
 // REQUEST_MESSAGE for AUTOPILOT_VERSION must target.
@@ -104,6 +107,10 @@ export const useSessionStore = defineStore('session', () => {
   // primary place this comes through (e.g. "ArduCopter V4.7.0-beta4-SFD
   // (d0615774)"). Drives the operator-facing autopilot label.
   const isSfd = ref(false)
+  // How secured this drone is, from one GET_IDENTITY read. `unknown` until
+  // the probe answers, and on any drone whose answer we can't interpret.
+  const securityPosture = ref<SecurityPosture>('unknown')
+  let securityProbed = false
 
   // Ring buffer of recent STATUSTEXTs (last 50). Used by the (future) log
   // pane; toasts for the WARNING-or-worse subset happen as they arrive.
@@ -138,8 +145,8 @@ export const useSessionStore = defineStore('session', () => {
   const autopilotLabelText = computed(() => {
     if (autopilot.value === null)
       return null
-    // Operator-facing override: detect SmallFastDrone via the boot
-    // banner's "-SFD" suffix.
+    // Operator-facing override: the drone said in its boot banner that
+    // it is a SmallFastDrone.
     if (isSfd.value)
       return 'SmallFastDrone'
     return autopilotLabel(autopilot.value)
@@ -162,10 +169,14 @@ export const useSessionStore = defineStore('session', () => {
     const entry: StatusTextEntry = { text, severity, receivedAt: Date.now() }
     recentStatusTexts.value = [...recentStatusTexts.value, entry].slice(-STATUSTEXT_HISTORY)
 
-    // Detect SFD from any banner text — usually arrives in the version
-    // line ("ArduCopter V4.7.0-beta4-SFD (d0615774)") shortly after we
-    // ask for it via DO_SEND_BANNER.
-    if (!isSfd.value && /\bSFD\b/.test(text)) {
+    // Detect SFD from any banner line, which arrives shortly after we ask
+    // via DO_SEND_BANNER. Two shapes exist and both are real: a build that
+    // suffixes the version ("ArduCopter V4.7.0-beta4-SFD (d0615774)"), and
+    // the product build, which replaces the vehicle name outright
+    // ("SmallFastDrone V4.7.0 (630cce8d)"). Matching only the suffix meant
+    // the product board — the one that most obviously is a SmallFastDrone —
+    // was reported as plain ArduPilot.
+    if (!isSfd.value && /\bSFD\b|SmallFastDrone/i.test(text)) {
       isSfd.value = true
     }
 
@@ -203,6 +214,14 @@ export const useSessionStore = defineStore('session', () => {
       // string that carries the SFD suffix), and REQUEST_DATA_STREAM (to
       // kick the FC into streaming SYS_STATUS / ATTITUDE / VFR_HUD etc.,
       // which it doesn't do by default until asked).
+      // How secured the drone is takes a round trip that a drone without
+      // secure firmware never answers, so it runs on its own rather than
+      // holding up the heartbeat handler for the timeout.
+      if (!securityProbed && connected.value) {
+        securityProbed = true
+        void probeSecurity(msg.sysid)
+      }
+
       if (!versionRequested && connected.value) {
         versionRequested = true
         try {
@@ -243,6 +262,19 @@ export const useSessionStore = defineStore('session', () => {
     }
   })
 
+  // Ask the drone how secured it is. Never rejects and never surfaces an
+  // error: nothing here was requested by the operator, so a drone that
+  // doesn't answer simply stays `unknown` and shows no badge at all.
+  async function probeSecurity(targetSystem: number): Promise<void> {
+    const client = new SecureCommandClient(
+      async msg => transport.value.send(session.serialize(msg)),
+      cb => session.on(cb),
+      targetSystem,
+      COMP_ID_AUTOPILOT,
+    )
+    securityPosture.value = await probeSecurityPosture(client)
+  }
+
   let unsubscribeData: (() => void) | null = null
   let unsubscribeClose: (() => void) | null = null
 
@@ -259,6 +291,8 @@ export const useSessionStore = defineStore('session', () => {
     fcUid.value = null
     boardId.value = null
     isSfd.value = false
+    securityPosture.value = 'unknown'
+    securityProbed = false
     rebooting.value = false
     recentStatusTexts.value = []
     statusReadAt.value = 0
@@ -423,6 +457,7 @@ export const useSessionStore = defineStore('session', () => {
     fcUid,
     boardId,
     isSfd,
+    securityPosture,
     recentStatusTexts,
     statusReadAt,
     subsystems,

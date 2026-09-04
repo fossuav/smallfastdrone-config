@@ -150,6 +150,7 @@ Most E2E specs are written against SITL's *fixture*, not just against a vehicle 
 | `connect.spec.ts` | Asserts SITL's "Quadcopter" and the "SmallFastDrone" banner. A board on a different frame or upstream firmware is a different, correct answer. |
 | `wizard.spec.ts` (connections ×2) | Asserts SERIAL3 reads "GPS" — SITL's wiring. The real board reported DJI OSD on SERIAL3, which the table rendered correctly. |
 | `wizard-motor-check.spec.ts` (×5, incl. ESC setup) | Needs a configured frame and ESCs. |
+| `security-badge.spec.ts` | Asserts an ordinary drone shows *no* padlock — which is the point of it. A secured board correctly shows one, so this is SITL-only by design. |
 
 **Specs are not idempotent against real hardware.** SITL is rebuilt per run, so a spec can write freely; a board keeps every write. A full `BENCH=1` run leaves `FRAME_CLASS`, `FRAME_TYPE`, `SCR_ENABLE`, `SERIAL1_*` and `RTL_ALT*` changed, and re-running some specs then fails on their own leftovers — `settings-scripting` needs `SCR_ENABLE` to start at 0 and leaves it at 1, so it passes once and then can't. Until a bench fixture snapshots and restores around the run (TODO.md), **put the board back yourself afterwards** — `param.pck` carries the firmware's own defaults, so restoring is mechanical rather than guesswork.
 
