@@ -52,6 +52,31 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   "none yet, offer to generate".
   Also confirms the sector-0 rewrite in `set_identity()` doesn't trip the
   watchdog and that a GET after GENERATE reads the key back from flash.
+- `[bug] [security]` **The enable ceremony can't tell "no identity yet" from
+  "this bootloader can't hold one".** Found on the bench 2026-09-04, and it is
+  on the upgrade path rather than off it. A drone running signed SFD firmware
+  on a pre-SFD bootloader answers `GET_IDENTITY` with `FAILED` — byte for byte
+  what a *blank* identity region answers. `SecureCommandClient.getIdentity()`
+  maps that to `null`, which is the ceremony's "no identity yet, generate one"
+  signal, so `runEnableCeremony()` generates, the firmware refuses with
+  `"Failed to find identity signature"`, and the operator is told "The drone
+  couldn't complete the identity operation." Dead end, for a situation with an
+  obvious next step: *update this drone's bootloader first*. **Every drone
+  upgrading from vanilla sits in exactly this state** between flashing SFD
+  firmware and flashing the SFD bootloader. No firmware change is needed to
+  fix it: a blank region would have *succeeded* at generate, so a `FAILED`
+  generate following a `FAILED` read means the region is absent. Wants a new
+  `EnableFailure` reason (`no-identity-region`) whose copy points at the
+  bootloader update.
+
+- `[firmware]` **Tool can't flash the bootloader, so the serial upgrade path
+  stops half way.** `MAV_CMD_FLASH_BOOTLOADER` (magic `290876` in `param5`)
+  asks a running firmware to write the secure bootloader it carries in ROMFS.
+  That is what turns a board that merely runs SFD firmware into one that can
+  hold an identity, and it needs no DFU — see docs/SECURITY.md "Step 1 has two
+  routes". Nothing in `src/` sends it. Until it does, the upgrade path has to
+  be finished by hand.
+
 - `[firmware]` **Identity ops are vendor-private op numbers, not dialect
   entries.** `0x53464401` / `0x53464402` live as C++ constants and as
   `SECURE_OP` in the tool, outside the `SECURE_COMMAND_OP` enum. Fine for the

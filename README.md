@@ -73,6 +73,7 @@ SITL can't tell you how long a real link takes, what happens when a board reboot
 ```bash
 bun run bench:check              # protocol checks: identify, params, metadata, FTP, param write, reboot
 bun run bench:check ftp reboot   # named checks only
+bun run bench:flash <fw.apj>     # flash firmware to the board using the tool's own bootloader client
 bun run bench:bridge             # serve the board to the app on ws://localhost:5761
 BENCH=1 bun run test:e2e         # run the E2E suite against the board instead of SITL
 ```

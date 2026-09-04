@@ -201,13 +201,76 @@ is what the tool does behind that.
 
 | # | Step | Notes |
 |---|---|---|
-| 1 | Flash SFD firmware (`_with_bl.hex`, DFU) | Bootloader carries only SFD's key. Uses the existing hardware-verified DFU path. |
+| 1 | Flash SFD firmware + its bootloader | Two routes, below. Bootloader carries SFD's key. |
 | 2 | Reconnect on MAVLink | Existing `useReconnect()` |
 | 3 | `GENERATE_IDENTITY` | Drone makes its keypair from the hardware TRNG, stores the private half, replies with UID + public key derived from what it just wrote. Denied while armed or if an identity already exists — the latter is not an error for the tool: fall through to step 4. No session key, no signature (see below). |
 | 4 | **Verify** — `GET_IDENTITY`, a fresh read | Must succeed and match step 3 before step 6. Never lock a drone whose identity is unconfirmed. |
 | 5 | Export identity file | Operator saves it; this is what reaches SFD |
 | 6 | Set the lock bit in `BRD_OPTIONS` | Firmware raises RDP on next boot |
 | 7 | Reboot, confirm locked state | Tool reports "SFD enabled" |
+
+### Step 1 has two routes, and the serial one is the upgrade path
+
+A **blank or bricked** board takes the DFU route: `_with_bl.hex` over WebUSB,
+bootloader and firmware in one image. That is the existing hardware-verified
+path and it is what recovery uses.
+
+A board **already running ArduPilot** — the upgrade case, and the common one —
+does not need DFU at all:
+
+1. Flash the signed SFD `.apj` over the existing bootloader, the ordinary
+   serial path. Any ArduPilot bootloader accepts it: a stock one holds no keys
+   and `check_good_firmware()` fail-opens on an empty key set.
+2. Ask the running firmware to flash the secure bootloader it carries in ROMFS:
+   `MAV_CMD_FLASH_BOOTLOADER` with the magic `290876` in `param5`. The
+   firmware's ROMFS bootloader is whatever `Tools/bootloaders/<board>_bl.bin`
+   held at build time, so a build made after `build_bootloaders.py --signing-key`
+   carries the secure one.
+
+This matters because it is the difference between "plug in and press a button"
+and "install DFU drivers". **The tool implements step 1 but not step 2** —
+`MAV_CMD_FLASH_BOOTLOADER` isn't sent anywhere yet.
+
+**Verified on the bench 2026-09-04**, TBS_LUCID_H7 running vanilla ArduCopter
+4.8.0-dev → signed SmallFastDronev1 4.7.0-beta via step 1, written and verified
+in 25.8 s by the tool's own `BootloaderClient`. `SmallFastDronev1` is
+`include ../TBS_LUCID_H7/hwdef.dat` plus `USE_BOOTLOADER_FROM_BOARD`, so the
+product board and a Lucid H7 are the same silicon — a plain `TBS_LUCID_H7`
+build would *not* carry the identity commands, since `AP_CHECK_FIRMWARE_FIXED_KEYS`
+is set only in the SmallFastDronev1 hwdef.
+
+### The state between the two steps is a real state, and the tool misreads it
+
+After step 1 but before step 2 the drone runs signed SFD firmware on a
+bootloader with no `.apsec_data` region. Measured in that state:
+
+| Probe | Result |
+|---|---|
+| `GET_SESSION_KEY` (upstream op 0) | `DENIED` — the handler is compiled in (`AP_SIGNED_FIRMWARE`) and F3's empty-key-set fail-closed bites |
+| `GET_IDENTITY` | `FAILED` — F4 dispatches; `find_identity()` finds no region |
+| `GENERATE_IDENTITY` | `FAILED`, with `"Failed to find identity signature"`. `set_identity()` locates the region by signature and refuses before it ever calls `write_bootloader()`, so this is safe to attempt |
+
+The tool reads `FAILED` from a read as `null`, meaning *"no identity yet — offer
+to generate"*, because that is what a **blank** region answers. A **missing**
+region answers identically, so `runEnableCeremony()` goes on to generate,
+fails, and tells the operator "The drone couldn't complete the identity
+operation." The true answer is specific and actionable: *update this drone's
+bootloader first*. The two cases are distinguishable without any firmware
+change — a blank region would have **succeeded** at generate, so a `FAILED`
+generate after a `FAILED` read means the region isn't there. Tracked in TODO.md.
+
+### DFU entry is refused on signed firmware — but the tool never used it
+
+`GCS_Common.cpp` refuses a MAVLink DFU-entry request under `#if AP_SIGNED_FIRMWARE`
+(`"Refusing DFU for secure firmware"`, `MAV_RESULT_FAILED`) — confirmed on the
+bench. Note the request sits behind a magic guard (`param1=42, param2=24,
+param3=71, param4=99`); sent without it you get `UNSUPPORTED` and learn nothing.
+
+This does **not** affect the tool: its DFU tab has always required the operator
+to put the board into DFU by hand, so it never sends that command. The
+practical consequence is for the operator, not the code — on an SFD board, DFU
+means the physical BOOT0 pads, and that is the last-resort recovery once a
+secure bootloader is on.
 
 ### Why the identity commands are unsigned
 
