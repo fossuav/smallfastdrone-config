@@ -158,8 +158,8 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 ## Shell / UX
 
-- `[bug] [protocol] [ux]` **A post-reboot param reload stalls, and the UI then
-  states a wrong value as fact.** Found on the bench 2026-09-04, in the
+- _Done 2026-09-04 → PROGRESS.md._ **A post-reboot param reload stalls, and
+  the UI then states a wrong value as fact.** Found on the bench 2026-09-04, in the
   scripting toggle's reboot flow. After `autoReconnect()` returns, the
   settings view does `params.clear()` then `params.load()` — and on real
   hardware that load fails: *"Param fetch stalled — got 1 params, then 10s of

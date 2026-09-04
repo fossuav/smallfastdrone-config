@@ -71,7 +71,7 @@ const PARAM_PACK_PATH = '@PARAM/param.pck?withdefaults=1'
 
 const session = useSessionStore()
 const params = useParamsStore()
-const { autoReconnect } = useReconnect()
+const { reconnectAndReload } = useReconnect()
 
 type Phase
   = | 'checking'
@@ -239,15 +239,18 @@ async function writeParamWithEcho(name: string, value: number, type: number): Pr
 async function reconnectAndFinish() {
   phase.value = 'restarting'
   errorMessage.value = null
-  const back = await autoReconnect()
-  if (!back) {
+  // Reconnect *and* re-read. The pre-reboot cache is stale, and a reload
+  // that fails must not settle to idle: an empty parameter map would
+  // render as a confident "currently off" for a setting the drone may
+  // well be holding on.
+  const outcome = await reconnectAndReload()
+  if (outcome !== 'ok') {
     phase.value = 'reconnect-failed'
-    errorMessage.value = 'Couldn\'t reconnect to your drone automatically. Make sure it\'s powered, then try again.'
+    errorMessage.value = outcome === 'no-drone'
+      ? 'Couldn\'t reconnect to your drone automatically. Make sure it\'s powered, then try again.'
+      : 'Your drone restarted but we couldn\'t read its settings back, so we can\'t tell you what it\'s set to. Try again.'
     return
   }
-  // Fresh fetch — the pre-reboot cache is stale.
-  params.clear()
-  await params.load()
   pendingValue.value = null
   phase.value = 'idle'
 }
@@ -397,11 +400,12 @@ async function applyRestore() {
 
     restorePhase.value = 'restarting'
     await session.reboot()
-    if (!await autoReconnect())
+    const outcome = await reconnectAndReload()
+    if (outcome === 'no-drone')
       throw new Error('Your settings were saved, but the drone didn\'t come back on its own. Power-cycle it and reconnect.')
+    if (outcome === 'no-params')
+      throw new Error('Your settings were saved and your drone restarted, but we couldn\'t read them back to confirm they landed. Reconnect and check.')
 
-    params.clear()
-    await params.load()
     restorePhase.value = 'done'
   }
   catch (err) {

@@ -117,7 +117,7 @@ export function buildConnectionRows(
 export function useConnections() {
   const session = useSessionStore()
   const params = useParamsStore()
-  const { autoReconnect } = useReconnect()
+  const { reconnectAndReload } = useReconnect()
 
   // Loading state for the fetch button; rows reactive so the table
   // re-renders after refresh().
@@ -328,16 +328,18 @@ export function useConnections() {
       applyPhase.value = 'restarting'
       await session.reboot()
 
+      // Reconnect and re-read in one step: a drone that comes back but
+      // can't be read yet is not a drone we can show port settings for,
+      // and reporting the stale ones as current would be a lie.
       applyPhase.value = 'reconnecting'
-      const back = await autoReconnect()
-      if (!back) {
-        applyError.value = 'Your drone didn\'t come back from its restart. Try unplugging and reconnecting.'
+      const outcome = await reconnectAndReload()
+      if (outcome !== 'ok') {
+        applyError.value = outcome === 'no-drone'
+          ? 'Your drone didn\'t come back from its restart. Try unplugging and reconnecting.'
+          : 'Your drone restarted but we couldn\'t read its ports back, so we can\'t show you what changed. Try unplugging and reconnecting.'
         applyPhase.value = 'idle'
         return
       }
-
-      applyPhase.value = 'reading'
-      await params.load()
 
       // Clear the staged edits — the writes either landed (in which
       // case the new values are now in params) or were rejected by

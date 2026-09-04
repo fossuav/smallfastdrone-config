@@ -49,7 +49,7 @@ const emit = defineEmits<{ done: [] }>()
 
 const session = useSessionStore()
 const params = useParamsStore()
-const { autoReconnect } = useReconnect()
+const { reconnectAndReload } = useReconnect()
 
 type Phase = 'checking' | 'idle' | 'applying' | 'restarting' | 'reconnect-failed' | 'error'
 const phase = ref<Phase>('checking')
@@ -129,14 +129,14 @@ async function applyConfig(cfg: EscConfig) {
 
 async function reconnect() {
   phase.value = 'restarting'
-  const back = await autoReconnect()
-  if (!back) {
+  const outcome = await reconnectAndReload()
+  if (outcome !== 'ok') {
     phase.value = 'reconnect-failed'
-    errorMessage.value = 'Your drone restarted but we couldn\'t reconnect. Make sure it\'s powered, then try again.'
+    errorMessage.value = outcome === 'no-drone'
+      ? 'Your drone restarted but we couldn\'t reconnect. Make sure it\'s powered, then try again.'
+      : 'Your drone restarted but we couldn\'t read its settings back. Make sure it\'s powered, then try again.'
     return
   }
-  params.clear()
-  await params.load()
   emit('done')
 }
 

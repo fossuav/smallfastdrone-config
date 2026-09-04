@@ -129,7 +129,7 @@ export function modulePath(name: string): string {
 export function useLuaEngine() {
   const session = useSessionStore()
   const params = useParamsStore()
-  const { autoReconnect } = useReconnect()
+  const { reconnectAndReload } = useReconnect()
 
   // Build a MavFtp targeting the connected FC. Throws if there's no
   // active session — callers should guard with session.connected
@@ -192,12 +192,9 @@ export function useLuaEngine() {
       return false
     await sleep(STORAGE_SETTLE_MS)
     await session.reboot()
-    const back = await autoReconnect()
-    if (!back)
-      return false
-    params.clear()
-    await params.load()
-    return true
+    // False covers both "never came back" and "came back but we couldn't
+    // read it": either way the caller can't rely on scripting being on.
+    return await reconnectAndReload() === 'ok'
   }
 
   // Upload a Lua applet to the FC. Ensures the APM/ + APM/scripts/

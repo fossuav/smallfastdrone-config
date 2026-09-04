@@ -38,7 +38,7 @@ import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../../workflow/reconnect
 
 const session = useSessionStore()
 const params = useParamsStore()
-const { autoReconnect } = useReconnect()
+const { reconnectAndReload } = useReconnect()
 
 type Phase = 'idle' | 'applying' | 'restarting' | 'error'
 const phase = ref<Phase>('idle')
@@ -85,14 +85,14 @@ async function apply(cfg: { protocol: number, bidir: boolean }) {
   phase.value = 'restarting'
   await sleep(STORAGE_SETTLE_MS)
   await session.reboot()
-  const back = await autoReconnect()
-  if (!back) {
+  const outcome = await reconnectAndReload()
+  if (outcome !== 'ok') {
     phase.value = 'error'
-    errorMessage.value = 'Your drone restarted but we couldn\'t reconnect. Make sure it\'s powered, then reload.'
+    errorMessage.value = outcome === 'no-drone'
+      ? 'Your drone restarted but we couldn\'t reconnect. Make sure it\'s powered, then reload.'
+      : 'Your drone restarted but we couldn\'t read its settings back. Make sure it\'s powered, then reload.'
     return
   }
-  params.clear()
-  await params.load()
   phase.value = 'idle'
 }
 

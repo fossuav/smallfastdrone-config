@@ -83,7 +83,7 @@ const params = useParamsStore()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
-const { autoReconnect } = useReconnect()
+const { reconnectAndReload } = useReconnect()
 
 const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
 
@@ -482,14 +482,16 @@ function retryReconnect() {
 // if it doesn't come back in time.
 async function reconnectThenReverify() {
   phase.value = 'restarting'
-  const back = await autoReconnect()
-  if (!back) {
+  // The re-check reads motor outputs straight out of the params store,
+  // so running it against a failed reload would test stale wiring.
+  const outcome = await reconnectAndReload()
+  if (outcome !== 'ok') {
     phase.value = 'reconnect-failed'
-    errorMessage.value = 'Your drone restarted but we couldn\'t reconnect. Make sure it\'s powered, then try again.'
+    errorMessage.value = outcome === 'no-drone'
+      ? 'Your drone restarted but we couldn\'t reconnect. Make sure it\'s powered, then try again.'
+      : 'Your drone restarted but we couldn\'t read its settings back, so we can\'t re-check the motors. Try again.'
     return
   }
-  params.clear()
-  await params.load()
   justFixed.value = true
   runAgain()
 }
