@@ -43,6 +43,7 @@ class FakeDrone implements IdentityClient {
   stored: DroneIdentity | null = null
   armed = false
   unsupported = false
+  getThrows: Error | null = null
   silent = false
   generateFails = false
   // Substituted for the stored identity on the read after generate, to
@@ -57,6 +58,8 @@ class FakeDrone implements IdentityClient {
   getIdentity = async (): Promise<DroneIdentity | null> => {
     this.calls.push('get')
     this.refuseIfNotSfd(SECURE_OP.GET_IDENTITY)
+    if (this.getThrows)
+      throw this.getThrows
     if (this.readBackOverride !== undefined && this.calls.includes('generate'))
       return this.readBackOverride
     return this.stored
@@ -168,6 +171,25 @@ describe('runEnableCeremony stops with a reason', () => {
     drone.silent = true
     const err = await failure(runEnableCeremony(drone, ctx()))
     expect(err.reason).toBe('unsupported')
+  })
+
+  // The state a drone is in part way through an upgrade: SFD firmware
+  // running, but a bootloader with nowhere to put an identity. It answers
+  // normally, so it must not be reported as "not running SFD firmware" —
+  // the operator would reinstall the firmware they already have.
+  it('no-region: SFD firmware, but the bootloader can\'t hold an identity', async () => {
+    const drone = new FakeDrone()
+    drone.getThrows = new SecureCommandError(
+      SECURE_OP.GET_IDENTITY,
+      MavResult.FAILED,
+      'This drone can\'t store an identity yet - its startup software is older than the drone\'s firmware.',
+      false,
+      true,
+    )
+    const err = await failure(runEnableCeremony(drone, ctx()))
+    expect(err.reason).toBe('no-region')
+    expect(err.reason).not.toBe('unsupported')
+    expect(err.message).toMatch(/startup software/)
   })
 
   it('mismatch: the read-back differs from what generate reported', async () => {

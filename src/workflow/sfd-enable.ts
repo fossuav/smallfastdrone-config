@@ -66,8 +66,12 @@ export interface EnableContext {
 //   unsupported — not SFD secure firmware; send the operator to Firmware
 //   armed       — disarm and retry
 //   mismatch    — the drone's answers disagree; do NOT lock, retry
+//   no-region   — SFD firmware, but a bootloader with nowhere to put an
+//                 identity: the state a drone is in part way through an
+//                 upgrade. Distinct from `unsupported` because the fix is
+//                 to update the bootloader, not the firmware
 //   failed      — the drone reported an error; its message is in `message`
-export type EnableFailure = 'unsupported' | 'armed' | 'mismatch' | 'failed'
+export type EnableFailure = 'unsupported' | 'armed' | 'mismatch' | 'no-region' | 'failed'
 
 export class EnableError extends Error {
   constructor(public readonly reason: EnableFailure, message: string) {
@@ -165,6 +169,11 @@ function translate(e: unknown): EnableError {
   if (e instanceof EnableError)
     return e
   if (e instanceof SecureCommandError) {
+    // Order matters: a drone with no identity region is running SFD
+    // firmware and answers normally, so it must not be swept into
+    // "isn't running SFD secure firmware".
+    if (e.noIdentityRegion)
+      return new EnableError('no-region', e.message)
     if (e.result === MavResult.UNSUPPORTED || e.timedOut)
       return new EnableError('unsupported', 'This drone isn\'t running SFD secure firmware. Install it from the Firmware page, then try again.')
     return new EnableError('failed', e.message)

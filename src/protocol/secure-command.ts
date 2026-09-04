@@ -48,6 +48,19 @@ export const SECURE_OP = {
 
 export const IDENTITY_UID_LEN = 12
 export const IDENTITY_KEY_LEN = 32
+
+// Why a GET_IDENTITY failed, as the firmware reports it in a single byte
+// of reply data. Both cases used to be a bare FAILED, which conflated two
+// different remedies: a drone whose bootloader predates the identity
+// region needs its bootloader updated, while one whose region is merely
+// empty needs an identity generated. Getting that wrong means offering to
+// key a drone that cannot hold a key. Firmware older than the change
+// sends no data at all, which we read as "empty" — the same assumption
+// the tool made before, so nothing regresses.
+export const IDENTITY_STATUS = {
+  NOT_SET: 1,
+  NO_REGION: 2,
+} as const
 const IDENTITY_REPLY_LEN = IDENTITY_UID_LEN + IDENTITY_KEY_LEN
 
 // SECURE_COMMAND's data field: 220 bytes shared between payload and
@@ -86,6 +99,10 @@ export class SecureCommandError extends Error {
     public readonly result: MavResult | null,
     message: string,
     public readonly timedOut = false,
+    // The drone has no identity region at all — its bootloader predates
+    // one. Distinct from "no identity yet" because the operator's next
+    // step is different: update the bootloader, not generate a key.
+    public readonly noIdentityRegion = false,
   ) {
     super(message)
     this.name = 'SecureCommandError'
@@ -110,8 +127,18 @@ export class SecureCommandClient {
   // other non-ACCEPTED result, a timeout, or a malformed reply.
   async getIdentity(): Promise<DroneIdentity | null> {
     const resp = await this.request(SECURE_OP.GET_IDENTITY, EMPTY, GET_TIMEOUT_MS)
-    if (resp.result === MavResult.FAILED)
+    if (resp.result === MavResult.FAILED) {
+      if (resp.data.byteLength === 1 && resp.data[0] === IDENTITY_STATUS.NO_REGION) {
+        throw new SecureCommandError(
+          SECURE_OP.GET_IDENTITY,
+          resp.result,
+          'This drone can\'t store an identity yet — its startup software is older than the drone\'s firmware. Update it from the Firmware page, then try again.',
+          false,
+          true,
+        )
+      }
       return null
+    }
     if (resp.result !== MavResult.ACCEPTED)
       throw resultError(SECURE_OP.GET_IDENTITY, resp.result)
     return decodeIdentity(SECURE_OP.GET_IDENTITY, resp.data)

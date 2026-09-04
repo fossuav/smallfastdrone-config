@@ -27,6 +27,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   decodeIdentity,
   IDENTITY_KEY_LEN,
+  IDENTITY_STATUS,
   IDENTITY_UID_LEN,
   SECURE_OP,
   SecureCommandClient,
@@ -272,5 +273,43 @@ describe('decodeIdentity', () => {
   it('rejects any other length', () => {
     expect(() => decodeIdentity(SECURE_OP.GET_IDENTITY, new Uint8Array(43))).toThrow(SecureCommandError)
     expect(() => decodeIdentity(SECURE_OP.GET_IDENTITY, new Uint8Array(45))).toThrow(SecureCommandError)
+  })
+})
+
+// The firmware reports why a read failed in one byte of reply data, so
+// "no identity yet" and "this bootloader can't hold one" stop looking
+// identical. A drone part way through an upgrade is in the second state.
+describe('getIdentity failure reasons', () => {
+  it('reads a bare FAILED as "none yet", the way older firmware answers', async () => {
+    const link = new FakeLink()
+    const pending = link.client().getIdentity()
+    await Promise.resolve()
+    link.reply(link.lastSequence(), SECURE_OP.GET_IDENTITY, MavResult.FAILED)
+
+    await expect(pending).resolves.toBeNull()
+  })
+
+  it('reads NOT_SET as "none yet" - the region is there, generate into it', async () => {
+    const link = new FakeLink()
+    const pending = link.client().getIdentity()
+    await Promise.resolve()
+    link.reply(link.lastSequence(), SECURE_OP.GET_IDENTITY, MavResult.FAILED, Uint8Array.of(IDENTITY_STATUS.NOT_SET))
+
+    await expect(pending).resolves.toBeNull()
+  })
+
+  it('refuses to call NO_REGION "none yet", since generating would fail', async () => {
+    const link = new FakeLink()
+    const pending = link.client().getIdentity()
+    await Promise.resolve()
+    link.reply(link.lastSequence(), SECURE_OP.GET_IDENTITY, MavResult.FAILED, Uint8Array.of(IDENTITY_STATUS.NO_REGION))
+
+    await expect(pending).rejects.toThrow(SecureCommandError)
+    await pending.catch((e: SecureCommandError) => {
+      expect(e.noIdentityRegion).toBe(true)
+      // Operator-facing: names the thing to update, in their words.
+      expect(e.message).toMatch(/startup software/)
+      expect(e.message).not.toMatch(/identity region|GET_IDENTITY/i)
+    })
   })
 })
