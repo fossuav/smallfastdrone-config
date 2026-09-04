@@ -141,6 +141,21 @@ BENCH=1 bun run test:e2e         # run the E2E suite against the board, not SITL
 
 **Nothing here arms anything.** Every check is read-only except the parameter write (one benign parameter, restored afterwards) and the reboot (of a disarmed board). Motor tests stay in SITL and in the props-off bringup wizard, where the operator is present.
 
+### What `BENCH=1` can and can't run
+
+Most E2E specs are written against SITL's *fixture*, not just against a vehicle — SITL's quad X frame, its GPS on SERIAL3, its SmallFastDrone banner. Those assertions are correct and worth keeping; they simply don't describe another board. As of 2026-09-04, on a bare TBS_LUCID_H7 with no card and no ESCs, 13 specs pass unmodified and these do not:
+
+| Spec | Why |
+|---|---|
+| `connect.spec.ts` | Asserts SITL's "Quadcopter" and the "SmallFastDrone" banner. A board on a different frame or upstream firmware is a different, correct answer. |
+| `wizard.spec.ts` (connections ×2) | Asserts SERIAL3 reads "GPS" — SITL's wiring. The real board reported DJI OSD on SERIAL3, which the table rendered correctly. |
+| `wizard-motor-check.spec.ts` (×5, incl. ESC setup) | Needs a configured frame and ESCs. |
+| `settings-scripting.spec.ts` | Needs `SCR_ENABLE` to start at 0, and leaves it at 1 (see below). |
+
+**Specs are not idempotent against real hardware.** SITL is rebuilt per run, so a spec can write freely; a board keeps every write. A full `BENCH=1` run leaves `FRAME_CLASS`, `FRAME_TYPE`, `SCR_ENABLE`, `SERIAL1_*` and `RTL_ALT*` changed, and re-running some specs then fails on their own leftovers. Until a bench fixture snapshots and restores around the run (TODO.md), **put the board back yourself afterwards** — `param.pck` carries the firmware's own defaults, so restoring is mechanical rather than guesswork.
+
+**A bench failure is a hypothesis, not a verdict.** Check whether the board can answer the question at all before treating a red spec as a defect — and equally, don't dismiss one: the scripting spec's failure here turned out to be a real bug in the post-reboot reload (TODO.md), which SITL had been hiding.
+
 ## SITL bridge
 
 SITL exposes MAVLink over TCP. The browser PWA speaks WebSerial in production. For E2E, we use a small bridge:

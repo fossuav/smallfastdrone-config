@@ -158,6 +158,45 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 ## Shell / UX
 
+- `[bug] [protocol] [ux]` **A post-reboot param reload stalls, and the UI then
+  states a wrong value as fact.** Found on the bench 2026-09-04, in the
+  scripting toggle's reboot flow. After `autoReconnect()` returns, the
+  settings view does `params.clear()` then `params.load()` — and on real
+  hardware that load fails: *"Param fetch stalled — got 1 params, then 10s of
+  silence"*. The FC is reachable (heartbeat is what ended the reconnect) but
+  isn't ready to stream the full set that soon after boot. Two separate
+  defects, both invisible on SITL, whose restart is slower and differently
+  shaped:
+  1. **The reload is sent too early and never retried.** A later load — the
+     one the param browser fires on mount — succeeds against the same board
+     seconds afterwards, so this is readiness, not a broken link.
+  2. **`reconnectAndFinish()` doesn't check `params.error`.** `runLoad`
+     catches the failure, leaves `params.value` as the empty map `clear()`
+     just installed, and the view sets `phase = 'idle'` regardless. The
+     operator is told **"Currently off"** for a setting the drone actually
+     holds **on** — a confident wrong answer, which is worse than an error.
+     The `onMounted` path already checks `params.error` and degrades to
+     `unavailable`; the reconnect path must do the same.
+
+  Reproduced end to end: toggle scripting on → apply → the board persists
+  `SCR_ENABLE = 1` (verified over the wire, and the param browser reads 1 from
+  the same store) while the settings card reads "Currently off" indefinitely.
+  Navigating away and back renders "Currently on" from the now-populated
+  store. The backup section is stuck at "Reading your drone's settings…" for
+  the same reason. Fixing (1) needs a decision on the retry contract — where
+  it lives (the store, `useReconnect`, or the caller) and how many attempts —
+  which is why this isn't a drive-by fix.
+
+- `[test]` **The E2E suite is not idempotent on real hardware.** Under
+  `BENCH=1` the specs write to the board and it keeps the writes; SITL starts
+  fresh every run, so this never showed. `settings-scripting` needs
+  `SCR_ENABLE` to start at 0 and leaves it at 1, so a second run of the same
+  spec fails at its first assertion. A whole-suite run also leaves
+  `FRAME_CLASS`, `FRAME_TYPE`, `SERIAL1_*` and `RTL_ALT*` changed. We already
+  own the fix's ingredients — `param.pck` gives the firmware's own defaults
+  and `planRestore` diffs against them — so a bench fixture could snapshot
+  before the run and put the board back after.
+
 - `[ux]` **SFD logo as the favicon.** Use the SmallFastDrone logo as the
   browser-tab icon.
 - `[ux] [security]` **Field tools: real entitlement + custom upload.** The Pro

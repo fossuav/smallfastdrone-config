@@ -26,6 +26,13 @@ const SITL_QUERY = '?transport=websocket&host=localhost:5761'
 const SITL_URL = `/${SITL_QUERY}`
 
 test('Drone settings: toggle scripting on, reboot, reconnect, see it applied', async ({ page }) => {
+  // Two full param loads (one on arrival, one after the restart) plus the
+  // reboot itself. The per-assertion budgets below already add up past
+  // Playwright's 30 s default, so without this the 75 s reconnect wait
+  // could never be reached — on SITL everything lands fast enough to hide
+  // that, on a real board over USB a param load alone is ~6 s.
+  test.setTimeout(180_000)
+
   await page.goto(SITL_URL)
   await page.getByRole('button', { name: 'Connect drone' }).click()
   // Vehicle type may be Quadcopter or Hexacopter depending on what
