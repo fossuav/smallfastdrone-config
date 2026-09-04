@@ -64,13 +64,13 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   `BRD_OPTIONS` bit 10 now reads "Lock drone memory on reboot" instead of
   being an unlabelled checkbox beside the flash-protection bits.
 
-- `[params]` **`FLTMODE_GCSBLOCK` is still undocumented.** The last gap, and a
-  different problem from the two above: `param_parse.py` emits nothing at all
-  for it when generating for ArduCopter, even though the block in
-  `AP_Vehicle.cpp` carries `@Bitmask{Copter}` entries and the tagged-field
-  handling looks like it should apply them. It is upstream-shaped code rather
-  than an SFD addition, so it may well be an upstream quirk. Low priority -
-  one parameter renders without a description.
+- _Done 2026-09-04 -> PROGRESS.md._ **`FLTMODE_GCSBLOCK` is undocumented.**
+  Not a vehicle-tag problem as guessed: the JSON emitter did
+  `self.content[g.name] = {}` per group, so libraries sharing a name lost
+  each other's parameters. Several legitimately share the *empty* name,
+  their parameters having no prefix - AP_Vehicle, the Lua applets and the
+  vehicle's own group - and the applets emitted last. Fixed by merging
+  (`c882cd54e5`). Board coverage is now **1282/1282**.
 
 - _Done 2026-09-04 -> PROGRESS.md._ **The enable ceremony can't tell "no identity yet" from
   "this bootloader can't hold one".** Found on the bench 2026-09-04, and it is
