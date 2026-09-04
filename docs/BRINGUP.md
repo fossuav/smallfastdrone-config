@@ -104,3 +104,16 @@ This tool is for SmallFastDrone, not vanilla ArduPilot. Defaults and recipes ass
 - **Carrier-mounted GPS-poor takeoffs** require `THROW_SRC_INI` handling rather than a blanket "drop SRC_INI" suggestion.
 
 When a recipe or phase has SFD-specific reasoning, link to the relevant doc in `../smallfastdrone/` (e.g. `ArduCopter/CLAUDE.md` indoor playbook) in the recipe description, so the operator can audit the rationale.
+
+## Securing (optional, last)
+
+The bringup ribbon ends with **Secure your drone** (`sfd-enable`), which gives an
+SFD drone its own identity. It is deliberately the only **optional** area: the
+ribbon's completion gate counts required areas only. Bringup is about getting a
+drone flying, securing is about its identity, and most drones cannot be secured
+at all — gating completion on it would leave an ordinary ArduPilot drone
+permanently short of finished.
+
+The panel says which of those a drone is rather than vanishing on one that
+isn't a candidate ("Not available on this drone"), per the never-silently-hide
+rule in [WIZARDS.md](WIZARDS.md).

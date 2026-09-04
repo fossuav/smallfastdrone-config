@@ -52,7 +52,16 @@ const router = useRouter()
 // Ordered chain of bringup areas. Pre-arm readiness is deliberately NOT
 // surfaced here — that's a phase-05 (pre-first-flight) gate, not an
 // opening-step concern. See docs/BRINGUP.md.
-const AREA_IDS = ['preflight', 'frame-select', 'connections-setup', 'motor-check'] as const
+// Securing comes last: it is about the drone's identity rather than
+// whether it will fly, and on a drone that isn't an SFD drone the panel
+// says so rather than disappearing (WIZARDS.md, "never silently hide").
+const AREA_IDS = ['preflight', 'frame-select', 'connections-setup', 'motor-check', 'sfd-enable'] as const
+
+// Areas offered in the ribbon but which never gate its completion.
+// Bringup is about getting the drone flying; securing is about its
+// identity, and most drones cannot be secured at all — gating on it would
+// mean an ordinary ArduPilot drone could never finish bringup.
+const OPTIONAL_AREA_IDS = new Set<string>(['sfd-enable'])
 
 // Where this DesktopView lives, for routing tabs + returnTo.
 const RIBBON_PATH = '/wizard/bringup'
@@ -95,7 +104,20 @@ const config = computed<Record<string, ConfigField[]>>(() => {
 
   // Motors has no read-only fields here — its panel hosts EscQuickControls +
   // the direction-check status instead.
-  return { 'preflight': preflight, 'frame-select': frame }
+  // Checklist wording, which differs from the badge's: "Not secured" reads
+  // as a failed step here, when the truth is that this drone was never a
+  // candidate.
+  const SECURE_STATUS: Record<string, string> = {
+    'identified': 'Secured — has its own identity',
+    'secured': 'Ready to secure',
+    'bootloader-outdated': 'Needs its startup software updated',
+    'unsecured': 'Not available on this drone',
+    'unknown': 'Checking…',
+  }
+  const secure: ConfigField[] = [
+    { label: 'Status', value: SECURE_STATUS[session.securityPosture] ?? 'Checking…' },
+  ]
+  return { 'preflight': preflight, 'frame-select': frame, 'sfd-enable': secure }
 })
 
 // Project each area into its tab + panel data.
@@ -168,9 +190,10 @@ watch(selected, (id) => {
     void connections.refresh()
 }, { immediate: true })
 
-// Auto-mark bringup complete once every sub-wizard is complete.
+// Auto-mark bringup complete once every *required* sub-wizard is complete.
+const requiredAreas = computed(() => areas.value.filter(a => !OPTIONAL_AREA_IDS.has(a.id)))
 const allComplete = computed(() =>
-  areas.value.length > 0 && areas.value.every(a => a.done),
+  requiredAreas.value.length > 0 && requiredAreas.value.every(a => a.done),
 )
 watch(
   allComplete,
@@ -179,7 +202,7 @@ watch(
       progress.markComplete(
         session.fcUid,
         'bringup',
-        `All ${areas.value.length} bringup steps complete.`,
+        `All ${requiredAreas.value.length} bringup steps complete.`,
       )
     }
   },
