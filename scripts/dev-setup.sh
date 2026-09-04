@@ -98,6 +98,32 @@ check_playwright_system_deps() {
   fi
 }
 
+# Bench testing against a real flight controller needs a Python with
+# pyserial that can see the board's serial port. On WSL that has to be
+# *Windows* Python: a board attached to Linux with usbipd never comes
+# back after it reboots, which is precisely what the bench needs to
+# test. Optional — nothing else in the project depends on it.
+check_bench_deps() {
+  local py
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    py="python.exe"
+  else
+    py="python3"
+  fi
+
+  if ! have "$py"; then
+    warn "bench testing needs $py on PATH (skip unless you have a board to test)"
+    return
+  fi
+
+  if "$py" -c "import serial" >/dev/null 2>&1; then
+    ok "$py has pyserial — bench testing available"
+  else
+    warn "bench testing needs pyserial:"
+    warn "  $py -m pip install pyserial"
+  fi
+}
+
 # ----- main -----------------------------------------------------------
 
 main() {
@@ -112,6 +138,7 @@ main() {
   check_sitl_build_deps
   install_playwright_browser
   check_playwright_system_deps
+  check_bench_deps
 
   echo
   ok "dev environment ready"
@@ -124,6 +151,10 @@ main() {
   echo "  bun run sitl:start  # start SITL on TCP 127.0.0.1:5760"
   echo "  bun run sitl:stop"
   echo "  bun run test:e2e    # Playwright E2E (auto-starts SITL + bridge + Vite)"
+  echo
+  echo "With a real board plugged in:"
+  echo "  bun run bench:check  # protocol checks against the board"
+  echo "  bun run bench:bridge # serve the board to the app on ws://localhost:5761"
 }
 
 main "$@"

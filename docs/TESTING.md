@@ -111,6 +111,36 @@ Tests are written to tolerate both: the motor-check direction spec (`wizard-moto
 
 `SECURE_COMMAND` handling is compiled only into signed firmware builds (`GCS_Common.cpp` dispatches it under `#if AP_SIGNED_FIRMWARE`), and `AP_CheckFirmware::find_public_keys()` returns null off ChibiOS anyway, so SITL never answers the SFD identity operations — a `GENERATE_IDENTITY` sent to SITL simply times out, which is also what a non-SFD drone looks like. The identity path is therefore tested at two layers only: **unit** (`secure-command.spec.ts`, `drone-identity.spec.ts`, `sfd-enable.spec.ts` against fakes) and **bench** on a Lucid H7 running a signed bootloader + signed SmallFastDronev1 build, with `Tools/scripts/signing/sfd_identity.py` in the firmware repo as the reference client. Don't write a SITL integration or E2E test for it; it can't pass.
 
+## Bench testing — a real board
+
+SITL answers most questions. Three it cannot answer at all:
+
+- **How long a real link actually takes.** A full parameter download over USB CDC, an FTP chunk sequence at real serial timing.
+- **What a reboot does.** A real board's USB device disappears and comes back as a different device. Every reboot-then-reconnect flow in the app — settings toggles, frame changes, firmware flash — depends on tolerating that gap. SITL never re-enumerates.
+- **Whether our bundled parameter metadata matches the firmware in front of the operator.** SITL runs the tree we generated the metadata from, so it agrees with itself by construction.
+
+`test/bench/` answers those against a board on the desk:
+
+| Piece | What it is |
+|---|---|
+| `com-pipe.py` | Owns the serial port and pipes it to stdio. Bytes on stdout/stdin, line-oriented status on stderr. Reopens the port by itself after it drops. |
+| `serial-link.ts` | Spawns the helper and presents it as bytes-in / bytes-out, with `onOpen` / `onClose` / `nextOpen` so a caller can watch a reboot happen. |
+| `serial-bridge.ts` | The real-hardware twin of `test/sitl/bridge.ts`. Same `ws://localhost:5761` contract, so the app and the Playwright suite reach a board with the transport they already have. |
+| `bench-check.ts` | Standalone protocol checks — identify, param download, metadata coverage, FTP, param write + persist, reboot. |
+
+```
+bun run bench:check              # all checks
+bun run bench:check ftp reboot   # named checks only
+bun run bench:bridge             # serve the board to the app on ws://localhost:5761
+BENCH=1 bun run test:e2e         # run the E2E suite against the board, not SITL
+```
+
+**Why Windows Python on WSL.** The helper runs under `python.exe`, not the WSL interpreter, and this is not incidental. Attaching the board to Linux with `usbipd` works right up until the board reboots: it re-enumerates, usbipd silently drops the WSL attachment, and the character device never returns — so the one check that most needs real hardware is the one that path cannot run. Windows keeps the COM number stable across a reboot. On a native-Linux bench, set `BENCH_PYTHON=python3` and the same helper drives `/dev/ttyACM0` through pyserial unchanged.
+
+**A bench board is not a drone.** `bench-check` reports `SKIP`, not `PASS`, for anything the board in front of it structurally cannot answer — no microSD means no writable filesystem, so no FTP write and no Lua wizard; no ESCs means no motor check. A skip is a bench condition, never a defect, and it must never read as a pass. The same applies to `BENCH=1 bun run test:e2e`: specs needing a configured frame, ESCs or storage are SITL-only, and a bare board failing them says nothing about the code.
+
+**Nothing here arms anything.** Every check is read-only except the parameter write (one benign parameter, restored afterwards) and the reboot (of a disarmed board). Motor tests stay in SITL and in the props-off bringup wizard, where the operator is present.
+
 ## SITL bridge
 
 SITL exposes MAVLink over TCP. The browser PWA speaks WebSerial in production. For E2E, we use a small bridge:
@@ -155,7 +185,7 @@ Each PLAN.md phase has a paired test acceptance criterion. The wizard isn't "don
 
 A subset of tests requires real hardware (real ESC enumeration, real DFU flash on bench FC, real WebSerial USB device). These are tagged `@hil` and **skipped in CI**. Operators / maintainers run them on the bench before tagging a release.
 
-`test/hil/` mirrors the `test/integration/` layout but exercises the real WebSerial / WebUSB paths.
+`test/hil/` mirrors the `test/integration/` layout but exercises the real WebSerial / WebUSB paths. It doesn't exist yet — what exists today is `test/bench/` above, which drives a real board from Bun and from the Playwright suite. The gap `test/hil/` still has to close is the **production transport itself**: `BENCH=1` exercises the app's stores, workflows and views against real hardware, but reaches it over `WebSocketTransport`, so `WebSerialTransport` and `WebUSBTransport` remain covered only by a human in Chrome.
 
 ## What goes in which layer
 

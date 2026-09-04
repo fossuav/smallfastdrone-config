@@ -10,8 +10,15 @@ import { defineConfig, devices } from '@playwright/test'
 //
 // Playwright waits for both ports before running the tests and tears
 // everything down on exit.
+//
+// BENCH=1 swaps the simulator for a real flight controller on the bench,
+// via test/bench/serial-bridge.ts on the same port and wire contract. Only
+// the specs a bare board can actually satisfy will pass — anything that
+// needs a frame, ESCs or an SD card is a SITL-only spec. See
+// docs/TESTING.md "Bench testing".
 
 const isCi = Boolean(process.env.CI)
+const isBench = Boolean(process.env.BENCH)
 
 export default defineConfig({
   testDir: './test/e2e',
@@ -32,7 +39,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: './scripts/test-sitl-bridge.sh',
+      command: isBench ? 'bun run bench:bridge' : './scripts/test-sitl-bridge.sh',
       url: 'http://localhost:5761/',
       timeout: 60_000,
       // Always restart SITL+bridge per test run. Re-using is dangerous:

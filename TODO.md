@@ -44,6 +44,12 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   `SECURE_COMMAND` handling exists only in signed builds. Needs a Lucid H7 with
   a signed bootloader + signed SmallFastDronev1 build, then
   `Tools/scripts/signing/sfd_identity.py --generate` and the enable view.
+  **The bench board isn't there yet** (2026-09-04): the TBS_LUCID_H7 on the
+  desk runs upstream ArduCopter 4.8.0-dev, so this needs the SFD build flashed
+  onto it first. Confirmed on that board that the *negative* path is right —
+  a non-SFD firmware ignores both identity ops and `GET_SESSION_KEY`, so the
+  client times out into `unsupported` rather than reading a blank identity as
+  "none yet, offer to generate".
   Also confirms the sector-0 rewrite in `set_identity()` doesn't trip the
   watchdog and that a GET after GENERATE reads the key back from flash.
 - `[firmware]` **Identity ops are vendor-private op numbers, not dialect
@@ -52,6 +58,16 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   tool and `sfd_identity.py`; if SFD ever wants them in MAVProxy or generated
   docs, add them to `ardupilotmega.xml` in the mavlink submodule and switch
   both sides to the enum. Low priority.
+
+- `[ux] [wizard]` **A drone with no storage reports an errno.** A board with no
+  microSD (or no mounted filesystem) fails every FTP write under `/` with
+  ENOSPC, and that reaches the operator verbatim as
+  `FTP CREATE_DIRECTORY failed: FailErrno (errno 28)` — a MAVLink opcode and a
+  POSIX errno, breaking the microcopy rule outright. Found on the bench
+  2026-09-04. Every Lua wizard depends on this path, so the failure is common
+  and the copy should name the cause and the fix ("This drone has no memory
+  card…"). The distinction is cheap to make: `@SYS` lists fine on a card-less
+  board, so a probe there separates "no card" from "FTP is broken".
 
 ## 3D / visuals
 

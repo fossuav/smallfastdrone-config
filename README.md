@@ -66,6 +66,21 @@ bun run bridge:start  # terminal 2
 bun dev               # terminal 3
 ```
 
+## Bench — a real board
+
+SITL can't tell you how long a real link takes, what happens when a board reboots and its USB device re-enumerates, or whether the parameter metadata we ship matches the firmware in front of the operator. `test/bench/` answers those against a board on the desk:
+
+```bash
+bun run bench:check              # protocol checks: identify, params, metadata, FTP, param write, reboot
+bun run bench:check ftp reboot   # named checks only
+bun run bench:bridge             # serve the board to the app on ws://localhost:5761
+BENCH=1 bun run test:e2e         # run the E2E suite against the board instead of SITL
+```
+
+Plug the board in and run them — the port is found by USB VID:PID. Checks the board structurally can't answer report `SKIP`, not `PASS`: no microSD means no writable filesystem, no ESCs means no motor check. Nothing here arms anything; the only writes are one benign parameter (restored afterwards) and a reboot of a disarmed board.
+
+On WSL the serial helper runs under Windows `python.exe` with pyserial, because a board attached to Linux via `usbipd` never comes back after it reboots. On a native-Linux bench set `BENCH_PYTHON=python3`. See [docs/TESTING.md](docs/TESTING.md#bench-testing--a-real-board).
+
 ## Test
 
 Vitest covers pure logic; Playwright E2E drives the UI against SITL. See [docs/TESTING.md](docs/TESTING.md) for the design.
@@ -124,7 +139,8 @@ Still to come, in rough order: seed recipes, log download (Phase 4), the SFD ena
 │   └── ui/              # shared components
 ├── test/
 │   ├── unit/            # Vitest, pure logic (+ fixtures/)
-│   ├── e2e/             # Playwright, drives the app against SITL
+│   ├── e2e/             # Playwright, drives the app against SITL (or a board, BENCH=1)
+│   ├── bench/           # real-board harness: serial helper, WebSocket bridge, protocol checks
 │   └── sitl/            # WebSocket↔TCP bridge, FTP smoke test
 ├── scripts/             # dev-setup, SITL build/run, wizard scaffold, lua:check
 ├── vendor/smallfastdrone/   # SFD firmware submodule, built into SITL for tests
