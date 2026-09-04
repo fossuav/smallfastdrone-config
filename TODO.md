@@ -52,38 +52,25 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   can no longer be reproduced on this board.
   Also confirms the sector-0 rewrite in `set_identity()` doesn't trip the
   watchdog and that a GET after GENERATE reads the key back from flash.
-- `[bug] [firmware] [params]` **`bun run params:rebuild` is broken, so the param
-  metadata is frozen before the last submodule bump.** `param_parse.py` exits 4
-  with `SIM_FLOW_OFS_X already has field Units`, so the generator never writes a
-  new `src/protocol/param-metadata.json` — which is why the metadata still dates
-  from `c99beab` even though the submodule was bumped at `ac69ccd`. **Cause is
-  an SFD commit**, `4be16989c9` "SITL: add SIM_FLOW_OFS optical flow rate offset
-  for fault injection" (`libraries/SITL/SITL.cpp:203`): it documents two
-  `@Param:` blocks, `FLOW_OFS_X` and `FLOW_OFS_Y`, above a single
-  `AP_GROUPINFO("FLOW_OFS", ...)`. The axis-suffixed idiom is only supported for
-  **Vector3** (`AP_Compass`'s `OFS_X/Y/Z` parse fine; `param_parse.py` knows
-  `Vector3Parameter` and has no Vector2 equivalent), so with two blocks the
-  parser folds them into one param and trips on the repeated `@Units`.
-  **Now visible to operators:** on SFD firmware the board reports 1282
-  parameters and 8 have no metadata at all — `VALT_POS_EXPO`,
-  `EK3_FLOW_GAIN_H`, `EK3_AGL_VD_SPD`, `EK3_AGL_ABIAS_P`, `EK3_FLOW_MIN_H`,
-  `LAND_FS_OPTIONS`, `FLTMODE_GCSBLOCK`, `BARO_THST_FILT` — so they render bare
-  in the param browser. Fix is in the firmware repo, not here. Separately,
-  `BARO_THST_FILT` is a *naming* mismatch rather than a stale one: the tree
-  documents it as `@Param: 1_THST_FILT` while `AP_GROUPINFO("_THST_FILT", ...)`
-  makes the real name `BARO_THST_FILT`, so the metadata carries
-  `BARO1_THST_FILT` and never matches.
+  works again, and the metadata is regenerated.** The cause was not a
+  `param_parse.py` limitation as first supposed: the parser ends a
+  documentation block at a **blank line**, so the two `@Param` blocks written
+  back to back in `SIM_FLOW_OFS` were read as one parameter with a duplicate
+  `@Units`. `AP_Compass` separates `OFS_X/Y/Z` exactly that way for exactly
+  that reason. Fixed in `211213a064`, plus `2e49794913` for a second bug the
+  regen exposed: `BARO_THST_FILT` was documented as `1_THST_FILT` while
+  declared `_THST_FILT`, so the metadata carried a name no drone reports.
+  Coverage on the bench board went from 1274/1282 to **1281/1282**, and
+  `BRD_OPTIONS` bit 10 now reads "Lock drone memory on reboot" instead of
+  being an unlabelled checkbox beside the flash-protection bits.
 
-  **Now blocking something visible (2026-09-04):** F6 added `BRD_OPTIONS`
-  **bit 10**, and the bundled metadata still describes bits 0-9 only, so the
-  seal bit renders unlabelled in the param browser — on the very parameter
-  whose neighbours are the flash write-protection bits, which is the worst
-  place for an unlabelled checkbox. It cannot be fixed here: the generator has
-  to run first. The correct idiom for the offending commit is a **single**
-  `@Param:` block plus a vector marker, the way `SIM_Ship.cpp` documents
-  `OFS` with `@Vector3Parameter: 1` — `param_parse.py` has no Vector2
-  equivalent, so `SIM_FLOW_OFS` (a `Vector2f`) needs either that support
-  adding or the two blocks collapsing into one.
+- `[params]` **`FLTMODE_GCSBLOCK` is still undocumented.** The last gap, and a
+  different problem from the two above: `param_parse.py` emits nothing at all
+  for it when generating for ArduCopter, even though the block in
+  `AP_Vehicle.cpp` carries `@Bitmask{Copter}` entries and the tagged-field
+  handling looks like it should apply them. It is upstream-shaped code rather
+  than an SFD addition, so it may well be an upstream quirk. Low priority -
+  one parameter renders without a description.
 
 - _Done 2026-09-04 -> PROGRESS.md._ **The enable ceremony can't tell "no identity yet" from
   "this bootloader can't hold one".** Found on the bench 2026-09-04, and it is

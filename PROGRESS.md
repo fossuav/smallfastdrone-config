@@ -67,6 +67,14 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-04: **`params:rebuild` works again; metadata regenerated; the seal bit is labelled.** Two firmware doc fixes and a regen. **My first two diagnoses of this were wrong** — it is not a `param_parse.py` limitation and has nothing to do with vector parameters. The parser ends a documentation block at a **blank line**, so the two `@Param` blocks written back to back in `SIM_FLOW_OFS` were read as one parameter with a duplicate `@Units`, and the generator exited rather than producing anything. `AP_Compass` separates `OFS_X/Y/Z` with blank lines for exactly that reason; the axis-suffixed idiom is fully supported. One blank line fixed it (`211213a064`).
+
+  The regen then exposed a second, unrelated bug: `BARO_THST_FILT` was documented as `@Param: 1_THST_FILT` while declared `AP_GROUPINFO("_THST_FILT", ...)`, so the metadata carried `BARO1_THST_FILT` — a name no drone reports. The `1_` belongs to the neighbouring `1_THST_SCALE`, which is per-instance; this one isn't (`2e49794913`).
+
+  **Result, measured on the board:** coverage 1274/1282 → **1281/1282**, and `BRD_OPTIONS` bit 10 now reads *"Lock drone memory on reboot"* rather than being an unlabelled checkbox sitting beside the flash write-protection bits — which was the point. 5715 params in the bundle, up from 5704.
+
+  **One gap left,** `FLTMODE_GCSBLOCK`: `param_parse.py` emits nothing for it under ArduCopter despite its `@Bitmask{Copter}` entries and tagged-field handling that looks like it should apply. Upstream-shaped code rather than an SFD addition, so possibly an upstream quirk. Logged; one parameter renders without a description.
+
 - 2026-09-04: **The seal, wired into the enable wizard** (`ui:` commit). F6's `BRD_OPTIONS` bit 10 is now reachable — the ceremony's steps 6-7, offered **only after** an identity exists and has been verified, never as part of the same action (docs/SECURITY.md, "Why this ordering is the security property"). `drone-lock.ts` holds the arithmetic and the guard; 12 unit tests, 357 green.
 
   **The arithmetic is worth having tested.** Bit 10 sits in the same mask as flash write-protection (bits 4-6), so `withLockBit()` is a read-modify-write and a test asserts every other flag survives — clobbering the bootloader write-protect bit would be a far worse bug than failing to seal. `lockBlocker()` mirrors the firmware's own refusal rather than trusting it: no identity, already sealed, or not connected, and a drone whose settings haven't been read yet counts as *unknown* rather than *unsealed*, so a one-way action is never offered on a guess.
