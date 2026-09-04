@@ -273,6 +273,45 @@ export function buildPreflightRebootToBootloader(targetSystem: number, targetCom
   return cmd
 }
 
+// The magic number MAV_CMD_FLASH_BOOTLOADER demands before it will do
+// anything. ArduPilot reads it from the command's `x` field and answers
+// FAILED with "Magic not set" otherwise — a deliberate guard, because the
+// command rewrites the sector the board boots from.
+export const FLASH_BOOTLOADER_MAGIC = 290876
+
+// Ask the running firmware to flash the bootloader it carries in its own
+// ROMFS (MAV_CMD_FLASH_BOOTLOADER, 42650, an ardupilotmega command). This
+// is the second half of the serial upgrade path: a build made against a
+// secure bootloader embeds that bootloader, so this is how a drone already
+// running SFD firmware gets an SFD bootloader — and therefore an identity
+// region — without ever entering DFU. See docs/SECURITY.md, "Step 1 has
+// two routes".
+//
+// The magic goes in param5 because ArduPilot converts COMMAND_LONG to
+// COMMAND_INT before dispatch and the handler reads `packet.x`; param5 maps
+// to x, and since this command is declared hasLocation="false" the value
+// passes through as a plain integer rather than being scaled by 1e7.
+//
+// Flashing is synchronous on the FC and rewrites a flash sector, so the
+// caller must allow far longer than a normal command ack — and must not
+// cut power while it runs. The new bootloader takes effect at the next
+// boot; this command does not itself reboot.
+export function buildFlashBootloader(targetSystem: number, targetComponent: number): common.CommandLong {
+  const cmd = new common.CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  cmd.command = 42650 as common.MavCmd // MAV_CMD_FLASH_BOOTLOADER (ardupilotmega)
+  cmd._param1 = 0
+  cmd._param2 = 0
+  cmd._param3 = 0
+  cmd._param4 = 0
+  cmd._param5 = FLASH_BOOTLOADER_MAGIC
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
+}
+
 // Build a COMMAND_LONG that restarts the FC's Lua scripting engine
 // (MAV_CMD_SCRIPTING, command id 42701; param1 = SCRIPTING_CMD_STOP_AND_RESTART
 // = 3). The scripting thread tears down its Lua state and rescans the
