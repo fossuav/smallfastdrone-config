@@ -38,18 +38,18 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   `--remote` hint, but a fresh `git submodule update --remote` would follow the
   wrong branch. Re-point it at the config branch, or at the merge when there
   is one. Operator's call.
-- `[firmware]` **Bench-verify the identity path.** F1–F4 (identity region,
+- _Done 2026-09-04 -> PROGRESS.md._ **Bench-verify the identity path.** F1–F4 (identity region,
   fixed-key posture, `GENERATE_IDENTITY` / `GET_IDENTITY`) and T1/T2 are
   compile- and unit-verified only; nothing SFD-specific runs in SITL because
   `SECURE_COMMAND` handling exists only in signed builds. Needs a Lucid H7 with
   a signed bootloader + signed SmallFastDronev1 build, then
   `Tools/scripts/signing/sfd_identity.py --generate` and the enable view.
-  **The bench board isn't there yet** (2026-09-04): the TBS_LUCID_H7 on the
-  desk runs upstream ArduCopter 4.8.0-dev, so this needs the SFD build flashed
-  onto it first. Confirmed on that board that the *negative* path is right —
-  a non-SFD firmware ignores both identity ops and `GET_SESSION_KEY`, so the
-  client times out into `unsupported` rather than reading a blank identity as
-  "none yet, offer to generate".
+  **Done:** the board was upgraded to a signed SmallFastDronev1 build on a
+  signed bootloader, and the identity was generated through the tool's own
+  `runEnableCeremony()`. Generate returned UID + public key, a second generate
+  was `DENIED`, and a read after reboot returned the same key. What is *not*
+  covered: the sector rewrite was never watched under load, and `NO_REGION`
+  can no longer be reproduced on this board.
   Also confirms the sector-0 rewrite in `set_identity()` doesn't trip the
   watchdog and that a GET after GENERATE reads the key back from flash.
 - `[bug] [firmware] [params]` **`bun run params:rebuild` is broken, so the param

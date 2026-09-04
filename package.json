@@ -14,6 +14,7 @@
     "bench:check": "bun run test/bench/bench-check.ts",
     "bench:flash": "bun run test/bench/flash.ts",
     "bench:bootloader": "bun run test/bench/update-bootloader.ts",
+    "bench:enable": "bun run test/bench/enable.ts",
     "params:rebuild": "python3 ./scripts/build-param-metadata.py",
     "dev": "vite",
     "dev:sitl": "./scripts/dev-with-sitl.sh",
