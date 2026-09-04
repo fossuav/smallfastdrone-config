@@ -74,7 +74,7 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   makes the real name `BARO_THST_FILT`, so the metadata carries
   `BARO1_THST_FILT` and never matches.
 
-- `[bug] [security]` **The enable ceremony can't tell "no identity yet" from
+- _Done 2026-09-04 -> PROGRESS.md._ **The enable ceremony can't tell "no identity yet" from
   "this bootloader can't hold one".** Found on the bench 2026-09-04, and it is
   on the upgrade path rather than off it. A drone running signed SFD firmware
   on a pre-SFD bootloader answers `GET_IDENTITY` with `FAILED` — byte for byte
@@ -86,10 +86,11 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   obvious next step: *update this drone's bootloader first*. **Every drone
   upgrading from vanilla sits in exactly this state** between flashing SFD
   firmware and flashing the SFD bootloader. No firmware change is needed to
-  fix it: a blank region would have *succeeded* at generate, so a `FAILED`
-  generate following a `FAILED` read means the region is absent. Wants a new
-  `EnableFailure` reason (`no-identity-region`) whose copy points at the
-  bootloader update.
+  **Fixed in the firmware rather than inferred in the tool**, since
+  `GET_IDENTITY` is SFD's own command: a failed read now returns a status byte
+  (`NOT_SET` / `NO_REGION`) and the ceremony gained a `no-region` reason.
+  Firmware commit `6c1efba363` on `SmallFastDrone-4.7-config`; **not yet
+  pushed**, so the submodule pin here still points at `630cce8d46`.
 
 - _Done 2026-09-04 → PROGRESS.md._ **Tool can't flash the bootloader.**
   `flashRomfsBootloader()` in `src/workflow/bootloader-update.ts` sends

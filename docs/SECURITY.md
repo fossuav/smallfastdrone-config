@@ -268,15 +268,22 @@ bootloader with no `.apsec_data` region. Measured in that state:
 | `GET_IDENTITY` | `FAILED` — F4 dispatches; `find_identity()` finds no region |
 | `GENERATE_IDENTITY` | `FAILED`, with `"Failed to find identity signature"`. `set_identity()` locates the region by signature and refuses before it ever calls `write_bootloader()`, so this is safe to attempt |
 
-The tool reads `FAILED` from a read as `null`, meaning *"no identity yet — offer
-to generate"*, because that is what a **blank** region answers. A **missing**
-region answers identically — the same reply is right after step 2 and wrong
-before it, which is precisely why it can't be trusted on its own — so `runEnableCeremony()` goes on to generate,
-fails, and tells the operator "The drone couldn't complete the identity
-operation." The true answer is specific and actionable: *update this drone's
-bootloader first*. The two cases are distinguishable without any firmware
-change — a blank region would have **succeeded** at generate, so a `FAILED`
-generate after a `FAILED` read means the region isn't there. Tracked in TODO.md.
+**Fixed 2026-09-04, in the firmware.** `GET_IDENTITY` is SFD's own command, so
+rather than inferring the difference tool-side it now *states* it: a failed read
+returns one byte of reply data, `AP_IDENTITY_STATUS_NOT_SET` (region present,
+generate into it) or `AP_IDENTITY_STATUS_NO_REGION` (bootloader predates the
+region, update it). Firmware without the change sends no data, which the tool
+still reads as an empty region, so nothing that already exists regresses.
+
+The tool acts on it: `getIdentity()` keeps returning `null` for NOT_SET and
+throws for NO_REGION, and the ceremony gained a **`no-region`** reason checked
+*before* `unsupported` — a drone with no region is running SFD firmware and
+answers normally, so sweeping it into "isn't running SFD secure firmware" would
+tell the operator to reinstall what they already have.
+
+Before the fix the ceremony read `FAILED` as "no identity yet", generated,
+failed, and dead-ended the operator with "The drone couldn't complete the
+identity operation." — a dead end for a situation with an obvious next step.
 
 ### Telling whether a secure bootloader is installed
 
