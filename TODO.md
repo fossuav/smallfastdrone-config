@@ -91,13 +91,11 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   `EnableFailure` reason (`no-identity-region`) whose copy points at the
   bootloader update.
 
-- `[firmware]` **Tool can't flash the bootloader, so the serial upgrade path
-  stops half way.** `MAV_CMD_FLASH_BOOTLOADER` (magic `290876` in `param5`)
-  asks a running firmware to write the secure bootloader it carries in ROMFS.
-  That is what turns a board that merely runs SFD firmware into one that can
-  hold an identity, and it needs no DFU — see docs/SECURITY.md "Step 1 has two
-  routes". Nothing in `src/` sends it. Until it does, the upgrade path has to
-  be finished by hand.
+- _Done 2026-09-04 → PROGRESS.md._ **Tool can't flash the bootloader.**
+  `flashRomfsBootloader()` in `src/workflow/bootloader-update.ts` sends
+  `MAV_CMD_FLASH_BOOTLOADER`; bench-verified end to end. **Still no view** —
+  it belongs in the enable ceremony (T7), which doesn't exist yet, so for now
+  only the bench can drive it.
 
 - `[firmware]` **Identity ops are vendor-private op numbers, not dialect
   entries.** `0x53464401` / `0x53464402` live as C++ constants and as

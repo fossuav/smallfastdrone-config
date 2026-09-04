@@ -228,12 +228,30 @@ does not need DFU at all:
    carries the secure one.
 
 This matters because it is the difference between "plug in and press a button"
-and "install DFU drivers". **The tool implements step 1 but not step 2** —
-`MAV_CMD_FLASH_BOOTLOADER` isn't sent anywhere yet.
+and "install DFU drivers". **Both steps are now in the tool**: step 1 via
+`BootloaderClient`, step 2 via `flashRomfsBootloader()` in
+`src/workflow/bootloader-update.ts`. Neither has a view yet — the enable
+ceremony (T7) is where step 2 belongs.
+
+Two things about step 2 that cost time to learn, so they are written down:
+
+- **Leaving the bootloader needs the bootloader's own protocol.** Rebooting
+  *into* it sets the hold flag, and it does not speak MAVLink, so a MAVLink
+  reboot strands the board there until it is power-cycled.
+- **`ACCEPTED` does not mean bytes were written.** ArduPilot maps `NO_CHANGE`
+  to `ACCEPTED` so an operator isn't shown an error for a no-op. The drone
+  says `"Bootloader up-to-date"` in text, and a refusal likewise explains
+  itself only in text (`"Bootloader not signed"`), never in the result code.
+
+`check_signed_bootloader()` guards the obvious footgun: a board that already
+has keys refuses to flash a bootloader without any, so a secure build cannot
+accidentally install an insecure bootloader from its own ROMFS.
 
 **Verified on the bench 2026-09-04**, TBS_LUCID_H7 running vanilla ArduCopter
 4.8.0-dev → signed SmallFastDronev1 4.7.0-beta via step 1, written and verified
-in 25.8 s by the tool's own `BootloaderClient`. `SmallFastDronev1` is
+in 25.8 s by the tool's own `BootloaderClient`; then step 2, after which the
+board reports its bootloader as **`TBS_LUCID_H7-Secure-BL-v10`** and the signed
+firmware still boots under it. `SmallFastDronev1` is
 `include ../TBS_LUCID_H7/hwdef.dat` plus `USE_BOOTLOADER_FROM_BOARD`, so the
 product board and a Lucid H7 are the same silicon — a plain `TBS_LUCID_H7`
 build would *not* carry the identity commands, since `AP_CHECK_FIRMWARE_FIXED_KEYS`
@@ -252,12 +270,29 @@ bootloader with no `.apsec_data` region. Measured in that state:
 
 The tool reads `FAILED` from a read as `null`, meaning *"no identity yet — offer
 to generate"*, because that is what a **blank** region answers. A **missing**
-region answers identically, so `runEnableCeremony()` goes on to generate,
+region answers identically — the same reply is right after step 2 and wrong
+before it, which is precisely why it can't be trusted on its own — so `runEnableCeremony()` goes on to generate,
 fails, and tells the operator "The drone couldn't complete the identity
 operation." The true answer is specific and actionable: *update this drone's
 bootloader first*. The two cases are distinguishable without any firmware
 change — a blank region would have **succeeded** at generate, so a `FAILED`
 generate after a `FAILED` read means the region isn't there. Tracked in TODO.md.
+
+### Telling whether a secure bootloader is installed
+
+Harder than it looks, and worth writing down because the first two attempts
+were wrong. `GET_IDENTITY` can't answer it (blank region and missing region
+both reply `FAILED`). No other secure command can either: they all require a
+signature the tool deliberately doesn't hold, so they all reply `DENIED`
+whatever the key set — `GET_SESSION_KEY` included, since it is
+signature-required upstream despite being the first step of the signed
+protocol.
+
+What does work is the bootloader's **USB product string**, which a secure
+build marks: `TBS_LUCID_H7-Secure-BL-v10`. On Windows read the *bus-reported
+device description* (`DEVPKEY_Device_BusReportedDeviceDesc`), not the friendly
+name — the friendly name stays "ArduPilot" and pyserial's `product` is empty
+there, which is how a first check reported a false negative.
 
 ### DFU entry is refused on signed firmware — but the tool never used it
 
