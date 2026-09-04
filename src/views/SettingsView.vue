@@ -40,20 +40,19 @@
 import type { ParamValue } from 'mavlink-mappings/dist/lib/common'
 import type { RestorePlan } from '../workflow/param-backup'
 import { computed, onMounted, ref, watch } from 'vue'
-import { MavFtp } from '../protocol/ftp'
-import { changedParamNames, parseParamPack } from '../protocol/param-pack'
 import { buildParamSet, isParamReadOnly, MSGID_PARAM_VALUE } from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
+import { downloadText } from '../ui/download'
 import {
   backupFilename,
   backupParamCount,
-  buildBackup,
   parseBackup,
   planRestore,
   serializeBackup,
 } from '../workflow/param-backup'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../workflow/reconnect'
+import { useSettingsBackup } from '../workflow/settings-backup'
 
 // Hardcoded scripting toggle. When a second toggle lands this lifts
 // into a FeatureToggle interface + a registry; for one entry the inline
@@ -65,13 +64,11 @@ const TOGGLE = {
 } as const
 const COMP_ID_AUTOPILOT = 1
 const PARAM_ACK_TIMEOUT_MS = 1500
-// Packed parameter file, asked for with defaults so the firmware tells us
-// which parameters it considers changed. See src/protocol/param-pack.ts.
-const PARAM_PACK_PATH = '@PARAM/param.pck?withdefaults=1'
 
 const session = useSessionStore()
 const params = useParamsStore()
 const { reconnectAndReload } = useReconnect()
+const { capture: captureBackup, fetchChangedNames } = useSettingsBackup()
 
 type Phase
   = | 'checking'
@@ -306,19 +303,7 @@ async function saveSettings() {
   saveState.value = 'saving'
   saveError.value = null
   try {
-    const changed = await fetchChangedNames()
-
-    const backup = buildBackup(
-      params.params,
-      {
-        sysid,
-        firmwareVersion: session.firmwareVersion,
-        frameLabel: session.vehicleLabel,
-        uid: session.fcUid,
-      },
-      new Date().toISOString(),
-      { changed, isReadOnly: isParamReadOnly },
-    )
+    const backup = await captureBackup()
     const filename = backupFilename(backup)
     downloadText(serializeBackup(backup), filename)
     savedFilename.value = filename
@@ -422,31 +407,9 @@ function cancelRestore() {
 
 // Ask the drone which of its parameters differ from its own factory
 // defaults. Shared by save and restore — save uses it to decide what to
-// write out, restore to spot changes the backup can't undo.
-async function fetchChangedNames(): Promise<Set<string>> {
-  const sysid = session.sysid
-  if (sysid === null)
-    throw new Error('Connect to your drone first.')
-  const ftp = new MavFtp(session.sendMessage, session.subscribeMessages, sysid, COMP_ID_AUTOPILOT)
-  // Clear any FTP slots a previous fetch left tied up; the firmware
-  // doesn't free them on its own and a second fetch would fail on
-  // OpenFileRO. Same reason useConnections() does it.
-  await ftp.resetSessions()
-  return changedParamNames(parseParamPack(await ftp.downloadFile(PARAM_PACK_PATH)))
-}
-
 // "1 setting" / "3 settings" — the counts below are frequently one.
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
-}
-
-function downloadText(text: string, filename: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
 }
 </script>
 

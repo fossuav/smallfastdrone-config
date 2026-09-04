@@ -38,6 +38,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
+import { downloadText } from '../../ui/download'
 import {
   describeBootloaderUpdateFailure,
   flashRomfsBootloader,
@@ -125,13 +126,7 @@ function saveIdentityFile(): void {
   const result = outcome.value
   if (!result)
     return
-  const blob = new Blob([result.text], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = result.filename
-  anchor.click()
-  URL.revokeObjectURL(url)
+  downloadText(result.text, result.filename)
   saved.value = true
 }
 
