@@ -74,6 +74,17 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   makes the real name `BARO_THST_FILT`, so the metadata carries
   `BARO1_THST_FILT` and never matches.
 
+  **Now blocking something visible (2026-09-04):** F6 added `BRD_OPTIONS`
+  **bit 10**, and the bundled metadata still describes bits 0-9 only, so the
+  seal bit renders unlabelled in the param browser — on the very parameter
+  whose neighbours are the flash write-protection bits, which is the worst
+  place for an unlabelled checkbox. It cannot be fixed here: the generator has
+  to run first. The correct idiom for the offending commit is a **single**
+  `@Param:` block plus a vector marker, the way `SIM_Ship.cpp` documents
+  `OFS` with `@Vector3Parameter: 1` — `param_parse.py` has no Vector2
+  equivalent, so `SIM_FLOW_OFS` (a `Vector2f`) needs either that support
+  adding or the two blocks collapsing into one.
+
 - _Done 2026-09-04 -> PROGRESS.md._ **The enable ceremony can't tell "no identity yet" from
   "this bootloader can't hold one".** Found on the bench 2026-09-04, and it is
   on the upgrade path rather than off it. A drone running signed SFD firmware
