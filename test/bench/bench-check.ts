@@ -51,13 +51,21 @@ import {
   MSGID_HEARTBEAT,
   MSGID_STATUSTEXT,
 } from '../../src/protocol/mavlink'
+import { changedParamNames, parseParamPack } from '../../src/protocol/param-pack'
 import {
   buildParamRequestList,
   buildParamSet,
   buildPreflightStorageSave,
   getParamMeta,
+  isParamReadOnly,
   MSGID_PARAM_VALUE,
 } from '../../src/protocol/params'
+import {
+  buildBackup,
+  parseBackup,
+  planRestore,
+  serializeBackup,
+} from '../../src/workflow/param-backup'
 import { openSerialLink } from './serial-link'
 
 const COMP_ID_AUTOPILOT = 1
@@ -70,6 +78,11 @@ const FTP_PATH = 'APM/scripts/bench_check.lua'
 // tree lives in RAM, so a download from it proves the FTP protocol path
 // even when there's no card in the slot.
 const FTP_VIRTUAL_PATH = '@SYS/uarts.txt'
+// The drone's own account of which parameters it holds away from factory
+// default — the only authoritative source, since defaults are board- and
+// frame-specific and the param metadata carries no default at all. Also
+// virtual, so it survives a board with no card.
+const PARAM_PACK_PATH = '@PARAM/param.pck?withdefaults=1'
 // Below this, the bundled metadata is being generated from the wrong tree
 // rather than merely lagging a firmware version.
 const COVERAGE_FLOOR = 0.95
@@ -359,6 +372,66 @@ async function checkFtp(bench: Bench): Promise<void> {
   }
 }
 
+// CHECK: settings backup (T5) end to end on a real drone. Downloads the
+// drone's packed parameter file, builds a backup from the live parameter
+// map, writes and re-reads the document, then plans a restore of that
+// backup onto the same drone — which must come back as "nothing to do".
+// Anything else means the delta filter, the serialiser or the comparison
+// disagree with each other on real data.
+//
+// It also cross-checks the two independent parameter paths: param.pck and
+// PARAM_REQUEST_LIST should report the same number of parameters.
+async function checkBackup(bench: Bench, params: Map<string, ParamRecord>): Promise<void> {
+  const ftp = new MavFtp(
+    async (msg) => { bench.send(bench.session.serialize(msg)) },
+    cb => bench.session.on(cb),
+    bench.sysid,
+    COMP_ID_AUTOPILOT,
+  )
+  await ftp.resetSessions()
+
+  const started = Date.now()
+  const pack = parseParamPack(await ftp.downloadFile(PARAM_PACK_PATH))
+  const elapsed = Date.now() - started
+
+  if (pack.params.length !== params.size) {
+    record(
+      'backup',
+      'fail',
+      `param.pck reports ${pack.params.length} params, PARAM_REQUEST_LIST reported ${params.size}`,
+    )
+    return
+  }
+
+  const filter = { changed: changedParamNames(pack), isReadOnly: isParamReadOnly }
+  const backup = buildBackup(params, {
+    sysid: bench.sysid,
+    firmwareVersion: null,
+    frameLabel: null,
+    uid: null,
+  }, new Date().toISOString(), filter)
+
+  // Round-trip the document, then plan a restore of it onto the very
+  // drone it came from. Every entry should read back identical.
+  const reread = parseBackup(serializeBackup(backup))
+  const plan = planRestore(reread, params, filter)
+  const saved = Object.keys(reread.params).length
+  const dropped = filter.changed.size - saved
+
+  const ok = plan.toWrite.length === 0 && plan.missing.length === 0 && plan.unchanged.length === saved
+  record(
+    'backup',
+    ok ? 'pass' : 'fail',
+    ok
+      ? `param.pck ${pack.params.length} params in ${elapsed}ms; ${filter.changed.size} changed from default, ${saved} saved (${dropped} read-only dropped); restore onto the same drone is a no-op`
+      : `restore of a just-taken backup is not a no-op: ${plan.toWrite.length} to write, ${plan.missing.length} missing, ${plan.unchanged.length}/${saved} unchanged`,
+  )
+  if (saved > 0)
+    console.log(`        saved: ${Object.keys(reread.params).join(', ')}`)
+  if (plan.notReverted.length > 0)
+    console.log(`        not revertable by this backup: ${plan.notReverted.join(', ')}`)
+}
+
 // CHECK: parameter write + persist + read back, then restore. Exercises
 // the PARAM_SET / PARAM_VALUE-echo ack path the settings and wizard code
 // all sit on, including the PREFLIGHT_STORAGE save that makes a change
@@ -439,12 +512,14 @@ async function main(): Promise<void> {
     await checkIdentify(bench)
 
   let params = new Map<string, ParamRecord>()
-  if (wants('params') || wants('metadata') || wants('paramwrite'))
+  if (wants('params') || wants('metadata') || wants('paramwrite') || wants('backup'))
     params = await checkParams(bench)
   if (wants('metadata'))
     checkMetadata(params)
   if (wants('ftp'))
     await checkFtp(bench)
+  if (wants('backup'))
+    await checkBackup(bench, params)
   if (wants('paramwrite'))
     await checkParamWrite(bench, params)
   if (wants('reboot'))
