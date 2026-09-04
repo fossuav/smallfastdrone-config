@@ -52,6 +52,28 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   "none yet, offer to generate".
   Also confirms the sector-0 rewrite in `set_identity()` doesn't trip the
   watchdog and that a GET after GENERATE reads the key back from flash.
+- `[bug] [firmware] [params]` **`bun run params:rebuild` is broken, so the param
+  metadata is frozen before the last submodule bump.** `param_parse.py` exits 4
+  with `SIM_FLOW_OFS_X already has field Units`, so the generator never writes a
+  new `src/protocol/param-metadata.json` — which is why the metadata still dates
+  from `c99beab` even though the submodule was bumped at `ac69ccd`. **Cause is
+  an SFD commit**, `4be16989c9` "SITL: add SIM_FLOW_OFS optical flow rate offset
+  for fault injection" (`libraries/SITL/SITL.cpp:203`): it documents two
+  `@Param:` blocks, `FLOW_OFS_X` and `FLOW_OFS_Y`, above a single
+  `AP_GROUPINFO("FLOW_OFS", ...)`. The axis-suffixed idiom is only supported for
+  **Vector3** (`AP_Compass`'s `OFS_X/Y/Z` parse fine; `param_parse.py` knows
+  `Vector3Parameter` and has no Vector2 equivalent), so with two blocks the
+  parser folds them into one param and trips on the repeated `@Units`.
+  **Now visible to operators:** on SFD firmware the board reports 1282
+  parameters and 8 have no metadata at all — `VALT_POS_EXPO`,
+  `EK3_FLOW_GAIN_H`, `EK3_AGL_VD_SPD`, `EK3_AGL_ABIAS_P`, `EK3_FLOW_MIN_H`,
+  `LAND_FS_OPTIONS`, `FLTMODE_GCSBLOCK`, `BARO_THST_FILT` — so they render bare
+  in the param browser. Fix is in the firmware repo, not here. Separately,
+  `BARO_THST_FILT` is a *naming* mismatch rather than a stale one: the tree
+  documents it as `@Param: 1_THST_FILT` while `AP_GROUPINFO("_THST_FILT", ...)`
+  makes the real name `BARO_THST_FILT`, so the metadata carries
+  `BARO1_THST_FILT` and never matches.
+
 - `[bug] [security]` **The enable ceremony can't tell "no identity yet" from
   "this bootloader can't hold one".** Found on the bench 2026-09-04, and it is
   on the upgrade path rather than off it. A drone running signed SFD firmware
