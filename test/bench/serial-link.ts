@@ -33,6 +33,7 @@
 // This is test-path code. Production reaches a board through
 // WebSerialTransport and nothing else — see docs/TESTING.md.
 
+import type { RawSerial } from '../../src/transport/raw-serial'
 import { Buffer } from 'node:buffer'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
@@ -48,22 +49,35 @@ const BENCH_PORT = process.env.BENCH_PORT
 
 const HELPER = join(dirname(fileURLToPath(import.meta.url)), 'com-pipe.py')
 
+// What the board is currently running, told apart by the USB product id
+// the helper reports: the firmware's dual-USB build claims 0x5740, the
+// single-USB bootloader 0x5741.
+export type BoardMode = 'firmware' | 'bootloader' | 'unknown'
+
 export interface SerialLink {
   // The port the helper actually opened, once it reports one.
   readonly port: string | null
+  // Which side of a flash the board is on right now.
+  readonly mode: BoardMode
   // Push bytes at the board. Dropped, not queued, while the port is down.
   write: (bytes: Uint8Array) => void
   // Subscribe to bytes arriving from the board. Returns an unsubscribe fn.
   onData: (cb: (bytes: Uint8Array) => void) => () => void
   // Fires on every open, including the reopen after a reboot.
-  onOpen: (cb: (port: string) => void) => () => void
+  onOpen: (cb: (port: string, mode: BoardMode) => void) => () => void
   // Fires when the port drops (reboot, unplug).
   onClose: (cb: () => void) => () => void
   // Resolve once the port is open — immediately if it already is.
   ready: (timeoutMs?: number) => Promise<string>
   // Resolve on the *next* open, ignoring the current one. This is how the
-  // reboot check times a re-enumeration.
-  nextOpen: (timeoutMs?: number) => Promise<string>
+  // reboot check times a re-enumeration. Pass `mode` to wait for the board
+  // to come back as specifically the firmware or the bootloader, which is
+  // what a flash needs across its two reboots.
+  nextOpen: (timeoutMs?: number, mode?: BoardMode) => Promise<string>
+  // Byte-level view of the same link, for protocols that sit below MAVLink
+  // (the serial bootloader). Reads are buffered from the moment this is
+  // called, so create it before sending anything you expect a reply to.
+  rawSerial: () => RawSerial
   close: () => void
 }
 
@@ -95,9 +109,10 @@ export function openSerialLink(port: string | undefined = BENCH_PORT): SerialLin
   })
 
   const dataCbs = new Set<(bytes: Uint8Array) => void>()
-  const openCbs = new Set<(port: string) => void>()
+  const openCbs = new Set<(port: string, mode: BoardMode) => void>()
   const closeCbs = new Set<() => void>()
   let openPort: string | null = null
+  let openMode: BoardMode = 'unknown'
   let stopped = false
 
   // Board bytes.
@@ -119,11 +134,16 @@ export function openSerialLink(port: string | undefined = BENCH_PORT): SerialLin
       for (const line of lines) {
         const text = line.trim()
         if (text.startsWith('open ')) {
-          openPort = text.slice(5)
-          for (const cb of openCbs) cb(openPort)
+          const [port, pid] = text.slice(5).split(' ')
+          openPort = port ?? null
+          openMode = pid === '5740' ? 'firmware' : pid === '5741' ? 'bootloader' : 'unknown'
+          if (openPort) {
+            for (const cb of openCbs) cb(openPort, openMode)
+          }
         }
         else if (text.startsWith('closed')) {
           openPort = null
+          openMode = 'unknown'
           for (const cb of closeCbs) cb()
         }
         else if (text.length > 0) {
@@ -136,18 +156,21 @@ export function openSerialLink(port: string | undefined = BENCH_PORT): SerialLin
   // Resolve on the next open event, with a deadline. Shared by `ready`
   // and `nextOpen`; the difference is only whether an already-open port
   // short-circuits it.
-  const awaitOpen = (timeoutMs: number): Promise<string> =>
+  const awaitOpen = (timeoutMs: number, wantMode?: BoardMode): Promise<string> =>
     new Promise((resolve, reject) => {
       let off: (() => void) | null = null
+      const what = wantMode ? `as ${wantMode}` : ''
+      const where = port ? ` on ${port}` : ' (no ArduPilot USB device found)'
       const timer = setTimeout(() => {
         off?.()
-        reject(new Error(
-          `board did not appear within ${timeoutMs}ms`
-          + `${port ? ` on ${port}` : ' (no ArduPilot USB device found)'}`,
-        ))
+        reject(new Error(`board did not appear ${what} within ${timeoutMs}ms${where}`))
       }, timeoutMs)
       off = ((): (() => void) => {
-        const cb = (p: string): void => {
+        const cb = (p: string, m: BoardMode): void => {
+          // A flash crosses two re-enumerations; waiting for the wrong one
+          // would race ahead while the board is still the other thing.
+          if (wantMode && m !== wantMode)
+            return
           clearTimeout(timer)
           off?.()
           resolve(p)
@@ -160,6 +183,9 @@ export function openSerialLink(port: string | undefined = BENCH_PORT): SerialLin
   return {
     get port() {
       return openPort
+    },
+    get mode() {
+      return openMode
     },
     write(bytes) {
       if (stopped)
@@ -182,12 +208,71 @@ export function openSerialLink(port: string | undefined = BENCH_PORT): SerialLin
     async ready(timeoutMs = 15_000) {
       return openPort ?? await awaitOpen(timeoutMs)
     },
-    nextOpen(timeoutMs = 60_000) {
-      return awaitOpen(timeoutMs)
+    nextOpen(timeoutMs = 60_000, wantMode?: BoardMode) {
+      return awaitOpen(timeoutMs, wantMode)
+    },
+    rawSerial() {
+      return makeRawSerial(this)
     },
     close() {
       stopped = true
       proc.kill()
+    },
+  }
+}
+
+// Adapt a SerialLink to the byte-level `RawSerial` the bootloader client
+// talks to. In the browser that interface is served by WebSerialTransport
+// reopening the port; here the helper already owns the port, so this is
+// just a buffer plus a waiter.
+//
+// Buffering starts when this is called, not when readExact is first
+// awaited, so a reply that arrives while the caller is still setting up
+// isn't lost.
+function makeRawSerial(link: SerialLink): RawSerial {
+  let buffer: number[] = []
+  let notify: (() => void) | null = null
+  let closed = false
+
+  const off = link.onData((bytes) => {
+    for (const b of bytes) buffer.push(b)
+    notify?.()
+  })
+
+  return {
+    async readExact(nBytes, timeoutMs) {
+      const deadline = Date.now() + timeoutMs
+      while (buffer.length < nBytes) {
+        if (closed)
+          throw new Error('raw serial closed while waiting for bytes')
+        const remaining = deadline - Date.now()
+        if (remaining <= 0) {
+          throw new Error(
+            `timed out waiting for ${nBytes} bytes (got ${buffer.length})`,
+          )
+        }
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, Math.min(remaining, 50))
+          notify = () => {
+            clearTimeout(timer)
+            notify = null
+            resolve()
+          }
+        })
+      }
+      const out = Uint8Array.from(buffer.slice(0, nBytes))
+      buffer = buffer.slice(nBytes)
+      return out
+    },
+    drain() {
+      buffer = []
+    },
+    async write(bytes) {
+      link.write(bytes)
+    },
+    async close() {
+      closed = true
+      off()
     },
   }
 }

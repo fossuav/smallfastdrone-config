@@ -122,6 +122,16 @@ check_bench_deps() {
     warn "bench testing needs pyserial:"
     warn "  $py -m pip install pyserial"
   fi
+
+  # Signing an SFD firmware build (and building a secure bootloader) needs
+  # pymonocypher, on the *Linux* python that runs the firmware tooling —
+  # not the Windows one that owns the serial port.
+  if python3 -c "import monocypher" >/dev/null 2>&1; then
+    ok "python3 has pymonocypher — firmware signing available"
+  else
+    warn "signing SFD firmware needs pymonocypher:"
+    warn "  python3 -m pip install pymonocypher==3.1.3.2"
+  fi
 }
 
 # ----- main -----------------------------------------------------------

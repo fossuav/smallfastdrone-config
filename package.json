@@ -12,6 +12,7 @@
     "ftp:smoke": "bun run test/sitl/ftp-smoke.ts",
     "bench:bridge": "bun run test/bench/serial-bridge.ts",
     "bench:check": "bun run test/bench/bench-check.ts",
+    "bench:flash": "bun run test/bench/flash.ts",
     "params:rebuild": "python3 ./scripts/build-param-metadata.py",
     "dev": "vite",
     "dev:sitl": "./scripts/dev-with-sitl.sh",

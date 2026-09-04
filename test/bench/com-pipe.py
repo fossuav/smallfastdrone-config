@@ -12,7 +12,11 @@ Protocol, so the TypeScript side can treat it as a transport:
 
     stdout  raw bytes from the board (binary, unbuffered)
     stdin   raw bytes to the board
-    stderr  line-oriented status: "open <PORT>", "closed", "error <msg>"
+    stderr  line-oriented status: "open <PORT> <pid>", "closed", "error <msg>"
+
+The product id on the open line says what is running -- 5740 is the
+firmware, 5741 the bootloader -- so a caller flashing firmware can tell
+which side of the reboot it is on.
 
 The port is reopened automatically after it drops, so a reboot shows up
 as "closed" followed by "open" once the board is back.
@@ -34,8 +38,15 @@ import time
 import serial
 from serial.tools import list_ports
 
-# ArduPilot's USB identity. Same pair every ChibiOS board enumerates with.
-VID, PID = 0x1209, 0x5740
+# ArduPilot's USB identity. A board presents a different product id
+# depending on what is running: the firmware's dual-USB build claims 0x5740
+# (MAVLink + SLCAN), while the bootloader, which is single-USB, claims
+# 0x5741. Follow both so a flash can track the board across the reboot into
+# its bootloader and back out again.
+VID = 0x1209
+PID_FIRMWARE = 0x5740
+PID_BOOTLOADER = 0x5741
+PIDS = (PID_FIRMWARE, PID_BOOTLOADER)
 BAUD = 115200
 # Short read timeout: long enough not to spin the CPU, short enough that
 # MAVLink latency stays well under one heartbeat.
@@ -49,18 +60,26 @@ def status(msg):
 
 
 def find_port(requested):
-    """Resolve which COM port to open, or None if the board isn't present."""
+    """Resolve (port, pid) to open, or (None, None) if the board isn't there."""
+    ports = list(list_ports.comports())
     if requested:
-        return requested
-    candidates = [p for p in list_ports.comports() if p.vid == VID and p.pid == PID]
+        for p in ports:
+            if p.device.upper() == requested.upper():
+                return requested, p.pid
+        return requested, None
+
+    candidates = [p for p in ports if p.vid == VID and p.pid in PIDS]
     if not candidates:
-        return None
+        return None, None
 
     def com_number(p):
         tail = p.device[3:]
         return int(tail) if p.device.upper().startswith("COM") and tail.isdigit() else 0
 
-    return sorted(candidates, key=com_number)[0].device
+    # The bootloader presents a single port; the firmware presents MAVLink on
+    # the lower-numbered one and SLCAN above it. Lowest wins either way.
+    chosen = sorted(candidates, key=com_number)[0]
+    return chosen.device, chosen.pid
 
 
 class Pipe(object):
@@ -75,7 +94,7 @@ class Pipe(object):
         """Board -> stdout, reopening the port whenever it goes away."""
         while not self.stop:
             if self.ser is None:
-                port = find_port(self.requested)
+                port, pid = find_port(self.requested)
                 if port is None:
                     time.sleep(0.2)
                     continue
@@ -87,7 +106,7 @@ class Pipe(object):
                     # keep trying rather than giving up on the first refusal.
                     time.sleep(0.2)
                     continue
-                status("open %s" % port)
+                status("open %s %s" % (port, "%04x" % pid if pid is not None else "----"))
                 continue
 
             try:
