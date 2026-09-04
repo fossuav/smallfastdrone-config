@@ -276,3 +276,55 @@ function makeRawSerial(link: SerialLink): RawSerial {
     },
   }
 }
+
+// What the USB device behind a port calls itself.
+//
+// This is how you tell a secure bootloader from a plain one without
+// destroying anything: ArduPilot marks a secure build's USB product string
+// with "-Secure-", and that string is the only non-destructive evidence of
+// which bootloader is installed — a secure bootloader whose identity region
+// is still blank answers GET_IDENTITY exactly as one with no region at all,
+// and every other secure command needs a signature we deliberately don't
+// hold, so they all answer DENIED whatever the key set.
+//
+// On Windows the value wanted is the *bus-reported* device description, not
+// the friendly name: the friendly name stays "ArduPilot" while the bus
+// string carries the real product. pyserial doesn't expose it there
+// (`product` is empty), so ask Windows directly and fall back to pyserial
+// elsewhere.
+export async function describeUsbPort(port: string): Promise<string | null> {
+  if (BENCH_PYTHON.endsWith('.exe')) {
+    const ps = [
+      `$c = Get-PnpDevice -PresentOnly | Where-Object { $_.FriendlyName -like '*(${port})*' }`,
+      `foreach ($d in $c) {`,
+      `  $p = Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue`,
+      `  if ($p.Data) { Write-Output $p.Data }`,
+      `}`,
+    ].join('; ')
+    const proc = Bun.spawn(['powershell.exe', '-NoProfile', '-Command', ps], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      cwd: '/mnt/c',
+    })
+    const out = (await new Response(proc.stdout).text()).trim()
+    if (out.length > 0)
+      return out.split(/\r?\n/)[0] ?? null
+  }
+
+  const script = [
+    'from serial.tools import list_ports',
+    'import sys',
+    'want = sys.argv[1].upper()',
+    'for p in list_ports.comports():',
+    '    if p.device.upper() == want:',
+    '        print(p.product or p.description or "")',
+    '        break',
+  ].join('\n')
+  const proc = Bun.spawn([BENCH_PYTHON, '-c', script, port], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    cwd: BENCH_PYTHON.endsWith('.exe') ? '/mnt/c' : undefined,
+  })
+  const out = (await new Response(proc.stdout).text()).trim()
+  return out.length > 0 ? out : null
+}
