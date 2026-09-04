@@ -67,6 +67,16 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-04: **The recovery wizard — the way back out** (`wizard:` commit). `src/wizards/sfd-recover/`, category `safety`, library-only and deliberately **not** in the bringup ribbon: it is a destructive escape hatch, not a setup step. It supplies the I/O behind T3's `RecoveryDriver`, so the ordering guarantee stays in the unit-tested pure module and the view only provides devices and prompts. The ceremony's two blocking gates — *do you really hold the file*, *is it in update mode* — are promises the view resolves from button clicks, which is what keeps an irreversible decision with a person instead of a timeout.
+
+  **Three things it has to get right.** The unlock **resets the chip the instant it succeeds**, so the DFU handle used to unlock is dead and the device must be re-acquired before flashing — no fresh permission prompt needed, since it stays authorised, so it polls `listAuthorisedDfuDevices()` the way the serial path polls for the firmware port. The image must be a **`_with_bl.hex`**, because the chip comes back blank *including its bootloader* and an `.apj` would leave a drone that cannot start — Start stays disabled until one is chosen, and the E2E asserts that. And the operator is told **before** they commit that the drone's identity dies and a new one would be a *different* identity, so anything SFD sent for that airframe stops working; that is the consequence they'd never guess.
+
+  **The visual is the step track**, which earns its place: a five-minute sequence that wipes a drone in the middle is frightening in proportion to how little of it you can see, so the destructive step is marked before it runs, and afterwards flips to "this has happened — your drone needs the rest finishing".
+
+  **Reuse first:** three surfaces now hand the operator a file, so `downloadText()` moved to `ui/`, and `useSettingsBackup().capture()` is shared with the settings page — deliberately, because the exit ceremony's backup is the operator's only way back from a mass erase and must be the code that has actually been exercised, not a lookalike. Settings backup/restore specs still pass.
+
+  **Not bench-run, and won't be casually:** proving this on hardware costs the identity generated today. The ordering is unit-tested (11 cases), and the E2E covers what SITL can prove — that the cost is stated and the wizard refuses to start unarmed. **T1–T7 are now all landed; only the lock step (F6) remains.**
+
 - 2026-09-04: **Securing joins the bringup ribbon, and T3 — the exit ceremony — lands.**
 
   **Ribbon:** `sfd-enable` is now the ribbon's last tab as well as a library card. Adding it exposed a trap: bringup's completion gate was `areas.every(done)`, so a fifth area would have meant **an ordinary ArduPilot drone could never finish bringup**. It is therefore the first *optional* area — the gate counts required areas only. The panel uses checklist wording rather than the badge's, because "Not secured" in a list of steps reads as a failed step when the truth is the drone was never a candidate; it says "Not available on this drone". Ribbon E2E still green.
