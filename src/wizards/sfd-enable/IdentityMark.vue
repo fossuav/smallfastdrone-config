@@ -19,9 +19,10 @@
 // the drone in front of me? Two drones look obviously different; one drone
 // looks identical every time. See src/workflow/identity-mark.ts.
 //
-// `pending` draws the same grid greyed and empty, so the shape of what is
-// coming is on screen before the drone has been asked - the placeholder is
-// the real thing, unfilled, rather than a spinner that tells you nothing.
+// An empty grid means "no mark to show". `pending` additionally says the
+// drone genuinely has no identity yet - it must not be set merely because
+// we have not read one, or the caption contradicts whatever the view says
+// about the drone beside it.
 
 import { computed } from 'vue'
 import {

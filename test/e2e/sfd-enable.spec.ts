@@ -50,7 +50,8 @@ test('SFD enable refuses clearly on a drone that cannot hold an identity', async
   // ...and must send the operator somewhere useful instead.
   await expect(page.getByRole('link', { name: /Go to firmware/ })).toBeVisible()
 
-  // The lock is not built yet, and the wizard says so rather than
-  // implying the drone is sealed.
-  await expect(page.getByText(/Sealing your drone/)).toBeVisible()
+  // Sealing is one-way and the firmware refuses it without a verified
+  // identity, so a drone that has none must never be shown the option.
+  await expect(page.getByText(/Seal this drone/)).toHaveCount(0)
+  await expect(page.getByText(/This drone is sealed/)).toHaveCount(0)
 })

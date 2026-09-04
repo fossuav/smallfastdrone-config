@@ -29,13 +29,16 @@
 // session.securityPosture, which is one GET_IDENTITY read (see
 // src/workflow/drone-security.ts).
 //
-// The lock itself (raising readout protection) is deliberately absent: the
-// firmware side of it does not exist yet, so the step is shown as coming
-// rather than pretended at. Enabling and locking are separate on purpose -
-// docs/SECURITY.md, "Why this ordering is the security property".
+// Sealing is offered only *after* an identity exists and has been verified,
+// never as part of the same action - docs/SECURITY.md, "Why this ordering is
+// the security property". It is also the one thing here the tool cannot
+// undo, so it sits behind a disclosure and a typed confirmation rather than
+// beside the primary button, the way the DFU unlock does on the Firmware
+// page.
 
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import { downloadText } from '../../ui/download'
@@ -43,6 +46,12 @@ import {
   describeBootloaderUpdateFailure,
   flashRomfsBootloader,
 } from '../../workflow/bootloader-update'
+import {
+  isLockRequested,
+  LOCK_PARAM,
+  lockBlocker,
+  withLockBit,
+} from '../../workflow/drone-lock'
 import { useReconnect } from '../../workflow/reconnect'
 import { useSfdEnable } from '../../workflow/use-sfd-enable'
 import IdentityMark from './IdentityMark.vue'
@@ -50,6 +59,7 @@ import IdentityMark from './IdentityMark.vue'
 const COMP_ID_AUTOPILOT = 1
 
 const session = useSessionStore()
+const params = useParamsStore()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
@@ -65,6 +75,68 @@ const updateState = ref<UpdateState>('idle')
 const updateError = ref<string | null>(null)
 
 const posture = computed(() => session.securityPosture)
+
+// --- sealing (the one-way step) ------------------------------------
+type SealState = 'idle' | 'writing' | 'restarting' | 'sealed' | 'failed'
+const sealState = ref<SealState>('idle')
+const sealError = ref<string | null>(null)
+const showSeal = ref(false)
+// Typed confirmation. A drone that cannot be un-sealed deserves more than
+// a click that could be a mis-click.
+const sealConfirmation = ref('')
+const SEAL_PHRASE = 'SEAL'
+
+// Sealing writes a parameter, so the set has to be loaded before the
+// option can be offered - otherwise the button is there and does nothing.
+onMounted(() => {
+  if (session.connected && params.count === 0 && !params.loading)
+    void params.load()
+})
+
+const boardOptions = computed(() => params.params.get(LOCK_PARAM)?.value)
+// Distinct from "not sealed": until the drone's settings are read we do
+// not know, and must not offer a one-way action on a guess.
+const sealKnown = computed(() => params.params.has(LOCK_PARAM))
+const alreadySealed = computed(() => isLockRequested(boardOptions.value))
+const sealBlocker = computed(() => (sealKnown.value
+  ? lockBlocker({
+      connected: session.connected,
+      hasIdentity: posture.value === 'identified',
+      options: boardOptions.value,
+    })
+  : 'not-connected'))
+const canSeal = computed(() => sealBlocker.value === null && sealConfirmation.value.trim().toUpperCase() === SEAL_PHRASE)
+
+// Ask the drone to seal itself on its next start. The firmware refuses
+// without a verified identity, so this mirrors that check rather than
+// relying on it alone.
+async function seal(): Promise<void> {
+  const existing = params.params.get(LOCK_PARAM)
+  if (!existing || sealBlocker.value !== null)
+    return
+  sealState.value = 'writing'
+  sealError.value = null
+
+  params.setEdit(LOCK_PARAM, withLockBit(existing.value))
+  await params.apply()
+  if (params.applyError !== null) {
+    sealState.value = 'failed'
+    sealError.value = 'Your drone didn\'t accept the change. Nothing has been sealed.'
+    return
+  }
+
+  // Readout protection is raised at the next start, not now.
+  sealState.value = 'restarting'
+  await session.reboot()
+  if (await reconnectAndReload() !== 'ok') {
+    sealState.value = 'failed'
+    sealError.value = 'Your drone was set to seal itself but didn\'t come back. Power-cycle it and reconnect to check.'
+    return
+  }
+  sealState.value = isLockRequested(params.params.get(LOCK_PARAM)?.value) ? 'sealed' : 'failed'
+  if (sealState.value === 'failed')
+    sealError.value = 'The setting didn\'t stick. Your drone has not been sealed.'
+}
 const identity = computed(() => outcome.value?.identity ?? null)
 const saved = ref(false)
 
@@ -147,9 +219,13 @@ function cancel(): void {
          is drawn empty before there is one, so the shape of what's coming
          is on screen rather than a spinner that says nothing. -->
     <div class="border-default flex flex-col items-center gap-4 rounded-md border bg-elevated/50 p-6">
+      <!-- "not made yet" only when that is actually true. A drone that
+           already has an identity we simply haven't read yet gets an empty
+           mark and no caption, rather than a caption contradicting the
+           line right below it. -->
       <IdentityMark
         :public-key="identity?.publicKey ?? null"
-        :pending="situation !== 'done'"
+        :pending="situation === 'secured'"
       />
     </div>
 
@@ -275,19 +351,84 @@ function cancel(): void {
       </div>
     </div>
 
-    <!-- What is left. The lock is real work that does not exist yet, and
-         saying so beats a step that quietly never appears. -->
-    <div class="border-default rounded-md border p-4">
-      <p class="text-muted text-xs uppercase tracking-wide">
-        Still to come
-      </p>
-      <div class="mt-2 flex items-start gap-2">
-        <UIcon name="i-lucide-lock" class="text-muted mt-0.5 size-4 shrink-0" />
+    <!-- Sealing. Offered only once an identity exists and has been
+         verified, and kept behind a disclosure so a one-way action never
+         competes with the primary button. -->
+    <div v-if="sealKnown && alreadySealed" class="border-default rounded-md border p-4">
+      <div class="flex items-start gap-2">
+        <UIcon name="i-lucide-lock" class="text-primary mt-0.5 size-4 shrink-0" />
         <p class="text-muted text-sm">
-          <span class="text-default font-medium">Sealing your drone</span> — stopping
-          anyone reading its secret half off the chip. This arrives with a
-          future firmware update; your drone's identity is ready for it now.
+          <span class="text-default font-medium">This drone is sealed.</span>
+          It won't give up its secret half to anyone reading the chip. Undoing
+          that means wiping the drone completely, from the
+          <RouterLink to="/wizard/sfd-recover" class="text-primary underline">
+            remove-security wizard
+          </RouterLink>.
         </p>
+      </div>
+    </div>
+
+    <div v-else-if="sealBlocker === null || sealState !== 'idle'" class="border-default rounded-md border p-4">
+      <button
+        v-if="!showSeal && sealState === 'idle'"
+        type="button"
+        class="text-muted hover:text-default flex items-center gap-2 text-sm"
+        @click="showSeal = true"
+      >
+        <UIcon name="i-lucide-lock" class="size-4" />
+        Seal this drone's memory
+        <UIcon name="i-lucide-chevron-down" class="size-3" />
+      </button>
+
+      <div v-else-if="sealState === 'idle'" class="space-y-3">
+        <UAlert
+          color="warning"
+          icon="i-lucide-lock"
+          title="Sealing can't be undone"
+          description="Sealing stops anyone reading your drone's secret half off the chip — including you, and including us. The only way back is wiping the drone completely, which destroys this identity and everything else on it. Your drone works exactly as before; it just stops giving up its secret."
+        />
+        <div>
+          <p class="text-muted text-xs">
+            Type <span class="text-default font-mono font-medium">{{ SEAL_PHRASE }}</span> to confirm.
+          </p>
+          <input
+            v-model="sealConfirmation"
+            type="text"
+            class="border-default mt-1 rounded-md border bg-default px-2 py-1 font-mono text-sm"
+            :placeholder="SEAL_PHRASE"
+          >
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <UButton color="warning" icon="i-lucide-lock" :disabled="!canSeal" @click="seal">
+            Seal this drone
+          </UButton>
+          <UButton color="neutral" variant="ghost" @click="showSeal = false">
+            Not now
+          </UButton>
+        </div>
+      </div>
+
+      <div v-else-if="sealState === 'writing' || sealState === 'restarting'" class="text-muted flex items-center gap-2 text-sm">
+        <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+        {{ sealState === 'writing' ? 'Sealing your drone…' : 'Restarting your drone…' }}
+      </div>
+
+      <!-- Honest about what was actually confirmed: the request is stored
+           and survived a restart. The chip's protection level has no
+           MAVLink representation, so claiming to have read it back would
+           be a claim we cannot support. -->
+      <UAlert
+        v-else-if="sealState === 'sealed'"
+        color="success"
+        icon="i-lucide-lock"
+        title="Your drone is sealed"
+        description="It restarted with sealing switched on. From now on its secret half can't be read off the chip."
+      />
+      <div v-else class="space-y-2">
+        <UAlert color="error" icon="i-lucide-triangle-alert" :description="sealError ?? 'Couldn\'t seal your drone.'" />
+        <UButton color="neutral" variant="subtle" icon="i-lucide-rotate-ccw" @click="sealState = 'idle'">
+          Back
+        </UButton>
       </div>
     </div>
 

@@ -488,7 +488,9 @@ rebase burden is low.
 
 ## Tool work list
 
-**Status 2026-09-04:** T1–T7 have all landed, and F6 has landed in firmware. What remains is the tool side of the lock — the ceremony's steps 6–7, which attach to a *completed* enable outcome rather than running inside it. T2's identity half and T7's enable wizard have both run against a real drone; T3 is unit-tested only, deliberately — see its row.
+**Status 2026-09-04:** T1–T7 and F6 have all landed, tool side included — the enable wizard now offers the seal (steps 6–7), attached to a *completed* enable outcome rather than running inside the ceremony. Nothing here is bench-verified past the identity: sealing the bench board would cost the identity generated on it.
+
+**What "sealed" can honestly be confirmed as.** The tool writes `BRD_OPTIONS` bit 10, reboots, and checks the bit survived. It cannot read the chip's protection level: that is a hardware state with no MAVLink representation, and the firmware's own call is a no-op once already set, so there is no signal to observe either. The success copy says the drone restarted with sealing switched on, and claims nothing further. Making it genuinely observable would need a firmware readback — worth considering, and deliberately not invented here. T2's identity half and T7's enable wizard have both run against a real drone; T3 is unit-tested only, deliberately — see its row.
 
 | # | Module | Purpose |
 |---|---|---|
