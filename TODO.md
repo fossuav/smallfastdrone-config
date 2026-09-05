@@ -256,8 +256,8 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   it lives (the store, `useReconnect`, or the caller) and how many attempts —
   which is why this isn't a drive-by fix.
 
-- `[bug] [ux]` **Connecting permanently rewrites the drone's telemetry rates,
-  and they then show up in every backup.** On connect, `session.ts` sends
+- _Done 2026-09-05 -> PROGRESS.md._ **Connecting permanently rewrites the drone's
+  telemetry rates, and they then show up in every backup.** On connect, `session.ts` sends
   `REQUEST_DATA_STREAM(MAV_DATA_STREAM_ALL, 2 Hz)`; ArduPilot doesn't treat
   that as a session preference, it `set_and_save`s it into the `MAVn_*`
   stream-rate parameters. Noticed on the bench 2026-09-04 while returning the
@@ -270,7 +270,15 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   whole premise is that it holds only their configuration. Decide whether to
   request per-message rates instead (`SET_MESSAGE_INTERVAL`, which is not
   persisted), restore the previous values on disconnect, or exclude `MAVn_*`
-  from backups. The first is the honest fix.
+  **Fixed by the first.** `REQUEST_DATA_STREAM` is gone; the session now asks
+  for `SYS_STATUS` alone via `SET_MESSAGE_INTERVAL`, which ArduPilot routes to
+  its deferred-message buckets and never writes to a parameter. It also turned
+  out to be the only streamed message the app reads - heartbeat is always sent,
+  and STATUSTEXT, COMMAND_ACK, the FTP replies and a script's
+  NAMED_VALUE_FLOAT are all event-driven - so asking for every stream was
+  buying nothing. Verified on the board: connecting leaves **0** parameters
+  changed where it used to leave 9, and SYS_STATUS goes from 0 to ~2 Hz on
+  request.
 
 - `[test]` **The E2E suite is not idempotent on real hardware.** Under
   `BENCH=1` the specs write to the board and it keeps the writes; SITL starts

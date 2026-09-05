@@ -46,8 +46,8 @@ import {
   buildDoSendBanner,
   buildPreflightReboot,
   buildPreflightRebootToBootloader,
-  buildRequestDataStream,
   buildRequestMessage,
+  buildSetMessageInterval,
   decodeFirmwareVersion,
   deriveSubsystemStatus,
   formatFcUid,
@@ -68,6 +68,11 @@ import { probeSecurityPosture } from '../workflow/drone-security'
 // MAV_COMP_ID_AUTOPILOT1 — the FC's component id, which is what
 // REQUEST_MESSAGE for AUTOPILOT_VERSION must target.
 const COMP_ID_AUTOPILOT = 1
+
+// How often we want SYS_STATUS. 2 Hz: the subsystem panel is a health
+// readout an operator glances at, not an instrument, and asking for less
+// leaves the FC more of its link.
+const SYS_STATUS_INTERVAL_US = 500_000
 
 export interface StatusTextEntry {
   text: string
@@ -211,9 +216,13 @@ export const useSessionStore = defineStore('session', () => {
 
       // First heartbeat after connect: ask for AUTOPILOT_VERSION (for the
       // structured firmware fields), DO_SEND_BANNER (for the human-readable
-      // string that carries the SFD suffix), and REQUEST_DATA_STREAM (to
-      // kick the FC into streaming SYS_STATUS / ATTITUDE / VFR_HUD etc.,
-      // which it doesn't do by default until asked).
+      // string that carries the SFD suffix), and SYS_STATUS on an interval
+      // (subsystem health, which the FC doesn't send until asked).
+      //
+      // SYS_STATUS is the only message here that needs a rate at all -
+      // heartbeat is always sent, and STATUSTEXT, COMMAND_ACK, the FTP
+      // replies and a script's NAMED_VALUE_FLOAT all arrive on their own
+      // events. So ask for that one rather than turning on every stream.
       // How secured the drone is takes a round trip that a drone without
       // secure firmware never answers, so it runs on its own rather than
       // holding up the heartbeat handler for the timeout.
@@ -229,7 +238,7 @@ export const useSessionStore = defineStore('session', () => {
           await transport.value.send(session.serialize(ver))
           const banner = buildDoSendBanner(msg.sysid, COMP_ID_AUTOPILOT)
           await transport.value.send(session.serialize(banner))
-          const stream = buildRequestDataStream(msg.sysid, COMP_ID_AUTOPILOT, 2)
+          const stream = buildSetMessageInterval(msg.sysid, COMP_ID_AUTOPILOT, MSGID_SYS_STATUS, SYS_STATUS_INTERVAL_US)
           await transport.value.send(session.serialize(stream))
         }
         catch (e) {

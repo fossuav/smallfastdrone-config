@@ -189,23 +189,40 @@ export function deriveSubsystemStatus(
   return out
 }
 
-// Build a REQUEST_DATA_STREAM to ask the FC to start streaming all of
-// its standard telemetry (SYS_STATUS, ATTITUDE, VFR_HUD, …) at the
-// given rate. ArduPilot honours the legacy stream request and is what
-// MAVProxy uses by default. Without this, SITL only emits heartbeat
-// until something asks for more.
-export function buildRequestDataStream(
+// Ask the FC to send one message at a given interval.
+//
+// Deliberately not REQUEST_DATA_STREAM, which this replaces. ArduPilot
+// treats a stream-rate request as configuration and `set_and_save`s it
+// into the MAVn_* parameters, so merely connecting used to leave a
+// permanent mark on the drone - and those parameters then showed up in
+// every settings backup, a document whose whole premise is that it holds
+// only what the operator changed. Observed on a bench board: nine MAVn_*
+// parameters moved from 0 to 2 purely because the tool had been plugged
+// in.
+//
+// SET_MESSAGE_INTERVAL is the per-message equivalent and stays in RAM -
+// the firmware routes it to its deferred-message buckets and writes no
+// parameter. It also lets us ask for what we actually read instead of
+// turning every stream on: interval is microseconds, and -1 means stop.
+export function buildSetMessageInterval(
   targetSystem: number,
   targetComponent: number,
-  rateHz: number,
-): common.RequestDataStream {
-  const r = new common.RequestDataStream()
-  r.targetSystem = targetSystem
-  r.targetComponent = targetComponent
-  r.reqStreamId = 0 // MAV_DATA_STREAM_ALL
-  r.reqMessageRate = rateHz
-  r.startStop = 1
-  return r
+  messageId: number,
+  intervalUs: number,
+): common.CommandLong {
+  const cmd = new common.CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  cmd.command = 511 as common.MavCmd // MAV_CMD_SET_MESSAGE_INTERVAL
+  cmd._param1 = messageId
+  cmd._param2 = intervalUs
+  cmd._param3 = 0
+  cmd._param4 = 0
+  cmd._param5 = 0
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
 }
 
 // Build an ardupilotmega DO_SEND_BANNER command. ArduPilot replies with

@@ -67,6 +67,14 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-05: **Connecting no longer changes the drone** (`mavlink:` commit). The tool asked for telemetry with `REQUEST_DATA_STREAM`, which ArduPilot treats as *configuration* and `set_and_save`s into the `MAVn_*` parameters — so merely plugging in left a permanent mark, and those nine then rode along in every settings backup, a document whose whole premise is that it holds only what the operator changed.
+
+  Replaced with `SET_MESSAGE_INTERVAL`. Both halves were checked in the firmware rather than assumed: `handle_request_data_stream` writes parameters, while `set_ap_message_interval` only touches the deferred-message buckets and writes nothing. It also turned out the app reads exactly **one** streamed message — `SYS_STATUS`. Heartbeat is always sent; STATUSTEXT, COMMAND_ACK, the FTP replies and a script's `NAMED_VALUE_FLOAT` are all event-driven; AUTOPILOT_VERSION and PARAM_VALUE are asked for explicitly. So turning on every stream was buying nothing. `buildRequestDataStream` is deleted rather than left available, and a test asserts it is gone — the point is that the persisting path should not be reachable by reaching for the obvious name.
+
+  **Verified on the board.** Connecting the app leaves **0** parameters changed, where it previously left 9. From a clean reboot, `SYS_STATUS` goes from **0 in 10 s** to **19 in 10 s** once asked — about the 2 Hz requested — and the subsystem panel renders its 9 indicators. One correction along the way: a first check reported the panel empty, which was the assertion reading `innerText` where the indicators carry `aria-label`; the feature was fine and the test was wrong.
+
+  361 unit → 365 green.
+
 - 2026-09-05: **Gyro calibration excluded from settings backups** (`params:` commit), closing the finding the exit-ceremony restore turned up. `isMeasuredParam()` in `param-backup.ts` drops `INS_GYROFFS_*` and `INS_GYR*_CALTEMP`: the drone re-measures them every boot, so saving them promises something a restore cannot keep. The predicate is **deliberately narrow** — the accelerometer equivalents are named almost identically (`INS_ACCOFFS_X`, `INS_ACC1_CALTEMP`) but are a calibration the operator performs by hand, and matching them would be a far worse bug than missing a gyro offset; a test pins that. On the board the saved set went from 8 entries, four of them gyro, to **6, all genuine settings**.
 
   Also tidied two inaccuracies the fix exposed in the bench harness itself: the backup check said "read-only dropped" when the count now includes drone-measured parameters, and its cross-check of `param.pck` against `PARAM_REQUEST_LIST` flapped because the stream is lossy under scripting load. It now re-reads once before failing — a single disagreement is the stream dropping one, not the counts differing — and passed three runs in a row. 361 unit green.
