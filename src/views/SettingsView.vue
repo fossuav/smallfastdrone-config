@@ -40,6 +40,7 @@
 import type { ParamValue } from 'mavlink-mappings/dist/lib/common'
 import type { RestorePlan } from '../workflow/param-backup'
 import { computed, onMounted, ref, watch } from 'vue'
+import { buildForceSaveCalibration } from '../protocol/mavlink'
 import { buildParamSet, isParamReadOnly, MSGID_PARAM_VALUE } from '../protocol/params'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
@@ -49,6 +50,7 @@ import {
   backupParamCount,
   parseBackup,
   planRestore,
+  restoreTouchesCalibration,
   serializeBackup,
 } from '../workflow/param-backup'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../workflow/reconnect'
@@ -381,6 +383,15 @@ async function applyRestore() {
       throw new Error(params.applyError)
 
     restoreWritten.value = plan.toWrite.length
+
+    // A restored calibration is not a calibration the drone believes in:
+    // the backup carries the values but not the sensor ids that bind them
+    // to hardware, so without this the drone refuses to arm having
+    // apparently forgotten a calibration the operator did. Do it before
+    // the restart so the drone comes back already sound.
+    if (restoreTouchesCalibration(plan) && session.sysid !== null)
+      await session.sendMessage(buildForceSaveCalibration(session.sysid, COMP_ID_AUTOPILOT)).catch(() => {})
+
     await sleep(STORAGE_SETTLE_MS)
 
     restorePhase.value = 'restarting'

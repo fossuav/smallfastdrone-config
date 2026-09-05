@@ -220,7 +220,9 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   panel sits below — and visually competes with — the primary "Start motor
   check". Collapse it behind a disclosure so the primary action stands alone.
   (UX audit.)
-- `[wizard]` **Force-cal for compass + accel.** Offer a "redo calibration"
+- `[wizard]` **Force-cal for compass + accel.** *(Distinct from the restore fix
+  of 2026-09-05: that tells the drone an already-restored calibration is valid,
+  this is about offering the operator a fresh one.)* Offer a "redo calibration"
   option for compass and accelerometer, shown only when the relevant cal params
   are present on the FC (so it appears only where it can actually act).
   Operator-first copy ("Recalibrate compass"), never param names.

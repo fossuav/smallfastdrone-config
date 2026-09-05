@@ -225,6 +225,42 @@ export function buildSetMessageInterval(
   return cmd
 }
 
+// Tell the drone the calibration it already holds is valid.
+//
+// Restoring a backup writes the calibration *values* back
+// (COMPASS_OFS_*, INS_ACCOFFS_*, INS_ACCSCAL_*), but not the sensor ids
+// that bind them to detected hardware - those are read-only and belong to
+// the hardware, so a backup rightly doesn't carry them. Without the ids
+// the firmware treats the calibration as not done: `accel_calibrated_ok_all()`
+// fails on `_accel_id_ok`, and the drone refuses to arm having apparently
+// forgotten a calibration the operator did.
+//
+// MAV_CMD_PREFLIGHT_CALIBRATION carries a dedicated escape for exactly
+// this, and ArduPilot's own comment on it names the case: "allow GCS to
+// force an existing calibration of accel and/or compass to be written as
+// valid. This is useful when reloading parameters after a full parameter
+// erase."
+//
+// The magic 76 goes in param2 for the compass and param5 for the accel,
+// and every other slot must stay 0: param1 = 1 starts a gyro calibration,
+// param5 = 4 starts a real accel calibration, and neither is something to
+// begin by accident while an operator is putting settings back.
+export function buildForceSaveCalibration(targetSystem: number, targetComponent: number): common.CommandLong {
+  const cmd = new common.CommandLong()
+  cmd.targetSystem = targetSystem
+  cmd.targetComponent = targetComponent
+  cmd.command = 241 as common.MavCmd // MAV_CMD_PREFLIGHT_CALIBRATION
+  cmd._param1 = 0 //  gyro           - leave alone
+  cmd._param2 = 76 // magnetometer   - accept the stored compass calibration
+  cmd._param3 = 0 //  ground pressure- leave alone
+  cmd._param4 = 0 //  RC             - leave alone
+  cmd._param5 = 76 // accelerometer  - accept the stored accel calibration
+  cmd._param6 = 0
+  cmd._param7 = 0
+  cmd.confirmation = 0
+  return cmd
+}
+
 // Build an ardupilotmega DO_SEND_BANNER command. ArduPilot replies with
 // several STATUSTEXTs including the vehicle + version string (which is
 // the only place the SFD suffix shows up — AUTOPILOT_VERSION doesn't

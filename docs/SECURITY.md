@@ -419,7 +419,24 @@ it.
 | 2 | Unlock | `stm32_flash_set_rdp_flash(0xAA)` — see two routes below |
 | 3 | Mass erase (automatic) | Silicon. Destroys firmware, bootloader, **and the identity key**. |
 | 4 | DFU flash vanilla SFD `_with_bl.hex` | Chip is blank including the bootloader, so this is the DFU path, not the serial bootloader path |
-| 5 | Restore params | With an explicit report of anything that did not survive |
+| 5 | Restore params | With an explicit report of anything that did not survive. **Includes telling the drone its restored calibration is valid** — see below. |
+
+**Restoring a calibration is not restoring a calibration.** A backup carries the
+compass and accelerometer calibration *values* (`COMPASS_OFS_*`, `INS_ACCOFFS_*`,
+`INS_ACCSCAL_*`) but not the sensor ids that bind them to detected hardware —
+those are read-only and describe the hardware, so a backup rightly has no
+business carrying them. Write the values back on their own and the firmware
+still considers the drone uncalibrated: `accel_calibrated_ok_all()` fails on
+`_accel_id_ok`, and the drone refuses to arm having apparently forgotten a
+calibration the operator performed. So step 5 finishes by sending
+`MAV_CMD_PREFLIGHT_CALIBRATION` with the accept-stored magic (76) in the
+compass and accel slots. ArduPilot's own comment on that path names this exact
+case: *"useful when reloading parameters after a full parameter erase"*.
+
+The slots matter and are pinned by a unit test: the same command **starts** a
+gyro calibration on `param1 = 1` and a real accelerometer calibration on
+`param5 = 4`, neither of which should begin while an operator is putting
+settings back.
 
 **Two unlock routes, and we need both:**
 

@@ -45,6 +45,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MavFtp } from '../../protocol/ftp'
 import { parseIntelHex } from '../../protocol/intel-hex'
+import { buildForceSaveCalibration } from '../../protocol/mavlink'
 import { changedParamNames, parseParamPack } from '../../protocol/param-pack'
 import { isParamReadOnly } from '../../protocol/params'
 import { useParamsStore } from '../../stores/params'
@@ -53,7 +54,12 @@ import { useWizardProgressStore } from '../../stores/wizardProgress'
 import { listAuthorisedDfuDevices, openDfuDevice, requestDfuDevice } from '../../transport/webusb'
 import { downloadText } from '../../ui/download'
 import { useFirmwareFlash } from '../../workflow/firmware'
-import { backupFilename, planRestore, serializeBackup } from '../../workflow/param-backup'
+import {
+  backupFilename,
+  planRestore,
+  restoreTouchesCalibration,
+  serializeBackup,
+} from '../../workflow/param-backup'
 import { useSettingsBackup } from '../../workflow/settings-backup'
 import { hasUnfinishedBusiness, RecoverError, runExitCeremony } from '../../workflow/sfd-recover'
 import RecoverySteps from './RecoverySteps.vue'
@@ -226,6 +232,14 @@ const driver: RecoveryDriver = {
       if (params.applyError !== null)
         throw new Error(params.applyError)
     }
+
+    // The drone was wiped, so anything it knew about its own calibration
+    // went with it. The values are back now, but the sensor ids that make
+    // them count are not in a backup - tell it they are good, or it comes
+    // out of the ceremony refusing to arm.
+    if (restoreTouchesCalibration(plan))
+      await session.sendMessage(buildForceSaveCalibration(sysid, COMP_ID_AUTOPILOT)).catch(() => {})
+
     return plan
   },
 }

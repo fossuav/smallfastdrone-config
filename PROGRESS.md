@@ -67,6 +67,16 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-05: **A restored calibration wasn't a calibration the drone believed in** (`params:` commit). Operator caught this: after reinstating compass and accel offsets, the drone needs telling they are valid. It was not being done anywhere.
+
+  The shape of the gap, confirmed against the metadata and the firmware: a backup carries the calibration **values** (`COMPASS_OFS_*`, `COMPASS_DIA_*`, `INS_ACCOFFS_*`, `INS_ACCSCAL_*`) but not the sensor **ids** (`COMPASS_DEV_ID*`, `INS_ACC*_ID`), which are read-only and describe detected hardware — correctly dropped, since they aren't the operator's configuration. But `accel_calibrated_ok_all()` gates on `_accel_id_ok`, so writing the values alone leaves the drone refusing to arm, having apparently forgotten a calibration the operator performed. On the exit ceremony — which wipes everything — that would have been the normal outcome for any calibrated drone.
+
+  Fixed in both restore paths (drone settings, and the recovery wizard) with `MAV_CMD_PREFLIGHT_CALIBRATION` carrying the accept-stored magic **76** in the compass and accel slots, sent only when the plan actually writes calibration. ArduPilot's own comment on that path names the case exactly: *"useful when reloading parameters after a full parameter erase."*
+
+  **The slots are the dangerous part and are pinned by tests:** the same command *starts* a gyro calibration on `param1 = 1` and a real accelerometer calibration on `param5 = 4`. Beginning either while an operator is putting settings back would be far worse than the bug being fixed.
+
+  **Verified on the board** that the command is accepted (`COMMAND_ACK` result 0), emits nothing, and re-calibrates nothing — gyro offsets, accel offsets, compass offsets and the accel id all unchanged. **The positive case is not proven:** this board has never had a compass or accel calibration to accept, so there was nothing for the command to validate. 374 unit green.
+
 - 2026-09-05: **Connecting no longer changes the drone** (`mavlink:` commit). The tool asked for telemetry with `REQUEST_DATA_STREAM`, which ArduPilot treats as *configuration* and `set_and_save`s into the `MAVn_*` parameters — so merely plugging in left a permanent mark, and those nine then rode along in every settings backup, a document whose whole premise is that it holds only what the operator changed.
 
   Replaced with `SET_MESSAGE_INTERVAL`. Both halves were checked in the firmware rather than assumed: `handle_request_data_stream` writes parameters, while `set_ap_message_interval` only touches the deferred-message buckets and writes nothing. It also turned out the app reads exactly **one** streamed message — `SYS_STATUS`. Heartbeat is always sent; STATUSTEXT, COMMAND_ACK, the FTP replies and a script's `NAMED_VALUE_FLOAT` are all event-driven; AUTOPILOT_VERSION and PARAM_VALUE are asked for explicitly. So turning on every stream was buying nothing. `buildRequestDataStream` is deleted rather than left available, and a test asserts it is gone — the point is that the persisting path should not be reachable by reaching for the obvious name.

@@ -221,6 +221,23 @@ export function parseBackup(text: string): ParamBackup {
 //   unchanged  — the drone already matches; nothing to do
 //   missing    — the drone's firmware doesn't have this parameter at all
 //   readOnly   — the drone has it but won't accept a write
+// Calibration the operator performed, whose values a backup carries but
+// whose sensor ids it cannot: the ids are read-only and describe detected
+// hardware. Writing the values back therefore leaves the drone holding a
+// calibration the firmware does not consider done, and it will refuse to
+// arm. See buildForceSaveCalibration().
+const CALIBRATION_PARAMS = [
+  // COMPASS_OFS_X, COMPASS_OFS2_Y, COMPASS_DIA_Z, COMPASS_ODI_X, ...
+  /^COMPASS_(OFS|DIA|ODI)\d?_[XYZ]$/,
+  // INS_ACCOFFS_X, INS_ACC2SCAL_Z, ...
+  /^INS_ACC\d?(OFFS|SCAL)_[XYZ]$/,
+]
+
+// True for a compass or accelerometer calibration value.
+export function isCalibrationParam(name: string): boolean {
+  return CALIBRATION_PARAMS.some(re => re.test(name))
+}
+
 export type RestoreAction = 'write' | 'unchanged' | 'missing' | 'readOnly'
 
 export interface RestoreItem {
@@ -249,6 +266,13 @@ export interface RestorePlan {
   // to. This is the honest cost of a delta backup and the operator is
   // told, not left to find out.
   notReverted: string[]
+}
+
+// Does applying this plan put calibration values back? If so the drone has
+// to be told they are valid afterwards - it cannot work that out for
+// itself, because the ids that would tell it are not in the backup.
+export function restoreTouchesCalibration(plan: RestorePlan): boolean {
+  return plan.toWrite.some(item => isCalibrationParam(item.name))
 }
 
 // Almost-equal threshold for parameter comparison. Integer parameters

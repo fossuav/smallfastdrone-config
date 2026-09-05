@@ -27,9 +27,11 @@ import {
   backupFilename,
   backupParamCount,
   buildBackup,
+  isCalibrationParam,
   isMeasuredParam,
   parseBackup,
   planRestore,
+  restoreTouchesCalibration,
   serializeBackup,
 } from '../../src/workflow/param-backup'
 
@@ -424,5 +426,69 @@ describe('measured parameters are not configuration', () => {
       isReadOnly: () => false,
     })
     expect(Object.keys(backup.params).sort()).toEqual(['ATC_RAT_PIT_P', 'INS_ACCOFFS_X'])
+  })
+})
+
+const EMPTY_BACKUP = {
+  schema: BACKUP_SCHEMA,
+  createdAt: CREATED_AT,
+  vehicle: VEHICLE,
+  params: {},
+}
+
+// A restored calibration is not one the drone believes in: the backup
+// carries the values but not the sensor ids that bind them to hardware, so
+// it has to be told they are valid or it refuses to arm.
+describe('calibration values need the drone told afterwards', () => {
+  it('recognises compass and accelerometer calibration', () => {
+    for (const name of [
+      'COMPASS_OFS_X',
+      'COMPASS_OFS2_Y',
+      'COMPASS_DIA_Z',
+      'COMPASS_ODI_X',
+      'INS_ACCOFFS_X',
+      'INS_ACCSCAL_Y',
+      'INS_ACC2OFFS_Z',
+      'INS_ACC3SCAL_X',
+    ])
+      expect(isCalibrationParam(name)).toBe(true)
+  })
+
+  it('does not treat ordinary settings as calibration', () => {
+    for (const name of [
+      'COMPASS_ENABLE',
+      'COMPASS_DEV_ID',
+      'INS_ENABLE_MASK',
+      'INS_GYROFFS_X',
+      'ATC_RAT_PIT_P',
+    ])
+      expect(isCalibrationParam(name)).toBe(false)
+  })
+
+  it('flags a plan that puts calibration back', () => {
+    const plan = planRestore(
+      { ...EMPTY_BACKUP, params: { COMPASS_OFS_X: { value: 12, type: 9 } } },
+      new Map([['COMPASS_OFS_X', { name: 'COMPASS_OFS_X', value: 0, type: 9, index: 1 }]]),
+      { changed: new Set(['COMPASS_OFS_X']), isReadOnly: () => false },
+    )
+    expect(plan.toWrite).toHaveLength(1)
+    expect(restoreTouchesCalibration(plan)).toBe(true)
+  })
+
+  // Sending it when nothing was calibrated would be noise, and the command
+  // shares its message with real calibrations.
+  it('does not flag a plan that only restores ordinary settings', () => {
+    const plan = planRestore(
+      { ...EMPTY_BACKUP, params: { ATC_RAT_PIT_P: { value: 0.2, type: 9 } } },
+      new Map([['ATC_RAT_PIT_P', { name: 'ATC_RAT_PIT_P', value: 0.135, type: 9, index: 1 }]]),
+      { changed: new Set(['ATC_RAT_PIT_P']), isReadOnly: () => false },
+    )
+    expect(plan.toWrite).toHaveLength(1)
+    expect(restoreTouchesCalibration(plan)).toBe(false)
+  })
+
+  it('does not flag a plan that writes nothing', () => {
+    const plan = planRestore(EMPTY_BACKUP, new Map(), { changed: new Set(), isReadOnly: () => false })
+    expect(restoreTouchesCalibration(plan)).toBe(false)
   })
 })
