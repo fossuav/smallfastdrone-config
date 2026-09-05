@@ -67,6 +67,10 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-05: **Gyro calibration excluded from settings backups** (`params:` commit), closing the finding the exit-ceremony restore turned up. `isMeasuredParam()` in `param-backup.ts` drops `INS_GYROFFS_*` and `INS_GYR*_CALTEMP`: the drone re-measures them every boot, so saving them promises something a restore cannot keep. The predicate is **deliberately narrow** — the accelerometer equivalents are named almost identically (`INS_ACCOFFS_X`, `INS_ACC1_CALTEMP`) but are a calibration the operator performs by hand, and matching them would be a far worse bug than missing a gyro offset; a test pins that. On the board the saved set went from 8 entries, four of them gyro, to **6, all genuine settings**.
+
+  Also tidied two inaccuracies the fix exposed in the bench harness itself: the backup check said "read-only dropped" when the count now includes drone-measured parameters, and its cross-check of `param.pck` against `PARAM_REQUEST_LIST` flapped because the stream is lossy under scripting load. It now re-reads once before failing — a single disagreement is the stream dropping one, not the counts differing — and passed three runs in a row. 361 unit green.
+
 - 2026-09-05: **SD card in; the remaining bench tests run, including the destructive ones.** Operator authorised bricking the board provided it could be wiped, which is what made the last two possible.
 
   **FTP write** — the skip carried since the very first bench day: **PASS**, 685 B round-trip. **F5/F10 on hardware:** a script encrypted to this drone's identity with `encrypt_lua.py` decrypted and ran (`LXA-OK decrypted and running`), and one encrypted to a *different* identity was refused. That is the capability the whole identity arc exists for, working end to end. **One sub-claim not confirmed:** instrumentation at the load function's first line never reached the ground station, which I could not reconcile, so "refused before any cipher work" is what the source says rather than what was observed — SECURITY.md now says so rather than asserting it.

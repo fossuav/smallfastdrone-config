@@ -372,6 +372,39 @@ async function checkFtp(bench: Bench): Promise<void> {
   }
 }
 
+// Re-read the parameter set and report how many distinct indices arrived.
+// Used only to tell a lossy stream from a real disagreement.
+async function streamParamCount(bench: Bench): Promise<number> {
+  const seen = new Set<number>()
+  await new Promise<void>((resolve) => {
+    let off: (() => void) | null = null
+    let silence: ReturnType<typeof setTimeout> | null = null
+    const finish = (): void => {
+      if (silence)
+        clearTimeout(silence)
+      off?.()
+      resolve()
+    }
+    const arm = (): void => {
+      if (silence)
+        clearTimeout(silence)
+      silence = setTimeout(finish, SILENCE_TIMEOUT_MS)
+    }
+    off = bench.session.on((msg) => {
+      if (msg.msgid !== MSGID_PARAM_VALUE)
+        return
+      const pv = msg.data as { paramIndex: number, paramCount: number }
+      seen.add(pv.paramIndex)
+      arm()
+      if (pv.paramCount > 0 && seen.size >= pv.paramCount)
+        finish()
+    })
+    arm()
+    bench.send(bench.session.serialize(buildParamRequestList(bench.sysid, COMP_ID_AUTOPILOT)))
+  })
+  return seen.size
+}
+
 // CHECK: settings backup (T5) end to end on a real drone. Downloads the
 // drone's packed parameter file, builds a backup from the live parameter
 // map, writes and re-reads the document, then plans a restore of that
@@ -394,11 +427,22 @@ async function checkBackup(bench: Bench, params: Map<string, ParamRecord>): Prom
   const pack = parseParamPack(await ftp.downloadFile(PARAM_PACK_PATH))
   const elapsed = Date.now() - started
 
-  if (pack.params.length !== params.size) {
+  // The two paths should agree. They usually do, but PARAM_REQUEST_LIST
+  // drops the occasional parameter on a busy drone (measured: one missing
+  // in roughly half of runs with a Lua applet emitting text), while the
+  // pack arrives in one piece. So a single disagreement is the stream
+  // being lossy rather than the counts genuinely differing - re-read once
+  // before calling it a failure, and say which way it went.
+  let counted = params.size
+  if (pack.params.length !== counted) {
+    const retry = await streamParamCount(bench)
+    counted = Math.max(counted, retry)
+  }
+  if (pack.params.length !== counted) {
     record(
       'backup',
       'fail',
-      `param.pck reports ${pack.params.length} params, PARAM_REQUEST_LIST reported ${params.size}`,
+      `param.pck reports ${pack.params.length} params, PARAM_REQUEST_LIST reported ${counted} twice`,
     )
     return
   }
@@ -423,7 +467,7 @@ async function checkBackup(bench: Bench, params: Map<string, ParamRecord>): Prom
     'backup',
     ok ? 'pass' : 'fail',
     ok
-      ? `param.pck ${pack.params.length} params in ${elapsed}ms; ${filter.changed.size} changed from default, ${saved} saved (${dropped} read-only dropped); restore onto the same drone is a no-op`
+      ? `param.pck ${pack.params.length} params in ${elapsed}ms; ${filter.changed.size} changed from default, ${saved} saved (${dropped} dropped as read-only or drone-measured); restore onto the same drone is a no-op`
       : `restore of a just-taken backup is not a no-op: ${plan.toWrite.length} to write, ${plan.missing.length} missing, ${plan.unchanged.length}/${saved} unchanged`,
   )
   if (saved > 0)

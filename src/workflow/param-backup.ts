@@ -80,6 +80,37 @@ export interface BackupFilter {
   isReadOnly: (name: string) => boolean
 }
 
+// Parameters the drone measures for itself, which look like settings and
+// are not.
+//
+// Gyro offsets and their calibration temperature are re-taken on every
+// boot: saved, written back and then overwritten by the drone within
+// seconds. Confirmed on a bench board by rebooting twice with no writes
+// at all and watching them move. Keeping them makes a backup carry values
+// that cannot be restored, and makes any check of a restore report
+// failures that aren't.
+//
+// This is the same category as BARO*_GND_PRESS and STAT_BOOTCNT, which the
+// read-only filter already drops - those are marked read-only in the
+// metadata, and these are not, so the filter misses them.
+//
+// Deliberately narrow. The *accelerometer* equivalents are named almost
+// identically (INS_ACCOFFS_X, INS_ACC1_CALTEMP) but are a calibration the
+// operator performs and must survive a restore, so nothing here may match
+// them.
+const MEASURED_PARAMS = [
+  // INS_GYROFFS_X, INS_GYR2OFFS_Y, ...
+  /^INS_GYR\d?OFFS_[XYZ]$/,
+  // INS_GYR1_CALTEMP, INS_GYR2_CALTEMP, ...
+  /^INS_GYR\d_CALTEMP$/,
+]
+
+// True for a parameter the drone re-measures for itself, which therefore
+// has no business in a backup of the operator's configuration.
+export function isMeasuredParam(name: string): boolean {
+  return MEASURED_PARAMS.some(re => re.test(name))
+}
+
 // Snapshot the operator's configuration into a backup document.
 //
 // A backup holds the *delta*, not the whole parameter set: only the
@@ -94,6 +125,10 @@ export interface BackupFilter {
 // drone cannot revert a later change to it. Restore planning is where that
 // gets surfaced to the operator, not hidden.
 //
+// Parameters the drone measures for itself are dropped too - see
+// isMeasuredParam(). They are not configuration, and saving them promises
+// something a restore cannot keep.
+//
 // Parameter *index* is deliberately dropped: indexes shift between
 // firmware builds, so name is the only stable key.
 export function buildBackup(
@@ -104,7 +139,7 @@ export function buildBackup(
 ): ParamBackup {
   const out: Record<string, ParamBackupEntry> = {}
   for (const name of [...params.keys()].sort()) {
-    if (!filter.changed.has(name) || filter.isReadOnly(name))
+    if (!filter.changed.has(name) || filter.isReadOnly(name) || isMeasuredParam(name))
       continue
     const record = params.get(name)!
     out[name] = { value: record.value, type: record.type }

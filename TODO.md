@@ -113,7 +113,7 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   card…"). The distinction is cheap to make: `@SYS` lists fine on a card-less
   board, so a probe there separates "no card" from "FTP is broken".
 
-- `[params] [ux]` **Gyro calibration doesn't belong in a settings backup.**
+- _Done 2026-09-05 -> PROGRESS.md._ **Gyro calibration doesn't belong in a settings backup.**
   Found on the bench 2026-09-05 while restoring after the exit ceremony.
   `INS_GYROFFS_X/Y/Z` and `INS_GYR*_CALTEMP` are saved, written back
   successfully, and then **overwritten by the drone at the next boot** -
@@ -123,8 +123,11 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   drops - but these are writable, so the filter misses them. Consequences:
   the backup carries values that cannot be restored, and any
   verify-after-restore reports false failures (4 of 7 on the bench). Wants
-  an explicit exclusion list for learned/measured parameters, separate from
-  the read-only one.
+  **Fixed:** `isMeasuredParam()` in `param-backup.ts` drops gyro offsets and
+  gyro calibration temperatures from a backup, deliberately narrow so it
+  cannot catch the near-identically-named *accelerometer* calibration, which
+  is a user calibration and must survive. On the board the saved set went
+  from 8 entries (four of them gyro) to 6, all genuine settings.
 
 - `[params]` **Param streaming is lossy under load.** `PARAM_REQUEST_LIST`
   returned 1296 or 1297 across runs on the same board while `param.pck`

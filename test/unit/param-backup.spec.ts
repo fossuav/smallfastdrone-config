@@ -27,6 +27,7 @@ import {
   backupFilename,
   backupParamCount,
   buildBackup,
+  isMeasuredParam,
   parseBackup,
   planRestore,
   serializeBackup,
@@ -370,5 +371,58 @@ describe('planRestore', () => {
 
     expect(plan.items).toHaveLength(0)
     expect(plan.toWrite).toHaveLength(0)
+  })
+})
+
+// Parameters the drone measures for itself look like settings and are not.
+// The bench proved it: gyro offsets written back during a restore were
+// overwritten by the drone within seconds of the next boot.
+describe('measured parameters are not configuration', () => {
+  it('recognises gyro offsets and calibration temperatures', () => {
+    for (const name of [
+      'INS_GYROFFS_X',
+      'INS_GYROFFS_Y',
+      'INS_GYROFFS_Z',
+      'INS_GYR2OFFS_X',
+      'INS_GYR3OFFS_Z',
+      'INS_GYR1_CALTEMP',
+      'INS_GYR2_CALTEMP',
+      'INS_GYR3_CALTEMP',
+    ])
+      expect(isMeasuredParam(name)).toBe(true)
+  })
+
+  // The accelerometer names are nearly identical but are a calibration the
+  // operator performs, and losing them across a restore would mean redoing
+  // it. Matching them would be a far worse bug than missing a gyro offset.
+  it('does not touch the accelerometer calibration', () => {
+    for (const name of [
+      'INS_ACCOFFS_X',
+      'INS_ACC2OFFS_Y',
+      'INS_ACC3OFFS_Z',
+      'INS_ACC1_CALTEMP',
+      'INS_ACC2_CALTEMP',
+      'INS_ACCSCAL_X',
+    ])
+      expect(isMeasuredParam(name)).toBe(false)
+  })
+
+  it('leaves ordinary settings alone', () => {
+    for (const name of ['INS_ENABLE_MASK', 'INS_HNTCH_FREQ', 'ATC_RAT_PIT_P', 'BRD_OPTIONS'])
+      expect(isMeasuredParam(name)).toBe(false)
+  })
+
+  it('keeps them out of a backup even when the drone reports them changed', () => {
+    const params = new Map<string, ParamRecord>([
+      ['INS_GYROFFS_X', { name: 'INS_GYROFFS_X', value: -0.0038, type: 9, index: 1 }],
+      ['INS_GYR1_CALTEMP', { name: 'INS_GYR1_CALTEMP', value: 43.6, type: 9, index: 2 }],
+      ['INS_ACCOFFS_X', { name: 'INS_ACCOFFS_X', value: 0.12, type: 9, index: 3 }],
+      ['ATC_RAT_PIT_P', { name: 'ATC_RAT_PIT_P', value: 0.135, type: 9, index: 4 }],
+    ])
+    const backup = buildBackup(params, VEHICLE, CREATED_AT, {
+      changed: new Set(params.keys()),
+      isReadOnly: () => false,
+    })
+    expect(Object.keys(backup.params).sort()).toEqual(['ATC_RAT_PIT_P', 'INS_ACCOFFS_X'])
   })
 })
