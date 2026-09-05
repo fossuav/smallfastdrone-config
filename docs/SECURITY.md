@@ -336,6 +336,38 @@ practical consequence is for the operator, not the code — on an SFD board, DFU
 means the physical BOOT0 pads, and that is the last-resort recovery once a
 secure bootloader is on.
 
+### The `.lxa` v2 script format
+
+What the identity is *for*. A script encrypted under v2 can be read by one
+airframe and no other, which is the capability the whole enable ceremony
+exists to deliver.
+
+```
+  0    6   magic "LXA2.0"
+  6   12   target board id, plaintext
+ 18   32   sender's ephemeral X25519 public key
+ 50   24   nonce
+ 74   16   Poly1305 tag
+ 90  ...   XChaCha20-Poly1305 ciphertext
+```
+
+The sender generates an ephemeral key pair, X25519s its private half against
+the drone's identity **public** key, and writes only the public half. The drone
+re-derives the same secret from its identity **private** key, which never
+leaves the chip. Nothing secret is in the file, and losing the ephemeral
+private half costs nothing — it existed for one file.
+
+The board id is checked before any cipher work. A drone carrying somebody
+else's script is an ordinary situation, not an attack, and it should cost a
+`memcmp` rather than a decryption attempt. Flipping that field gains an
+attacker nothing: the key agreement is what gates decryption and does not
+involve it.
+
+**v1 is gone, not deprecated.** It encrypted with a bootloader public key used
+as a symmetric key — a key present in every bootloader, so anyone with the
+firmware could read any script. Keeping a reader for it would keep that path
+alive for no benefit, and nothing has shipped that writes it.
+
 ### Why the identity commands are unsigned
 
 Upstream `SECURE_COMMAND` requires every operation to be signed by a private key
@@ -462,7 +494,7 @@ Companion to this document, landing on the **`SmallFastDrone-4.7-config`**
 branch in `../smallfastdrone/` (origin `fossuav/smallfastdrone`) — that is
 `pr-lua-encryption` rebased onto the 4.7 beta line plus the BLHeli-in-SITL
 enablement, and it is the branch the `vendor/smallfastdrone/` submodule tracks.
-Ordered by dependency, not priority. **Status 2026-09-04:** F1–F4, F6 and F9 landed; F1–F4 and F9 are **bench-verified on a TBS_LUCID_H7** running a signed SmallFastDronev1 build on a signed bootloader — the drone generated its identity, refused to generate a second, and returned the same public key after a reboot. F5–F8 and F10 remain open.
+Ordered by dependency, not priority. **Status 2026-09-05: every firmware item F1–F10 has landed.** F1–F4 and F9 are **bench-verified on a TBS_LUCID_H7** running a signed SmallFastDronev1 build on a signed bootloader — the drone generated its identity, refused to generate a second, and returned the same public key after a reboot. **F5–F8 and F10 are not bench-verified** — F5/F10 need a microSD in the board, and F7 would mean deliberately emptying a keyed board's keys to see it refuse. Each row says what was verified instead.
 
 | # | Change | Where | Notes |
 |---|---|---|---|
@@ -470,28 +502,12 @@ Ordered by dependency, not priority. **Status 2026-09-04:** F1–F4, F6 and F9 l
 | F2 | Compile out `SET_PUBLIC_KEYS` / `REMOVE_PUBLIC_KEYS` on SFD builds | `AP_CheckFirmware/AP_CheckFirmware_secure_command.cpp` — the `SECURE_COMMAND_OP` switch | ✅ **Landed 2026-08-28** (`AP_CheckFirmware: compile out MAVLink key management on fixed-key builds`). Under `AP_CHECK_FIRMWARE_FIXED_KEYS` both operations and `set_public_keys()` itself — the only writer of `public_key[]` — are gone; `read_bootloader()` / `write_bootloader()` remain for the identity region. Confirmed absent from the SmallFastDronev1 ELF. |
 | F3 | Fail closed on an empty key array | same file — `all_zero_keys()` and its use in `check_signature()` | ✅ **Landed 2026-08-28** (`AP_CheckFirmware: fail closed on an empty key set when keys are fixed`). `check_signature()` returns false on an all-zero set under the same define. The bootloader's own `all_zero_public_keys()` fail-open in `check_good_firmware()` is untouched here — that is F7, and a bootloader change. |
 | F4 | New secure commands: `GENERATE_IDENTITY`, `GET_IDENTITY` | same file | ✅ **Landed 2026-08-28** (`AP_CheckFirmware: add GENERATE_IDENTITY and GET_IDENTITY secure commands`). Identity only — lock/unlock are `BRD_OPTIONS` bits, not commands (F6). Generate: `hal.util->get_true_random_vals()` (100 ms timeout), X25519 clamp, `set_identity()` (write-once from F1), `crypto_wipe` the stack copy; denied while armed. Get: UID + `crypto_x25519_public_key()` of the key in flash. Both **unsigned** — see "Why the identity commands are unsigned". Gated by `AP_CHECK_FIRMWARE_IDENTITY_ENABLED`. **Bench-verified 2026-09-04** against a TBS_LUCID_H7 running a signed bootloader + signed SmallFastDronev1 build, driven through the tool's own `runEnableCeremony()` rather than the Python probe: generate returned UID + public key, a second generate was `DENIED` (write-once holds), and a read after reboot returned the same key. |
-| F5 | `.lxa` v2 loader — ECDH + UID prefix check | `AP_Scripting/lua_scripts.cpp` — `load_encrypted_script()`, `decrypt_script()` | Replaces the symmetric slot-3 path. Check the nonce's UID prefix *before* attempting decryption, so a file for another airframe is refused cheaply. |
+| F5 | `.lxa` v2 loader — ECDH + board-id check | `AP_Scripting/lua_scripts.cpp`, `Tools/scripts/signing/encrypt_lua.py` | ✅ **Landed 2026-09-05** (`6709fba30c`, `edbe52a371`). v1 encrypted with a bootloader *public* key used as a symmetric key — obfuscation, not encryption, since that key is in every bootloader; decryption even tried all ten slots in turn, which only makes sense when the key is a guess. v2 agrees a key: the sender X25519s an ephemeral private key against the drone's **identity public key** and ships only the public half, and the drone re-derives the same secret from the private half that never leaves its chip. **The board id gets its own header field** rather than prefixing the nonce as sketched below, so the nonce stays fully random and the check reads as the check it is; it is tested before any cipher work. **v1 is not accepted** — keeping it would keep the weak path alive. Encrypting is now done from the `sfd-identity/1` file the configurator saves, which closes the loop with the enable ceremony. Round-tripped against pymonocypher at the firmware's own offsets: the drone recovers the script and a different identity cannot. **Not bench-run** — needs a card in the board. |
 | F6 | RDP as a `BRD_OPTIONS` bit, acting on next boot | `AP_BoardConfig` (bit 10 + `secure_memory()`), `AP_HAL_ChibiOS/HAL_ChibiOS_Class.cpp` | ✅ **Landed 2026-09-04** (`badba877f8`, `2648771d65`). **The "one bit or two" question is resolved by neither: one bit, raise-only.** Setting BRD_OPTIONS bit 10 asks for readout protection at the next boot; clearing it does *nothing*, because the firmware never lowers protection. That removes the hazard the two-bit design existed to dodge — an operator un-ticking a box and mass-erasing their drone — without needing a second bit. Unlocking stays exclusively the DFU route, which is also the case that matters since a drone needing an unlock has usually stopped booting. **The `__RAMFUNC__` caveat evaporates with it:** `stm32_flash_set_rdp_flash(0xAA)`, the call that would run from the flash it is erasing, is never invoked from firmware and stays commented out upstream. The only live call is `0xBB` (level 1); `0xCC`, which is irreversible and scraps the board, appears nowhere in the tree. Locking is **refused without a verified identity**. Note that nothing was protected before this either: `HAL_FLASH_READOUT_PROTECTION` defaults to 0 and no board set it, so the old unconditional call was unreachable — SmallFastDronev1 now compiles it in, which only makes the option available. **Not bench-verified**, and doing so costs the board's identity — see below. |
-| F7 | Bootloader-side invariants | bootloader build of `AP_CheckFirmware` | Keys never emptied; RDP raise-only except through the deliberate unlock path; identity write-once unless the chip has been erased. Invariants held in the bootloader survive a buggy or hostile configurator; tool-side guards don't. |
-| F8 | Fix `create_nonce()` | `AP_Scripting/lua_scripts.cpp` — `create_nonce()` | Called on the *decrypt* path, where it overwrites the nonce read from the file; and `nonce_len` goes into `get_system_id_unformatted(buf, len)` uninitialised, where `len` is in/out (see `GCS_Common.cpp` for the correct pattern). Keep the file's nonce and *verify* its prefix. |
+| F7 | Bootloader-side invariants | `AP_CheckFirmware/AP_CheckFirmware.cpp`, bootloader build | ✅ **Landed 2026-09-05** (`33903945b9`). Two of the three invariants turned out to hold by construction and are recorded rather than added: the bootloader **never touches RDP** and **never writes an identity**, so "raise-only" and "write-once" cannot be violated from there. The one that did not hold: the bootloader booted unsigned firmware whenever its key set was empty — deliberate on an unsecured board, and the comment above it named the path (remove keys over `SECURE_COMMAND`, then load unsigned). On a drone holding an identity that is a downgrade, since such a drone was keyed when the identity was written. Both fail-open sites now refuse in that case. The identity is read straight from `public_keys`, the bootloader's own `.apsec_data`, with no signature check needed — unlike the firmware, which must find the region inside an image it read out of flash, here the linker placed it. **Inert on every board today**: it bites only when keys are empty *and* an identity is present. **Not bench-run**, and testing it would mean deliberately emptying a keyed board's keys. |
+| F8 | Fix `create_nonce()` | `AP_Scripting/lua_scripts.cpp` | ✅ **Landed 2026-09-05** (`8d04921203`). `create_nonce()` was called on the *decrypt* path, where it overwrote the nonce just read from the file — so decryption could only ever have worked with the board-id prefixing compiled out, which is the default and why it went unnoticed. The nonce is now verified, not regenerated, and before decrypting rather than after. The uninitialised `nonce_len` could not overrun (the callee caps at 12) but was undefined and silently truncated the prefix; a short read now zeroes it rather than leaving something that looks checked. |
 | F9 | Confirm x25519 isn't compiled out of the FC monocypher build | `AP_CheckFirmware/monocypher.{h,cpp}` | ✅ **Resolved 2026-08-28.** Nothing trims it — the only conditionals in `monocypher.cpp` are BLAKE2 unrolling and Argon2. It was merely linker-GC'd for lack of a caller; F4's `crypto_x25519_public_key()` now links (`nm` on the SmallFastDronev1 ELF shows it). F5 can rely on `crypto_key_exchange`. |
-| F10 | Optional: re-key `SCR_LD_ENCRYPT` | `AP_Scripting/lua_scripts.cpp` — `encrypt_all_scripts_in_dir()` | On-FC self-encryption still has value for a customer's *own* scripts, but under v2 it must ECDH to the drone's own public key. Low priority. |
-
-**Bootloader changes get bench-verified on real hardware every time, not just
-SITL.** It is the one component where a bug bricks boards with no recovery
-except BOOT0 + DFU. Our DFU path being hardware-verified is what makes that
-survivable.
-
-Note that F1–F7 are permanent fork deltas that cannot be upstreamed — SFD-specific
-lockdown is the whole point. `AP_CheckFirmware` is small and stable, so the
-rebase burden is low.
-
-## Tool work list
-
-**Status 2026-09-04:** T1–T7 and F6 have all landed, tool side included — the enable wizard now offers the seal (steps 6–7), attached to a *completed* enable outcome rather than running inside the ceremony. Nothing here is bench-verified past the identity: sealing the bench board would cost the identity generated on it.
-
-**What "sealed" can honestly be confirmed as.** The tool writes `BRD_OPTIONS` bit 10, reboots, and checks the bit survived. It cannot read the chip's protection level: that is a hardware state with no MAVLink representation, and the firmware's own call is a no-op once already set, so there is no signal to observe either. The success copy says the drone restarted with sealing switched on, and claims nothing further. Making it genuinely observable would need a firmware readback — worth considering, and deliberately not invented here. T2's identity half and T7's enable wizard have both run against a real drone; T3 is unit-tested only, deliberately — see its row.
-
+| F10 | Re-key on-FC self-encryption | `AP_Scripting/lua_scripts.cpp` — `encrypt_all_scripts_in_dir()` | ✅ **Landed 2026-09-05** with F5. The drone makes an ephemeral pair from its TRNG, agrees a key against its **own** identity public key, wipes the private half immediately and writes only the public one — so a script the drone encrypts for itself is readable by itself and nothing else. Refused outright on a drone with no identity, rather than falling back to something weaker. |
 | # | Module | Purpose |
 |---|---|---|
 | T1 | `src/protocol/secure-command.ts` | ✅ **Landed 2026-08-28.** `SecureCommandClient` (same `send` / `subscribe` / sysid / compid shape as `MavFtp`): `getIdentity()` → identity or `null` when the drone has none (the firmware answers FAILED to a blank region); `generateIdentity()` → the identity the drone read back after writing; generic `request(op, data, timeoutMs)` for anything else. Unsigned and sessionless — `sig_length = 0`, no `GET_SESSION_KEY` — so it holds no key material. Replies matched on `sequence` + `operation`; the sequence starts random so a stale reply from an earlier session can't match. Non-ACCEPTED verdicts, timeouts and malformed replies all surface as `SecureCommandError` with the drone's `result` (DENIED / UNSUPPORTED / FAILED, or `null` for no verdict) so the enable workflow can branch without string-matching; a timeout is also what a non-signed firmware looks like, since it never answers. 15 s allowance on GENERATE for the sector rewrite. 14 unit tests against a fake link (`test/unit/secure-command.spec.ts`); not SITL-testable — the handler exists only in signed builds — so bench is the integration test. |
