@@ -111,6 +111,68 @@ export function isMeasuredParam(name: string): boolean {
   return MEASURED_PARAMS.some(re => re.test(name))
 }
 
+// Accel calibration parameters, capturing the instance they belong to.
+// ArduPilot numbers these inconsistently: the first accel's id and its
+// offset/scale carry no digit (INS_ACC_ID, INS_ACCOFFS_X, INS_ACCSCAL_X)
+// while its calibration temperature does (INS_ACC1_CALTEMP).
+const ACCEL_CAL_PATTERNS = [
+  // INS_ACCOFFS_X, INS_ACC2SCAL_Z, ...
+  /^INS_ACC(\d?)(?:OFFS|SCAL)_[XYZ]$/,
+  // INS_ACC1_CALTEMP, INS_ACC2_CALTEMP, ...
+  /^INS_ACC(\d)_CALTEMP$/,
+]
+
+// The 1-based accel instance a calibration parameter belongs to, or null
+// when the name isn't one.
+function accelCalInstance(name: string): number | null {
+  for (const re of ACCEL_CAL_PATTERNS) {
+    const match = re.exec(name)
+    if (match)
+      return match[1] === '' ? 1 : Number(match[1])
+  }
+  return null
+}
+
+// The parameter holding an accel instance's sensor id. Zero there means
+// the drone has no such accelerometer.
+function accelIdParam(instance: number): string {
+  return instance === 1 ? 'INS_ACC_ID' : `INS_ACC${instance}_ID`
+}
+
+// True for a calibration value belonging to an accelerometer the drone
+// doesn't have - which must never reach a backup.
+//
+// AP_InertialSensor::simple_accel_cal() marks unused instances by *saving
+// a zero scale* to them. That reads as changed-from-default, so it lands
+// in the delta a backup records. Restore it onto a drone reporting more
+// accels than the source did - two boots of the same board can differ, if
+// an IMU fails to probe once - and accel_calibrated_ok_all() takes its
+// "zero scaling also indicates not calibrated" branch for an accel that
+// really is present. The drone then refuses to arm, permanently:
+// force_save_calibration() cannot undo it, because it saves the in-RAM
+// scale, which is by then zero.
+//
+// Seen on the bench TBS_LUCID_H7 on 2026-09-05, where a firmware change
+// took the board from one detected accel to two.
+//
+// A sensor that isn't there has no calibration worth keeping, so the whole
+// instance is dropped rather than only its zero scales.
+export function isAbsentAccelCalibration(
+  name: string,
+  value: number,
+  params: Map<string, ParamRecord>,
+): boolean {
+  const instance = accelCalInstance(name)
+  if (instance === null)
+    return false
+  if (params.get(accelIdParam(instance))?.value === 0)
+    return true
+  // Belt and braces. A zero scale is never a setting an operator chose, so
+  // it is never worth recording - and this still holds when the id
+  // parameter is missing from the set and the check above cannot fire.
+  return /SCAL_[XYZ]$/.test(name) && value === 0
+}
+
 // Snapshot the operator's configuration into a backup document.
 //
 // A backup holds the *delta*, not the whole parameter set: only the
@@ -127,7 +189,9 @@ export function isMeasuredParam(name: string): boolean {
 //
 // Parameters the drone measures for itself are dropped too - see
 // isMeasuredParam(). They are not configuration, and saving them promises
-// something a restore cannot keep.
+// something a restore cannot keep. So is calibration belonging to an
+// accelerometer the drone doesn't have - see isAbsentAccelCalibration(),
+// where keeping it can permanently stop the restored drone arming.
 //
 // Parameter *index* is deliberately dropped: indexes shift between
 // firmware builds, so name is the only stable key.
@@ -142,6 +206,8 @@ export function buildBackup(
     if (!filter.changed.has(name) || filter.isReadOnly(name) || isMeasuredParam(name))
       continue
     const record = params.get(name)!
+    if (isAbsentAccelCalibration(name, record.value, params))
+      continue
     out[name] = { value: record.value, type: record.type }
   }
   return { schema: BACKUP_SCHEMA, createdAt, vehicle, params: out }

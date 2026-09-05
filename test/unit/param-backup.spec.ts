@@ -27,6 +27,7 @@ import {
   backupFilename,
   backupParamCount,
   buildBackup,
+  isAbsentAccelCalibration,
   isCalibrationParam,
   isMeasuredParam,
   parseBackup,
@@ -490,5 +491,91 @@ describe('calibration values need the drone told afterwards', () => {
   it('does not flag a plan that writes nothing', () => {
     const plan = planRestore(EMPTY_BACKUP, new Map(), { changed: new Set(), isReadOnly: () => false })
     expect(restoreTouchesCalibration(plan)).toBe(false)
+  })
+})
+
+describe('calibration for an accelerometer the drone does not have', () => {
+  // simple_accel_cal() marks unused instances by saving a zero scale, and
+  // that reads as changed-from-default. Carrying it into a backup is what
+  // lets a restore permanently stop a drone arming - see
+  // isAbsentAccelCalibration().
+  const ONE_ACCEL = paramMap([
+    ['INS_ACC_ID', 3408138, 6],
+    ['INS_ACC2_ID', 0, 6],
+    ['INS_ACC3_ID', 0, 6],
+  ])
+
+  it('drops every calibration parameter of an absent instance', () => {
+    for (const name of [
+      'INS_ACC2OFFS_X',
+      'INS_ACC2SCAL_Y',
+      'INS_ACC3OFFS_Z',
+      'INS_ACC3SCAL_X',
+      'INS_ACC2_CALTEMP',
+    ])
+      expect(isAbsentAccelCalibration(name, 0, ONE_ACCEL)).toBe(true)
+  })
+
+  // The first accel's id and offsets carry no digit while its calibration
+  // temperature does, so the instance mapping has to special-case it.
+  it('keeps the calibration of an instance that is present', () => {
+    for (const [name, value] of [
+      ['INS_ACCOFFS_X', 0.315],
+      ['INS_ACCSCAL_Y', 1.002],
+      ['INS_ACC1_CALTEMP', 43.8],
+    ] as Array<[string, number]>)
+      expect(isAbsentAccelCalibration(name, value, ONE_ACCEL)).toBe(false)
+  })
+
+  it('reads the second instance id from INS_ACC2_ID, not INS_ACC_ID', () => {
+    const twoAccels = paramMap([['INS_ACC_ID', 3408138, 6], ['INS_ACC2_ID', 3408162, 6]])
+    expect(isAbsentAccelCalibration('INS_ACC2OFFS_X', 0.37, twoAccels)).toBe(false)
+    expect(isAbsentAccelCalibration('INS_ACC2_CALTEMP', 43.8, twoAccels)).toBe(false)
+  })
+
+  // The id lookup is the main rule, but a zero scale is never a setting an
+  // operator chose, so it must not survive an id parameter going missing.
+  it('never records a zero scale, even with no id to consult', () => {
+    const noIds = paramMap([['ATC_RAT_PIT_P', 0.135, 9]])
+    expect(isAbsentAccelCalibration('INS_ACC2SCAL_X', 0, noIds)).toBe(true)
+    expect(isAbsentAccelCalibration('INS_ACCSCAL_Z', 0, noIds)).toBe(true)
+    // An offset of zero is ordinary, and says nothing about the sensor.
+    expect(isAbsentAccelCalibration('INS_ACC2OFFS_X', 0, noIds)).toBe(false)
+  })
+
+  it('leaves everything that is not accel calibration alone', () => {
+    for (const name of ['INS_ACC_ID', 'INS_ENABLE_MASK', 'COMPASS_OFS_X', 'ATC_RAT_PIT_P'])
+      expect(isAbsentAccelCalibration(name, 0, ONE_ACCEL)).toBe(false)
+  })
+
+  // The bench case in full: a board reporting one accel, calibrated, whose
+  // backup must not carry the zero scales that would brick a two-accel
+  // drone on restore.
+  it('keeps them out of a backup while keeping the real calibration', () => {
+    const params = paramMap([
+      ['INS_ACC_ID', 3408138, 6],
+      ['INS_ACC2_ID', 0, 6],
+      ['INS_ACC3_ID', 0, 6],
+      ['INS_ACCOFFS_X', 0.315, 9],
+      ['INS_ACCOFFS_Z', 19.42, 9],
+      ['INS_ACC1_CALTEMP', 43.8, 9],
+      ['INS_ACC2SCAL_X', 0, 9],
+      ['INS_ACC2SCAL_Y', 0, 9],
+      ['INS_ACC3SCAL_Z', 0, 9],
+      ['ATC_RAT_PIT_P', 0.135, 9],
+    ])
+    // The sensor ids are read-only on a real drone, which is why a backup
+    // cannot carry them and why the force-save exists at all.
+    const backup = buildBackup(params, VEHICLE, CREATED_AT, {
+      changed: new Set(params.keys()),
+      isReadOnly: name => name.endsWith('_ID'),
+    })
+
+    expect(Object.keys(backup.params).sort()).toEqual([
+      'ATC_RAT_PIT_P',
+      'INS_ACC1_CALTEMP',
+      'INS_ACCOFFS_X',
+      'INS_ACCOFFS_Z',
+    ])
   })
 })
