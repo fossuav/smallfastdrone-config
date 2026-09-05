@@ -22,6 +22,21 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 - _Done 2026-05-27 → PROGRESS.md._ **Firmware flashing / DFU.** Both paths
   landed and are hardware-verified on TBS_LUCID_H7, routed through the security
   uploader seam.
+- `[params]` **A backup can carry zero accel scales that permanently block
+  arming.** `simple_accel_cal()` marks *unused* accel instances by saving a
+  scale of zero, and those read as changed-from-default, so they land in a
+  settings backup. Restore that backup onto a drone that reports *more*
+  accels than the source did and `accel_calibrated_ok_all()` takes its
+  "zero scaling also indicates not calibrated" branch forever — and the
+  force-save cannot rescue it, because it saves the in-RAM scale, which is
+  now zero. Not hypothetical: seen between two boots of the bench
+  TBS_LUCID_H7 on 2026-09-05, where a firmware change took the board from
+  one detected accel to two (`INS_ACC2_ID` 0 → 3408162). Likely fix: in
+  `buildBackup`, skip `INS_ACC<n>(OFFS|SCAL)_*` when that instance's
+  `INS_ACC<n>_ID` is zero on the source drone — a sensor that isn't there
+  has no calibration worth saving. Zero scales for an instance absent on
+  *both* sides are harmless, so this only bites when the count grows.
+
 - `[firmware]` **Bench-verify the DFU unlock (read-unprotect).** `DfuClient.readUnprotect()`
   and the recovery tab's unlock disclosure are unit-tested only — there is no
   SITL substitute for DFU, and the path has never been run against a genuinely
