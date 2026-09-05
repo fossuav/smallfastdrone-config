@@ -1,0 +1,770 @@
+<title>Lucid H7 Bench Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+
+<style>
+  :root {
+    --paper:      #f3f5f7;
+    --surface:    #ffffff;
+    --surface-2:  #e9edf1;
+    --ink:        #0e131a;
+    --ink-2:      #3d4854;
+    --ink-3:      #6a7684;
+    --rule:       #cfd7de;
+    --accent:     #1c6b78;
+    --accent-ink: #12505a;
+    --verified:   #2c7a58;
+    --offline:    #4a5f8a;
+    --caution:    #9a6608;
+    --destruct:   #a4402a;
+
+    --measure: 68ch;
+    --s1: 0.35rem; --s2: 0.7rem; --s3: 1.1rem; --s4: 1.8rem; --s5: 2.8rem; --s6: 4.2rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0d1116;
+      --surface:    #141a21;
+      --surface-2:  #1c242d;
+      --ink:        #e8edf2;
+      --ink-2:      #b3bec9;
+      --ink-3:      #7d8b99;
+      --rule:       #2a343f;
+      --accent:     #4fb3c1;
+      --accent-ink: #7fcdd8;
+      --verified:   #56b98b;
+      --offline:    #8aa2d4;
+      --caution:    #d3a13c;
+      --destruct:   #e0765c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0d1116;
+    --surface:    #141a21;
+    --surface-2:  #1c242d;
+    --ink:        #e8edf2;
+    --ink-2:      #b3bec9;
+    --ink-3:      #7d8b99;
+    --rule:       #2a343f;
+    --accent:     #4fb3c1;
+    --accent-ink: #7fcdd8;
+    --verified:   #56b98b;
+    --offline:    #8aa2d4;
+    --caution:    #d3a13c;
+    --destruct:   #e0765c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: var(--s5) var(--s3) var(--s6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+  }
+
+  h1, h2, h3, .eyebrow, .chip, th, .metric-label, .step-n {
+    font-family: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  code, .mono, td.num, .fingerprint {
+    font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+
+  .eyebrow {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+  }
+
+  h1 {
+    font-size: clamp(2.1rem, 5.2vw, 3.1rem);
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    margin: var(--s2) 0 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    max-width: var(--measure);
+    font-size: 1.12rem;
+    color: var(--ink-2);
+    margin: var(--s3) 0 0;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: 0.005em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+  section { display: flex; flex-direction: column; gap: var(--s3); }
+  .stack-tight { display: flex; flex-direction: column; gap: var(--s2); }
+
+  header.masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: var(--s4);
+  }
+
+  .runline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1) var(--s3);
+    margin-top: var(--s3);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.78rem;
+    color: var(--ink-3);
+  }
+  .runline span { white-space: nowrap; }
+  .runline b { color: var(--ink-2); font-weight: 500; }
+
+  /* ---- evidence chips: the spine of the document ---- */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0.22em 0.6em;
+    border-radius: 2px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .chip::before {
+    content: "";
+    width: 0.5em; height: 0.5em;
+    background: currentColor;
+    border-radius: 50%;
+  }
+  .c-hw  { color: var(--verified); }
+  .c-off { color: var(--offline); }
+  .c-not { color: var(--caution); }
+  .c-not::before { border-radius: 0; transform: rotate(45deg); }
+
+  /* ---- evidence rows ---- */
+  .rows { display: flex; flex-direction: column; }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s2) var(--s3);
+    align-items: start;
+    padding: var(--s3) 0;
+    border-top: 1px solid var(--rule);
+  }
+  .row:last-child { border-bottom: 1px solid var(--rule); }
+  .row p { font-size: 0.94rem; color: var(--ink-2); margin-top: 0.3em; }
+  .row .mono { font-size: 0.82rem; color: var(--ink-3); }
+
+  /* ---- the one genuine sequence ---- */
+  .track { display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: grid;
+    grid-template-columns: 2.6rem minmax(0, 1fr);
+    gap: var(--s3);
+    padding-bottom: var(--s3);
+    position: relative;
+  }
+  .step:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    left: 1.05rem; top: 1.9rem; bottom: 0;
+    width: 2px;
+    background: var(--rule);
+  }
+  .step-n {
+    width: 2.1rem; height: 2.1rem;
+    display: grid; place-items: center;
+    border: 2px solid var(--accent);
+    color: var(--accent-ink);
+    background: var(--surface);
+    border-radius: 50%;
+    font-size: 0.8rem; font-weight: 700;
+    position: relative; z-index: 1;
+  }
+  .step.destructive .step-n { border-color: var(--destruct); color: var(--destruct); }
+  .step-body { display: flex; flex-direction: column; gap: 0.3em; padding-top: 0.15rem; }
+  .step-body p { font-size: 0.92rem; color: var(--ink-2); }
+  .step .mono { font-size: 0.8rem; color: var(--ink-3); }
+
+  /* ---- tables ---- */
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.87rem; }
+  caption {
+    text-align: left;
+    font-family: "IBM Plex Sans Condensed", sans-serif;
+    font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding-bottom: var(--s2);
+  }
+  th {
+    text-align: left;
+    font-size: 0.7rem; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 0 var(--s3) var(--s2) 0;
+    border-bottom: 1px solid var(--ink);
+    white-space: nowrap;
+  }
+  td {
+    padding: var(--s2) var(--s3) var(--s2) 0;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink-2);
+    vertical-align: top;
+  }
+  td.num { font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+  td:last-child, th:last-child { padding-right: 0; }
+  .stall { color: var(--caution); font-weight: 500; }
+  .clean { color: var(--verified); font-weight: 500; }
+
+  /* ---- findings ---- */
+  .findings { display: grid; gap: var(--s3); grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); }
+  .finding {
+    display: flex; flex-direction: column; gap: 0.45em;
+    padding-left: var(--s3);
+    border-left: 3px solid var(--rule);
+  }
+  .finding.keystone { border-left-color: var(--accent); }
+  .finding.open { border-left-color: var(--caution); }
+  .finding p { font-size: 0.9rem; color: var(--ink-2); }
+  .finding .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem; color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+
+  /* ---- pull quote / caveat block ---- */
+  .caveat {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--caution);
+    padding: var(--s3) var(--s4);
+    display: flex; flex-direction: column; gap: var(--s2);
+  }
+  .caveat h3 { color: var(--caution); }
+  .caveat p { font-size: 0.94rem; color: var(--ink-2); }
+
+  /* ---- metrics ---- */
+  .metrics {
+    display: grid;
+    gap: var(--s3) var(--s4);
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    padding: var(--s3) 0;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .metric { display: flex; flex-direction: column; gap: 0.15em; }
+  .metric-v {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 1.42rem; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .metric-label {
+    font-size: 0.68rem; font-weight: 600;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .fingerprint {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--accent-ink);
+    word-break: break-all;
+    background: var(--surface-2);
+    padding: var(--s2) var(--s3);
+    border-left: 3px solid var(--accent);
+  }
+
+  code {
+    font-size: 0.87em;
+    background: var(--surface-2);
+    padding: 0.08em 0.34em;
+    border-radius: 2px;
+    color: var(--ink);
+  }
+
+  em { font-style: italic; }
+  strong { font-weight: 500; color: var(--ink); }
+
+  footer {
+    border-top: 2px solid var(--ink);
+    padding-top: var(--s3);
+    font-size: 0.82rem;
+    color: var(--ink-3);
+    max-width: var(--measure);
+  }
+
+  a { color: var(--accent-ink); }
+  a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .row, .step, .finding { transition: none; }
+  }
+
+  @media (max-width: 34rem) {
+    .row { grid-template-columns: minmax(0, 1fr); }
+    .step { grid-template-columns: 2.1rem minmax(0, 1fr); gap: var(--s2); }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Bench session &middot; 4&ndash;5 September 2026</div>
+    <h1>Taking a Lucid H7 all the way in, and all the way back out</h1>
+    <p class="standfirst">
+      Two days on the bench with one TBS_LUCID_H7. It went from stock ArduPilot to
+      signed SmallFastDrone firmware, gained a secure bootloader and its own cryptographic
+      identity, was sealed against readout, then wiped and returned to vanilla ArduPilot
+      with its settings intact. Nine defects fell out along the way. This is the record of
+      what the hardware actually proved &mdash; and, just as deliberately, what it didn&rsquo;t.
+    </p>
+    <div class="runline">
+      <span><b>board</b> TBS_LUCID_H7 &middot; id 5250</span>
+      <span><b>uid</b> 350053000551333530343432</span>
+      <span><b>start</b> ArduCopter 4.8.0-dev</span>
+      <span><b>end</b> ArduCopter 4.7.1</span>
+      <span><b>commits</b> 33</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>How to read this</h2>
+    <p>
+      Every result below carries one of three marks. The distinction is the point of the
+      document: a great deal was proven on silicon, some was proven only against a
+      reference implementation, and a few things could not be proven at all without
+      destroying something we needed. Conflating those three is how a security claim
+      quietly becomes untrue.
+    </p>
+    <div class="rows" style="max-width: var(--measure);">
+      <div class="row">
+        <div class="stack-tight">
+          <h3>On hardware</h3>
+          <p>Observed on the board itself, under the conditions it will actually meet.</p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>Offline</h3>
+          <p>Proven against a reference implementation or by construction, not on the board.</p>
+        </div>
+        <span class="chip c-off">Offline</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>Not proven</h3>
+          <p>Stated with the reason it could not be shown, rather than left to look proven.</p>
+        </div>
+        <span class="chip c-not">Not proven</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The path through</h2>
+    <p>
+      The upgrade is a genuine one-way sequence &mdash; each step changes what the next one
+      can do, and step&nbsp;5 cannot be undone without step&nbsp;6. That ordering is a
+      security property, not a workflow convenience, which is why it is drawn as a sequence
+      and nothing else here is.
+    </p>
+    <div class="track">
+
+      <div class="step">
+        <div class="step-n">1</div>
+        <div class="step-body">
+          <h3>Reach the board at all</h3>
+          <p>
+            A bench harness that owns the serial port and presents it as bytes, so protocol
+            code can be driven without a browser. It runs under <em>Windows</em> Python by
+            necessity: attaching the board to Linux via usbipd works until the board
+            reboots, at which point it re-enumerates, the attachment is silently dropped and
+            the device never returns &mdash; killing the one test that most needs real hardware.
+          </p>
+          <div class="mono">test/bench/ &middot; com-pipe.py, serial-link.ts, serial-bridge.ts</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">2</div>
+        <div class="step-body">
+          <h3>Signed firmware over the existing bootloader</h3>
+          <p>
+            1,672,284 bytes written and verified in 25.8&nbsp;s by the tool&rsquo;s own
+            <code>BootloaderClient</code>. The documented route for this was DFU; the serial
+            route turned out to work and needs no drivers, which is the difference between
+            &ldquo;press a button&rdquo; and &ldquo;install a driver&rdquo; for anyone upgrading a working drone.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">3</div>
+        <div class="step-body">
+          <h3>The secure bootloader, from the firmware&rsquo;s own ROMFS</h3>
+          <p>
+            <code>MAV_CMD_FLASH_BOOTLOADER</code>, added to the tool for this. The board
+            afterwards reports itself as <code>TBS_LUCID_H7-Secure-BL-v10</code> &mdash; which,
+            it turns out, is the only non-destructive way to know a secure bootloader is
+            installed at all.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">4</div>
+        <div class="step-body">
+          <h3>An identity, made by the drone</h3>
+          <p>
+            The drone drew an X25519 key from its own hardware RNG, kept the private half in
+            the bootloader sector and returned the public half. A second attempt was
+            <code>DENIED</code>; a reboot returned the same key, proving it is in flash and
+            not RAM.
+          </p>
+          <span class="fingerprint">24dd82cf316a5589d2bf55f29bde2aa5aaf725345b8cb6340162febf00373f5b</span>
+        </div>
+      </div>
+
+      <div class="step destructive">
+        <div class="step-n">5</div>
+        <div class="step-body">
+          <h3>Sealed</h3>
+          <p>
+            <code>BRD_OPTIONS</code> 1&nbsp;&rarr;&nbsp;1025, raising readout protection at the
+            next boot. Everything else about the drone carried on unchanged: the encrypted
+            applet still ran, the identity still read back. One way, short of erasing the chip.
+          </p>
+        </div>
+      </div>
+
+      <div class="step destructive">
+        <div class="step-n">6</div>
+        <div class="step-body">
+          <h3>Out again, whole</h3>
+          <p>
+            Settings saved, readout protection dropped, chip mass-erased &mdash; firmware,
+            bootloader and identity together &mdash; stock image flashed over DFU, settings
+            restored. The board came back as ordinary ArduCopter 4.7.1, which is exactly what
+            an escape hatch should deliver.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>What the hardware settled</h2>
+    <div class="rows">
+
+      <div class="row">
+        <div class="stack-tight">
+          <h3>Sealing genuinely raises readout protection</h3>
+          <p>
+            The tool cannot read the chip&rsquo;s protection level &mdash; there is no MAVLink
+            representation of it, and the firmware&rsquo;s own call is a no-op once set. So the
+            seal&rsquo;s effect was unverifiable by design. The erase settled it: the chip
+            mass-erased and vanished from the bus, which only happens on an RDP 1&rarr;0
+            transition. Had the seal been a no-op, the command would have been refused and the
+            firmware would still have been there.
+          </p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A script encrypted for one drone runs on that drone only</h3>
+          <p>
+            An applet encrypted to this board&rsquo;s identity decrypted and ran; an identical one
+            encrypted to a different identity was refused. This is the capability the entire
+            identity arc exists to deliver, and it now works end to end.
+          </p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+
+      <div class="row">
+        <div class="stack-tight">
+          <h3>Identity survives a firmware update, and write-once holds</h3>
+          <p>
+            Reflashing firmware left the key untouched &mdash; it lives in the bootloader sector,
+            as designed. A second <code>GENERATE_IDENTITY</code> came back <code>DENIED</code>,
+            so write-once is enforced in firmware rather than merely intended.
+          </p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The exit ceremony returns a working drone</h3>
+          <p>
+            Backup, unlock, erase, reinstall, restore. <code>planRestore</code> reported
+            honestly under real conditions: one parameter missing because the stock firmware
+            doesn&rsquo;t have it, and four flagged as unrevertable because stock enables a second
+            IMU the SFD build did not.
+          </p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The <code>.lxa</code> v2 key agreement</h3>
+          <p>
+            v1 encrypted with a bootloader <em>public</em> key used as a symmetric key &mdash;
+            obfuscation, not encryption, since that key sits in every bootloader. v2 agrees a
+            key by X25519 against the drone&rsquo;s identity. Round-tripped against pymonocypher at
+            the firmware&rsquo;s own header offsets before it ever reached the board.
+          </p>
+        </div>
+        <span class="chip c-off">Offline</span>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>What broke, and where it came from</h2>
+    <p>
+      Eight findings: five fixed in the session, three logged with enough detail to act on.
+      One of the five &mdash; the frozen metadata &mdash; was three separate bugs stacked behind
+      each other. Notably, <em>none</em> was caught by the unit suite; every one needed either
+      real hardware or a look at a rendered page.
+    </p>
+
+    <div class="findings">
+
+      <div class="finding keystone">
+        <span class="tag">fixed &middot; found on hardware</span>
+        <h3>A confident wrong answer</h3>
+        <p>
+          Toggle a setting, reboot, and the drone reported it <em>off</em> while actually
+          holding it <em>on</em>. After a reboot the parameter reload stalls &mdash; the board
+          answers heartbeats a half-second in but cannot stream 1,242 parameters until roughly
+          four &mdash; and no caller checked whether the reload had worked. All seven reboot
+          flows shared the bug. SITL never exposed it because its restart is differently shaped.
+        </p>
+      </div>
+
+      <div class="finding">
+        <span class="tag">fixed &middot; found by looking at the screen</span>
+        <h3>The SFD detector never fired</h3>
+        <p>
+          The connect card said &ldquo;ArduPilot&rdquo; on a drone whose banner reads
+          <code>SmallFastDrone V4.7.0</code>. The sniffer matched a version <em>suffix</em>;
+          the product build replaces the vehicle name outright. So it had never worked on the
+          board that most obviously is a SmallFastDrone.
+        </p>
+      </div>
+
+      <div class="finding">
+        <span class="tag">fixed &middot; three separate bugs</span>
+        <h3>Parameter metadata was frozen</h3>
+        <p>
+          The generator had been unable to run across two submodule bumps. The cause was a
+          missing blank line between two documentation blocks; the regeneration then exposed a
+          parameter documented under a name no drone reports; and a group-name collision in the
+          JSON emitter was silently dropping whole libraries. Board coverage went from
+          1,274/1,282 to <strong>1,282/1,282</strong>.
+        </p>
+      </div>
+
+      <div class="finding">
+        <span class="tag">fixed &middot; found during the exit ceremony</span>
+        <h3>Gyro calibration is not a setting</h3>
+        <p>
+          Four of seven restored values &ldquo;failed&rdquo; verification. Rebooting twice with no
+          writes at all showed them moving on their own: the drone re-measures gyro offsets
+          every boot. They are measurements wearing the shape of settings, and saving them
+          promises something a restore cannot keep.
+        </p>
+      </div>
+
+      <div class="finding">
+        <span class="tag">fixed &middot; latent, would have bitten later</span>
+        <h3>An unreachable timeout</h3>
+        <p>
+          A test budgeted 135&nbsp;s across its assertions but never raised the 30&nbsp;s
+          default, so its final wait could never be reached. It passed on SITL only because
+          everything there is fast. Fixing it is what let the real bug above surface.
+        </p>
+      </div>
+
+      <div class="finding open">
+        <span class="tag">logged</span>
+        <h3>Connecting rewrites the drone</h3>
+        <p>
+          The tool asks for telemetry on connect; ArduPilot persists that as nine
+          <code>MAV*</code> parameters. So merely plugging in permanently alters the drone
+          &mdash; and those nine then ride along in every settings backup, a document whose
+          premise is that it holds only what the operator changed.
+        </p>
+      </div>
+
+      <div class="finding open">
+        <span class="tag">logged</span>
+        <h3>An errno in front of an operator</h3>
+        <p>
+          A drone with no memory card fails every file write with
+          <code>FTP CREATE_DIRECTORY failed: FailErrno (errno 28)</code>. Every Lua wizard sits
+          on that path. Distinguishing &ldquo;no card&rdquo; from &ldquo;broken&rdquo; is cheap:
+          the virtual filesystem lists fine on a card-less board.
+        </p>
+      </div>
+
+      <div class="finding open">
+        <span class="tag">logged</span>
+        <h3>Parameter streaming is lossy under load</h3>
+        <p>
+          With a Lua applet running, the parameter stream drops one roughly half the time
+          where it was clean on day one. Not a correctness bug &mdash; but it makes the reload
+          retry added for the first finding load-bearing rather than precautionary.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>The measurement that shaped a fix</h2>
+    <p>
+      Rather than guess a settle delay for the post-reboot reload, the board was asked directly:
+      reboot, wait a fixed interval, then request the full parameter set. One reboot per
+      interval, so the attempts could not perturb each other.
+    </p>
+    <div class="scroll">
+      <table>
+        <caption>Full parameter request, timed from the first heartbeat</caption>
+        <thead>
+          <tr><th>Requested at</th><th>Result</th><th>Received</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">+0 ms</td><td class="stall">stalled</td><td class="num">1 of 1242</td></tr>
+          <tr><td class="num">+1000 ms</td><td class="stall">stalled</td><td class="num">1 of 1242</td></tr>
+          <tr><td class="num">+2000 ms</td><td class="stall">stalled</td><td class="num">1 of 1242</td></tr>
+          <tr><td class="num">+4000 ms</td><td class="clean">complete</td><td class="num">1242 of 1242</td></tr>
+          <tr><td class="num">+8000 ms</td><td class="clean">complete</td><td class="num">1242 of 1242</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      A single-parameter read was tested as a cheaper readiness signal and answered in
+      133&nbsp;ms &mdash; while the full request still stalled. So neither a heartbeat nor a
+      successful read means ready, and there is no cheap signal to wait on. That is why the fix
+      is a retry against a budget rather than a tuned delay: the constant is a latency
+      optimisation, and correctness rests on the retry.
+    </p>
+  </section>
+
+  <section>
+    <h2>What was not proven, and why</h2>
+    <div class="caveat">
+      <h3>Four claims the bench could not close</h3>
+      <p>
+        <strong>The WebUSB DFU client.</strong> The unlock and reflash were driven through
+        pyusb and STM32CubeProgrammer, because <code>DfuClient</code> only runs in a browser.
+        What is proven is that the escape hatch works, not that our implementation of it does.
+        Worth noting the shipped code is the more careful of the two: the bench mirror treated
+        a status read as needing to succeed, when that read failing <em>is</em> the success.
+      </p>
+      <p>
+        <strong>The production serial transport.</strong> Everything reached the board over a
+        WebSocket bridge, so <code>WebSerialTransport</code> itself is still exercised only by a
+        human in Chrome.
+      </p>
+      <p>
+        <strong>Where a foreign script is refused.</strong> It is definitely refused. But
+        instrumentation at the load function&rsquo;s first line never reached the ground station and
+        could not be reconciled, so &ldquo;refused before any cipher work&rdquo; is what the source
+        says rather than what was observed. The documentation now says so.
+      </p>
+      <p>
+        <strong>The downgrade refusal.</strong> It is inert on any board whose keys are intact,
+        so seeing it work means deliberately emptying a keyed board&rsquo;s keys.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>By the numbers</h2>
+    <div class="metrics">
+      <div class="metric"><span class="metric-v">33</span><span class="metric-label">Commits</span></div>
+      <div class="metric"><span class="metric-v">361</span><span class="metric-label">Unit tests, green</span></div>
+      <div class="metric"><span class="metric-v">F1&ndash;F10</span><span class="metric-label">Firmware items landed</span></div>
+      <div class="metric"><span class="metric-v">T1&ndash;T7</span><span class="metric-label">Tool items landed</span></div>
+      <div class="metric"><span class="metric-v">822 ms</span><span class="metric-label">Reboot to re-enumerate</span></div>
+      <div class="metric"><span class="metric-v">25.8 s</span><span class="metric-label">Firmware flash, verified</span></div>
+      <div class="metric"><span class="metric-v">1282<span style="color:var(--ink-3)">/1282</span></span><span class="metric-label">Parameters documented</span></div>
+      <div class="metric"><span class="metric-v">~25 kB/s</span><span class="metric-label">MAVLink FTP read</span></div>
+    </div>
+    <p>
+      The 822&nbsp;ms figure is worth keeping: the reconnect logic budgets 60&nbsp;s for it, so
+      the assumption holds with an order of magnitude to spare &mdash; and it is a number a
+      simulator structurally cannot produce, because SITL never re-enumerates a USB device.
+    </p>
+  </section>
+
+  <section>
+    <h2>What I would carry forward</h2>
+    <p>
+      Four times during this session I diagnosed a problem from reading code, and four times I
+      was wrong &mdash; once expensively, with a &ldquo;fix&rdquo; that dropped 320 parameters before
+      being reverted. What settled it each time was cheap instrumentation that had been
+      available from the start: a <code>--verbose</code> flag, a print at a branch, reading a
+      value back off the board. The pattern is clear enough to name: when a theory is about
+      what code <em>does</em>, measure it before acting on it.
+    </p>
+    <p>
+      The second thing worth keeping is the habit that shaped this document. Several results
+      here are weaker than they could have been made to sound. A seal that is
+      &ldquo;set&rdquo; is not a seal that is <em>proven raised</em>; a script that is
+      &ldquo;refused&rdquo; is not a script refused <em>at the cheap check</em>. Recording that
+      difference costs a sentence and is the only thing that makes the strong claims worth
+      anything.
+    </p>
+  </section>
+
+  <footer>
+    Bench log for <span class="mono">smallfastdrone-config</span> &middot; sessions of
+    4&ndash;5 September 2026 &middot; one TBS_LUCID_H7, returned to stock and still flying-ready.
+    Detail for every item lives in <span class="mono">PROGRESS.md</span>,
+    <span class="mono">docs/SECURITY.md</span> and <span class="mono">TODO.md</span>.
+  </footer>
+
+</div>

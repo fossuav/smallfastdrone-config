@@ -170,6 +170,7 @@ Still to come, in rough order: seed recipes, log download (Phase 4), the SFD ena
 - **[docs/TESTING.md](docs/TESTING.md)** — test pyramid, SITL setup
 - **[docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md)** — Vue / TS standards, AI-slop anti-patterns
 - **[CLAUDE.md](CLAUDE.md)** — playbook for Claude Code working in this repo
+- **[docs/bench/](docs/bench/)** — bench session records. Dated **snapshots**, not playbooks: each says what one board proved on one day, and is deliberately never updated afterwards. Open the `.html` in a browser.
 
 ## License
 
