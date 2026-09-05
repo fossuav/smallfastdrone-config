@@ -67,6 +67,22 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-05: **SD card in; the remaining bench tests run, including the destructive ones.** Operator authorised bricking the board provided it could be wiped, which is what made the last two possible.
+
+  **FTP write** — the skip carried since the very first bench day: **PASS**, 685 B round-trip. **F5/F10 on hardware:** a script encrypted to this drone's identity with `encrypt_lua.py` decrypted and ran (`LXA-OK decrypted and running`), and one encrypted to a *different* identity was refused. That is the capability the whole identity arc exists for, working end to end. **One sub-claim not confirmed:** instrumentation at the load function's first line never reached the ground station, which I could not reconcile, so "refused before any cipher work" is what the source says rather than what was observed — SECURITY.md now says so rather than asserting it.
+
+  **F6 seal: PASS, and only the erase could have proved it.** `BRD_OPTIONS` 1 → **1025** via the tool's own `withLockBit()` (watchdog bit preserved), survived a reboot, and the board carried on exactly as before — encrypted script still running, identity still readable. The tool cannot read the chip's protection level, so the seal's *effect* was unverifiable by design. The exit ceremony settled it: the DFU read-unprotect triggered a **silicon mass erase** and the board vanished from USB. That only happens on an RDP 1→0 transition; had the seal been a no-op the command would have been refused and the firmware would still have been there.
+
+  **T3 exit ceremony: full run.** Backup (13 settings) → unlock → mass erase (firmware, bootloader *and* identity gone) → stock `arducopter_with_bl.hex` flashed and verified over DFU → **ArduCopter V4.7.1 on TBS_LUCID_H7**, vanilla, exactly what an escape hatch should deliver → settings restored. `planRestore` reported honestly and correctly: 7 to write, 1 `missing` (`INS_HNTCH_OPTS`, which stock doesn't have), 4 `notReverted` (`INS_GYR2*` — stock enables a second IMU the SFD build didn't, so the backup has nothing to say about it).
+
+  **A real finding out of the restore.** 4 of 7 writes "failed" verification — all gyro calibration. Rebooting twice with **no writes at all** showed `INS_GYROFFS_*` and `INS_GYR1_CALTEMP` moving on their own: the drone re-measures them every boot. They are measurements, not settings, like `BARO*_GND_PRESS` and `STAT_BOOTCNT` that the read-only filter already drops — but writable, so the filter misses them. They bloat the backup and make verify-after-restore report false failures. Logged.
+
+  **Also logged:** `PARAM_REQUEST_LIST` now drops a parameter intermittently (1296 vs 1297 against `param.pck`) where it was clean on day one — the difference is scripting running. Not a tool bug, but it makes the 2026-09-04 reload retry load-bearing rather than precautionary.
+
+  **Scope, stated plainly:** the DFU work exercised firmware and silicon via STM32CubeProgrammer and pyusb, **not** our WebUSB `DfuClient`, which only runs in a browser. What is proven is that the escape hatch works, not that our implementation of it does. Worth noting the shipped code is the more careful of the two: my bench mirror of `readUnprotect` treated the post-`DNLOAD` status read as needing to succeed and got a timeout, when that timeout *was* the success — `DfuClient` waits the poll timeout and then expects the read to fail.
+
+  **Board now:** stock ArduCopter 4.7.1, settings restored, no identity, unsealed. `BRD_OPTIONS` still reads 1025 because the backup said so — bit 10 is unused on stock and harmless, left rather than silently edited.
+
 - 2026-09-05: **F5, F7, F8 and F10 — every firmware item in the security work list has now landed.** Five commits on `SmallFastDrone-4.7-config`, one library each. **Not pushed**, so the submodule pin is unchanged.
 
   **F8** (`8d04921203`): `create_nonce()` was called on the *decrypt* path, where it overwrote the nonce just read from the file. Decryption could therefore only ever have succeeded with the board-id prefixing compiled out — which is the default, and why nobody noticed. The nonce is now verified rather than regenerated, and *before* decrypting. The uninitialised `nonce_len` could not overrun (the callee caps at 12) but was undefined behaviour and silently truncated the prefix; a short read now zeroes it rather than leaving something that looks checked.

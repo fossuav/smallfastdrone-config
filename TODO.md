@@ -113,6 +113,28 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   card…"). The distinction is cheap to make: `@SYS` lists fine on a card-less
   board, so a probe there separates "no card" from "FTP is broken".
 
+- `[params] [ux]` **Gyro calibration doesn't belong in a settings backup.**
+  Found on the bench 2026-09-05 while restoring after the exit ceremony.
+  `INS_GYROFFS_X/Y/Z` and `INS_GYR*_CALTEMP` are saved, written back
+  successfully, and then **overwritten by the drone at the next boot** -
+  proved by rebooting twice with no writes at all and watching them move on
+  their own. They are measurements, not settings, exactly like
+  `BARO*_GND_PRESS` and `STAT_BOOTCNT` that the read-only filter already
+  drops - but these are writable, so the filter misses them. Consequences:
+  the backup carries values that cannot be restored, and any
+  verify-after-restore reports false failures (4 of 7 on the bench). Wants
+  an explicit exclusion list for learned/measured parameters, separate from
+  the read-only one.
+
+- `[params]` **Param streaming is lossy under load.** `PARAM_REQUEST_LIST`
+  returned 1296 or 1297 across runs on the same board while `param.pck`
+  consistently reported 1297. On day one it was clean over four runs; the
+  difference is that scripting is now enabled and a Lua applet is emitting
+  text. Not a correctness bug in the tool - the params store's silence
+  timeout and the reload retry added 2026-09-04 both handle it - but it
+  means that retry is load-bearing rather than belt-and-braces, and a bench
+  check that cross-validates the two counts will flap.
+
 ## 3D / visuals
 
 - `[3d]` **Drop the motor "donuts" in the copter graphic.** The ring indicators
