@@ -576,7 +576,30 @@ and inspect. A signed grant is a quiet write over a link. "SFD could, but
 it would take a firmware release someone might notice" is a meaningfully
 different promise from "SFD can, silently, today".
 
-Three ways to take it:
+**Decided 2026-09-07: grants work on a sealed drone** (PLAN.md decision 42).
+The deciding argument is that the change **announces itself** — the owner's key
+stops opening new recordings at the next download, so a re-point is a loud act
+rather than a quiet one. Refusing grants after sealing would trade a real,
+recoverable failure (a lost key) for an obstacle that stops nobody: an SFD
+willing to re-point ownership would ship a firmware build instead.
+
+Three conditions came out of deciding, and the first is a hole in the sketch
+above:
+
+1. **A monotonic counter, not a timestamp.** The drone has no clock and no
+   memory of what it has applied, so the `issued-at` field above does not
+   prevent replay: an old grant can be re-applied to restore a key the operator
+   rotated away from. The drone must store the last value applied, in the owner
+   region, and refuse anything not strictly newer.
+2. **The tool shows the fingerprint a grant would install, and the operator
+   confirms it.** The attack here is not on the crypto but on the customer, who
+   relays a file somebody sent them. A grant pointing at an attacker's key is
+   caught by a person reading a fingerprint, and by nothing else.
+3. **The tool says when the drone's owner is not the key in hand**, rather than
+   leaving the operator to infer it from a decryption failure. This is what
+   makes the self-announcing property something an operator actually sees.
+
+The options considered, kept for the record:
 
 - **Grants work on sealed drones.** Lost keys are recoverable; SFD can
   re-point ownership silently. Simplest, and the only option that solves
