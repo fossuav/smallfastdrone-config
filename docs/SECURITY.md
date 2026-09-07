@@ -992,8 +992,23 @@ complete; T8–T10 are the outbound arc** (decision 36) and are not started.
 | T9 | Owner key provisioning in the enable ceremony | ✅ **Landed 2026-09-07**, and driven through the UI against the bench board. **Superseded plan:** One more step in `sfd-enable`: after the identity is generated and verified, write the owner public key, verify it by read-back the same way, and only then offer the seal. Identity, ownership and seal in one sitting is not a convenience — it is what closes the claiming window in F12. |
 | T10 | Outbound decryption on the read paths | ✅ **Landed 2026-09-07.** `src/protocol/sfx.ts`, with the Logs view as its first surface — downloading recordings is still Phase 4, but an operator who copies one off the card can turn it back into a flight log today. Tested against a fixture **produced by the firmware's own monocypher** at the firmware's offsets, and verified beyond that by opening a real 32,640-byte bench log byte-identically to `decrypt_sfx.py`. Needed a crypto dependency (decision 40): Chromium has X25519 but neither ChaCha20 nor BLAKE2b. Custody survives it — both agreements happen in WebCrypto and only their results reach the library. **Superseded plan:** `.sfx` open for `@PARAM/param.sfx` and for downloaded logs. This is where decision 10 actually changes, and it is worth being blunt in review: the moment this lands, the tool performs cryptography. It should be one module, it should take the agreement from T8's custody layer rather than a raw key, and nothing else in `src/` should import a cipher. |
 
-Encrypted applet install routes through the existing seam as
-`kind: 'lua_script'` — the tool moves an opaque blob and never inspects it.
+Encrypted applet install routes through the existing seam — the tool moves an
+opaque blob and never inspects it. **Landed 2026-09-07** (`kind: 'lua-applet'`,
+which is what the code actually calls it): `src/protocol/lxa.ts` reads the
+envelope and nothing else, and the Field tools page installs one.
+
+The tool checks **one** thing before uploading, and it is the address rather
+than the contents. The `.lxa` v2 header carries the target drone's UID in the
+clear, put there so the firmware can refuse somebody else's applet without
+spending a decryption on it; reading the same field in the tool refuses in the
+same breath the operator chose the file. It is not the enforcement — the drone
+refuses regardless — it is the difference between finding out now and finding
+out from a log line after a scripting restart.
+
+The same change made an older claim true. `field-tools.ts` said asset uploads
+route through the seam and they did not: `lua-engine.ts` went straight to FTP,
+against the rule below, with a comment asserting the opposite. Applets and
+modules now go through `defaultUploader` as encrypted applets do.
 
 ## The upload seam
 

@@ -68,6 +68,16 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-07: **A drone can now be given an applet only it can read — the last unbuilt piece of the inbound half.** The operator asked whether encrypted Lua needed a third keypair. It does not: it is the **drone identity** keypair, which is what that key has always been for. SFD encrypts to the drone's identity public key, the private half never leaves the chip, and the customer relays a blob they cannot open. A third keypair would be actively wrong — a key whose private half the client holds could by definition decrypt what it installs. Remote key exchange is not a third keypair either; it reuses SFD's existing firmware signing key.
+
+  **What was missing was delivery.** The firmware has decrypted `.lxa` since F5 and `encrypt_lua.py` has written them, but `src/` had **no `.lxa` handling at all** — nothing could put one on a drone except a card reader. `src/protocol/lxa.ts` now reads the envelope and the Field tools page installs one.
+
+  **The tool checks the address, never the contents.** The v2 header carries the target drone's UID in the clear, put there so the firmware can refuse somebody else's applet without spending a decryption on it; reading the same field refuses in the same breath the operator chose the file, rather than after an upload, a scripting restart and a warning in a log nobody is watching. Not behind expert mode, unlike the custom-applet seam beside it: a custom applet is one the operator wrote, and this is the opposite.
+
+  **And it made an old comment true.** `field-tools.ts` claimed asset uploads route through the security seam; `lua-engine.ts` went straight to FTP, against a rule stated in both CLAUDE.md and SECURITY.md, with a comment asserting the opposite of the fact. Applets and modules now go through `defaultUploader`. v1 of the seam is a passthrough so nothing changes today — which is the point.
+
+  Driven against SITL: an applet for another drone refused by name before anything uploads, one for this drone landing in `APM/scripts`. 412 → 417 unit, 28 E2E still green.
+
 - 2026-09-07: **Three things closed out: an E2E for log download, what sealing settles about ownership, and a design for remote key exchange.**
 
   **The E2E** covers what SITL can reach — listing, downloading, and handing back a log that needed no key — with the scrambled path exercised from a fixture file, which needs no drone. Writing it found two real bugs. **The log directory is not the same on every drone**: a board uses `/APM/LOGS` and SITL `/logs`, nothing on the wire says which, and the code knew only the first — so it worked on hardware and would have found nothing in the simulator forever. And **"nothing recorded yet" did not mean it**: every failure was swallowed into an empty list, so a dropped link read as an empty card. Only the drone saying not-there now moves on; anything else is a failure the operator can act on. SITL logs while disarmed now via the defaults overlay, because a test for downloading recordings needs a recording — and arming the simulator would have been a far worse way to get one. 412 unit, 28 E2E.
