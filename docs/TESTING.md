@@ -225,18 +225,30 @@ Local dev typically runs unit on save and integration / e2e on demand.
 
 ## CI shape
 
-Workflow steps:
+**Landed 2026-09-07** as `.github/workflows/ci.yml`, in two jobs split by
+what they cost.
 
-1. Checkout with `submodules: recursive`.
-2. Restore SITL build cache keyed on `vendor/smallfastdrone` SHA.
-3. Build SITL on cache miss; warm-cache builds skip this step.
-4. `bun install`.
-5. `bun run lint` + `bun run typecheck`.
-6. `bun run test:unit`.
-7. Start SITL + bridge as background services, `bun run test:integration`.
-8. `bun run test:e2e` against the same SITL/bridge.
+**`checks`** — no submodule, because nothing in it reads the firmware tree:
+the parameter metadata and the test fixtures are checked in. `bun install
+--frozen-lockfile`, then lint, typecheck, `test:unit`, and `bun run build`.
+The build is there to catch what typecheck cannot — a bad import path, a
+plugin that rejects something — since it is the only place the app is
+assembled the way it ships. Runs in a couple of minutes, so it is what tells
+you quickly that a change is broken.
 
-Skipping a layer in CI requires a passing reason logged in the PR description.
+**`e2e`** — checkout with `submodules: recursive`, restore the SITL build and
+ccache keyed on the pinned firmware SHA, build SITL on a miss, install
+Chromium with `--with-deps`, then `bun run test:e2e`. Playwright starts SITL,
+the bridge and Vite itself, so nothing is started by hand. The report is kept
+as an artifact when it fails.
+
+The two jobs are deliberately **not** chained: a lint error should not wait
+behind a firmware build.
+
+**`test:integration` is absent, and that is the one layer skipped.** It does
+not exist yet — the integration tier in the pyramid above has no runner. When
+it lands it belongs in the `e2e` job, which already has a built SITL. Skipping
+any other layer requires a passing reason logged in the PR description.
 
 ## Test writing rules
 

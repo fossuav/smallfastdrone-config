@@ -1,5 +1,7 @@
 # smallfastdrone-config
 
+[![CI](https://github.com/fossuav/smallfastdrone-config/actions/workflows/ci.yml/badge.svg)](https://github.com/fossuav/smallfastdrone-config/actions/workflows/ci.yml)
+
 Browser-based configuration tool for [SmallFastDrone](https://github.com/fossuav/smallfastdrone), an ArduPilot fork for small fast drones.
 
 Designed for **operators, not experts** — get a new drone configured and flying well in the shortest possible time, with the lowest possible risk.
@@ -120,14 +122,15 @@ A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV br
 - **Recipes** (`/recipes`) — hosts tuning-flavoured wizards with the same unlocked/locked-Pro card model. Seed recipes (cinewhoop, throw mode, first-flight failsafes) are still to come.
 - **Firmware** (`/firmware`) — the firmware-install surface. An online picker builds a firmware.ardupilot.org download URL from vehicle/version/board dropdowns (board and version lists pulled live from GitHub). Then two tabs: "Install over USB" (the daily driver — reboots the drone to its bootloader and flashes a `.apj` over the same port) and "Recovery (DFU mode)" (WebUSB DFU for a bricked or fresh chip; takes `.apj` or `_with_bl.hex`). Both paths are **hardware-verified on TBS_LUCID_H7**, including the preserve-your-settings erase mode. The recovery tab also hides an **unlock** action for read-protected boards — destructive, and not yet bench-verified.
 - **Settings** (`/settings`) — feature toggles that write a parameter and handle the restart + reconnect for you (Lua scripting is the first), plus **Your drone's settings**: save and restore its configuration. A backup holds only what's changed from the firmware's own factory defaults, minus read-only parameters — the drone reports which those are via `@PARAM/param.pck?withdefaults=1`. Restoring shows what will change (and what it *can't* put back) before writing.
-- **Logs** (`/logs`) and **ESC tools** (`/esc`) — placeholders. Log download is Phase 4, ESC passthrough is Phase 6; neither has started.
+- **Logs** (`/logs`) — lists the flight recordings on the drone and pulls one off over MAVLink FTP with a progress bar (burst read, ~420 KB/s on a real board). A secured drone scrambles what it records so only its owner can read it; load your owner key and the drone's identity file and the same page hands back an ordinary flight log. Reading the log itself is a job for a log analysis tool.
+- **ESC tools** (`/esc`) — placeholder. ESC passthrough is Phase 6 and hasn't started.
 - **Expert mode** toggle (top-right, off by default, per-session) reveals **Parameters** (`/params`) — the full param table with metadata-driven descriptions, units, enum dropdowns and decoded bitmasks, inline editing with dirty tracking and per-row undo, and Apply (PARAM_SET + PREFLIGHT_STORAGE) with per-row ack indicators.
 
 Each route lazy-loads as its own chunk. State lives in Pinia setup stores. Status messages of WARNING or worse surface as toasts; a bell icon opens a popover with the most recent ~50, severity-coloured.
 
 The app is an installable PWA — `vite-plugin-pwa` generates a service worker, web manifest, and icons. Drop into Chrome's "Install" menu to get a standalone window.
 
-Still to come, in rough order: seed recipes, log download (Phase 4), the SFD enablement ceremonies (Phase 7 — the enable ceremony's identity half exists as a workflow with no view yet; the lock and the exit ceremony are gated on firmware work), and BLHeli ESC passthrough (Phase 6). There is no CI workflow yet. See [PLAN.md](PLAN.md) for the full plan.
+Still to come, in rough order: seed recipes (then `/wizard` retires), the ESC throttle-calibration step, the rest of Phase 4 (a narrow in-tool `.bin` parser and the first log-engine wizard), BLHeli ESC passthrough (Phase 6), and remote key exchange — provisioning a drone's owner key without somebody standing next to it, which is the one piece of the security design with no construction yet. See [PLAN.md](PLAN.md) for the full plan.
 
 ## Project layout
 
