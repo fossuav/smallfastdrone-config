@@ -82,7 +82,7 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
   **Nothing here has met a board.** Signed SmallFastDronev1, unsigned SmallFastDronev1, the signed TBS_LUCID_H7 bootloader and SITL all build; SITL compiles the encryption out, so the E2E suite is untouched. What is missing is a log written on hardware and read back.
 
-- 2026-09-07: **F11 — the owner key region, in firmware.** First code of the outbound arc. `struct ap_owner_data` in `AP_CheckFirmware.h` plus `find_owner_key()` / `owner_key_is_set()` / write-once `set_owner_key()`, committed to the submodule as `8689b1d3f1` and **not pushed**, so the pin here is unchanged.
+- 2026-09-07: **F11 — the owner key region, in firmware.** First code of the outbound arc. `struct ap_owner_data` in `AP_CheckFirmware.h` plus `find_owner_key()` / `owner_key_is_set()` / write-once `set_owner_key()`, committed to the submodule as `8689b1d3f1`. It was unpushed when this was written; it went up with the rest of the arc and the pin was bumped once, later the same day.
 
   It mirrors F1 closely because F1's placement reasoning still holds — the region goes after the identity, which is what keeps it out of reach of `make_secure_bl.py`, and it carries its own signature checked at its offset rather than searched for. Two things differ. It **refuses without an identity**, because the outbound agreement authenticates with the identity private key, so an owner key without one buys nothing; that puts the ceremony's ordering in the firmware instead of only in the tool. And it is **not wiped** after writing, because an owner key is public and wiping it would tell a reader it was not.
 
