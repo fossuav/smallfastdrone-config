@@ -613,6 +613,40 @@ The options considered, kept for the record:
   re-point cannot be used to read the past. Does not stop SFD reading the
   *future*, and adds a destructive step to a support flow.
 
+### As built (F15 + T11, 2026-09-07)
+
+The grant is 124 bytes, and the signature lives **inside it** rather than in
+`SECURE_COMMAND`'s `sig` field. That is the one structural departure and it is
+forced: `check_signature()` covers a session key the drone issues, which makes
+it interactive, and a grant is signed offline weeks before use.
+`AP_CheckFirmware::verify_signed_blob()` checks a detached signature over the
+grant alone, against the same bootloader keys.
+
+**The counter is in the owner region**, written in the same flash operation as
+the key it authorised so the two cannot disagree after an interrupted write. A
+drone claimed only in person has a counter of zero, so a first grant needs at
+least 1. `sign_owner_grant.py` refuses a zero rather than producing a grant that
+can never apply.
+
+Checks run cheapest first and the signature last, so a grant for another
+airframe costs a `memcmp`; and the counter is checked before anything is
+written, so a replayed grant never reaches flash.
+
+**Bench-verified on a TBS_LUCID_H7**, all five paths: a valid grant applied; the
+same grant replayed **refused as superseded**; a grant for another drone
+refused; one signed by an untrusted key refused; and a newer grant rotating to a
+different key applied.
+
+**Not verified: the sealed case**, which is the whole point of decision 42.
+Testing it costs the board's identity to undo, so it is reasoned rather than
+observed — the code path does not consult the seal at all, which is what makes
+it work, but that is an argument rather than a measurement.
+
+**The region grew again.** A drone needs a bootloader carrying the counter
+field before it can take a grant, and updating a bootloader erases the identity,
+since they share a sector. So this is not a firmware-only upgrade for a drone
+already in the field: it is a re-enable.
+
 ### The half that needs no decision
 
 **An owner-signed re-claim** covers rotating a key you still hold, and

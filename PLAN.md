@@ -314,10 +314,12 @@ never met an H743.
   firmware with, moved as a file, verified by `check_signature()` against the
   bootloader's key. No server, and no key material in the tool — the serverless
   premise survives intact.
-  **Decided 2026-09-07 (decision 42): grants work on a sealed drone**, with a
-  monotonic counter against replay, an operator confirmation of the fingerprint
-  being installed, and the tool saying plainly when a drone's owner is not the
-  key in hand. **Not yet built** — F15 and T11 in docs/SECURITY.md.
+  **Decided 2026-09-07 (decision 42) and built the same day** — F15 + T11, all
+  three conditions in. Bench-verified on five paths including replay refusal;
+  the sealed case is reasoned rather than measured, because testing it costs the
+  board's identity to undo. **Note for anything in the field:** the owner region
+  grew, so taking a grant needs a bootloader update, and that erases the
+  identity — a re-enable, not an upgrade.
   An **owner-signed re-claim** — the current owner authorising a key rotation,
   SFD not involved — is safe on a sealed drone by construction and is worth
   building whichever way that goes.

@@ -68,6 +68,20 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-07: **Remote key exchange, built and bench-verified (F15 + T11).** A drone nobody is standing next to can now be claimed, by a permission SFD signs offline.
+
+  **The authorisation was already in the board** — it trusts exactly one key, SFD's in the bootloader — and had simply never been used for this. The one structural departure: the signature lives *inside* the grant rather than in `SECURE_COMMAND`'s `sig` field, because `check_signature()` covers a session key the drone issues and a grant is signed weeks before use. `verify_signed_blob()` checks a detached signature over the grant alone.
+
+  **The counter, which was the hole in the design.** Without it a grant replays and restores a key the operator rotated away from. The drone has no clock, so only something the drone remembers can order two grants: the owner region gains a counter, written in the same flash operation as the key it authorised.
+
+  **All five paths verified on hardware**: a valid grant applied; the same grant **replayed and refused as superseded**; a grant for another drone refused; one signed by an untrusted key refused; a newer grant rotating keys applied. **Not verified sealed**, which is decision 42's whole point — testing it costs the board's identity to undo, so it is reasoned (the code never consults the seal) rather than measured.
+
+  **The tool relays and never judges.** It cannot verify a grant, so it shows the operator what the grant would install and whether that is the key they hold — because the likely attack is on the person relaying a file, not on the signature. The Logs view now also says when a drone's owner is not the key in hand: decision 42 rests on a re-point announcing itself, and that is only true if somebody notices.
+
+  **Two things fell out.** The owner region grew again, so a drone needs a new bootloader before it can take a grant — and updating a bootloader erases the identity, so this is a re-enable rather than a firmware update for anything in the field. And the bootloader flash **reported success this time**, under a real erase-and-write: that is the `GCS_MAVLink` ack fix working under the stall it was written for, which was the one claim recorded earlier as reasoned rather than observed. It is observed now.
+
+  422 unit, 28 E2E.
+
 - 2026-09-07: **A drone can now be given an applet only it can read — the last unbuilt piece of the inbound half.** The operator asked whether encrypted Lua needed a third keypair. It does not: it is the **drone identity** keypair, which is what that key has always been for. SFD encrypts to the drone's identity public key, the private half never leaves the chip, and the customer relays a blob they cannot open. A third keypair would be actively wrong — a key whose private half the client holds could by definition decrypt what it installs. Remote key exchange is not a third keypair either; it reuses SFD's existing firmware signing key.
 
   **What was missing was delivery.** The firmware has decrypted `.lxa` since F5 and `encrypt_lua.py` has written them, but `src/` had **no `.lxa` handling at all** — nothing could put one on a drone except a card reader. `src/protocol/lxa.ts` now reads the envelope and the Field tools page installs one.
