@@ -79,10 +79,21 @@ jobs:
 
       # scripts/dev-setup.sh is the source of truth for what a build
       # needs; this is that list, installed rather than checked for.
+      #
+      # The Python packages are waf's, not ours: ArduPilot generates its
+      # MAVLink and DroneCAN sources with empy at configure time and says
+      # so only by failing. A venv because the runner's Python is
+      # externally managed and pip refuses to touch it; putting it on
+      # GITHUB_PATH is what makes waf's own `python3` find them.
       - name: Install SITL build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential python3 python3-pip ccache
+          sudo apt-get install -y --no-install-recommends \
+            build-essential g++ gawk make ccache python3 python3-venv
+          python3 -m venv "$HOME/sfd-venv"
+          "$HOME/sfd-venv/bin/pip" install --quiet --upgrade pip
+          "$HOME/sfd-venv/bin/pip" install --quiet empy==3.3.4 pexpect future dronecan lxml
+          echo "$HOME/sfd-venv/bin" >> "$GITHUB_PATH"
 
       - uses: oven-sh/setup-bun@v2
         with:

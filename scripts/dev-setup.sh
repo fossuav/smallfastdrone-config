@@ -67,6 +67,19 @@ check_sitl_build_deps() {
   else
     ok "all SITL build tools present"
   fi
+
+  # waf generates ArduPilot's MAVLink and DroneCAN sources with empy at
+  # configure time, and reports its absence only by failing the build
+  # with a one-line hint. Checked separately from the tools above
+  # because it is a Python import rather than something on PATH - and
+  # because CI hit exactly this and nothing here had warned about it.
+  if ! python3 -c 'import em' >/dev/null 2>&1; then
+    warn "python3 can't import empy, which waf needs to configure a build"
+    warn "  python3 -m pip install empy==3.3.4 pexpect future dronecan lxml"
+    warn "  (on a distro with an externally-managed Python, use a venv)"
+  else
+    ok "empy present for the SITL build"
+  fi
 }
 
 install_playwright_browser() {
