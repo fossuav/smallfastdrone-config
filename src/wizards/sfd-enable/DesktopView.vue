@@ -136,6 +136,38 @@ const sealBlocker = computed(() => (sealKnown.value
   : 'not-connected'))
 const canSeal = computed(() => sealBlocker.value === null && sealConfirmation.value.trim().toUpperCase() === SEAL_PHRASE)
 
+/*
+  What sealing settles about this drone's recordings, forever.
+
+  After the seal the owner can never be changed, so whatever is true now
+  is true for the life of the airframe. Three situations, and they are
+  worth telling apart because two of them are losses an operator would
+  not otherwise see coming:
+
+    'matched'   — the drone is claimed, and the key loaded here opens it.
+                  The operator demonstrably holds it at this moment,
+                  which is the strongest thing this tool can honestly
+                  check. It cannot see whether they have a backup, and
+                  pretending to would be worse than saying nothing.
+    'unclaimed' — nobody owns it, so it will record in the clear for
+                  good.
+    'mismatch'  — it is claimed to some other key. Whoever holds that key
+                  can read its recordings and nobody else ever will.
+ */
+type SealOwnership = 'matched' | 'unclaimed' | 'mismatch'
+
+const droneOwnerKey = computed(() => outcome.value?.ownerPublicKey ?? null)
+
+const sealOwnership = computed<SealOwnership>(() => {
+  const onDrone = droneOwnerKey.value
+  if (onDrone === null)
+    return 'unclaimed'
+  const loaded = ownerKey.value?.publicKey
+  if (loaded && loaded.length === onDrone.length && loaded.every((b, i) => b === onDrone[i]))
+    return 'matched'
+  return 'mismatch'
+})
+
 // Ask the drone to seal itself on its next start. The firmware refuses
 // without a verified identity, so this mirrors that check rather than
 // relying on it alone.
@@ -468,6 +500,35 @@ function cancel(): void {
           icon="i-lucide-lock"
           title="Sealing can't be undone"
           description="Sealing stops anyone reading your drone's secret half off the chip — including you, and including us. The only way back is wiping the drone completely, which destroys this identity and everything else on it. Your drone works exactly as before; it just stops giving up its secret."
+        />
+
+        <!-- Sealing also fixes who can read this drone's recordings, for
+             the life of the airframe. Said here because it is the last
+             moment it can be changed, and because the two bad cases are
+             losses an operator would not otherwise see coming. -->
+        <UAlert
+          v-if="sealOwnership === 'unclaimed'"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-unlock"
+          title="This drone has no owner, and after sealing it can never be given one"
+          description="It will keep recording in the clear, so anyone who takes its card can read where it has flown. If you want its recordings scrambled to you, load your key and give it an owner before sealing."
+        />
+        <UAlert
+          v-else-if="sealOwnership === 'mismatch'"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-key-round"
+          title="This drone is owned by a key you don't have loaded"
+          description="Only that key will ever read its recordings, and after sealing that can't be changed. Load the matching key and check the mark below before you seal — if it is lost, so is everything this drone records from now on."
+        />
+        <UAlert
+          v-else
+          color="success"
+          variant="subtle"
+          icon="i-lucide-key-round"
+          :title="`Its recordings will be readable with your key ${ownerLabel}`"
+          description="That key is the only one that will ever read them, and after sealing that can't be changed. Make sure the file it came from is somewhere you won't lose it."
         />
         <div>
           <p class="text-muted text-xs">
