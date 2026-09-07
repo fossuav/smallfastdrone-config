@@ -45,6 +45,7 @@ import type { ScriptStorageStatus } from './script-storage'
 import { MavFtp, MavFtpError } from '../protocol/ftp'
 import { buildScriptingRestart } from '../protocol/mavlink'
 import { buildParamRequestRead, buildParamSet } from '../protocol/params'
+import { defaultUploader } from '../security/uploader'
 import { useParamsStore } from '../stores/params'
 import { useSessionStore } from '../stores/session'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from './reconnect'
@@ -213,7 +214,26 @@ export function useLuaEngine() {
         throw e
       })
     }
-    await ftp.uploadFile(appletPath(wizardId), bytes)
+    await putThroughSeam(`applet ${wizardId}`, appletPath(wizardId), bytes)
+  }
+
+  /*
+    Every applet reaches the drone through here.
+
+    docs/SECURITY.md: "Every upload from the tool to the FC goes through
+    this", and encrypted Lua is the case the seam was named for. It was
+    not true of this file until 2026-09-07 - the uploads went straight to
+    FTP while a comment in field-tools.ts said otherwise, which is worse
+    than no comment. v1 of the seam is a passthrough, so this changes
+    nothing today and is the whole point: when signing or key selection
+    lands, the call sites are already right.
+  */
+  async function putThroughSeam(name: string, remotePath: string, bytes: Uint8Array): Promise<void> {
+    const ftp = getFtp()
+    await defaultUploader.upload(
+      { kind: 'lua-applet', name, bytes },
+      { runUpload: async payload => ftp.uploadFile(remotePath, payload) },
+    )
   }
 
   // Remove a previously-uploaded applet. Silently swallows FileNotFound
@@ -244,7 +264,42 @@ export function useLuaEngine() {
         throw e
       })
     }
-    await ftp.uploadFile(modulePath(name), bytes)
+    await putThroughSeam(`module ${name}`, modulePath(name), bytes)
+  }
+
+  /*
+    Install an applet SFD encrypted for this drone.
+
+    The tool never opens one: it is encrypted to the drone's identity and
+    the private half is in flash. What this does read is the address on
+    the envelope - the target drone's UID, in the clear in the header,
+    put there so the firmware can refuse somebody else's applet without
+    spending a decryption on it. Checking it here refuses in the same
+    breath the operator chose the file, rather than after an upload and a
+    scripting restart and a line in a log nobody is watching.
+
+    The file keeps its own name. Unlike a wizard applet, which this tool
+    owns and names, this one belongs to whoever sent it.
+  */
+  async function installEncryptedApplet(filename: string, bytes: Uint8Array): Promise<void> {
+    const ftp = getFtp()
+    for (const dir of ['APM', 'APM/scripts']) {
+      await ftp.createDirectory(dir).catch((e) => {
+        if (e instanceof MavFtpError && e.errCode === 8)
+          return
+        throw e
+      })
+    }
+    await putThroughSeam(filename, `APM/scripts/${filename}`, bytes)
+  }
+
+  async function removeEncryptedApplet(filename: string): Promise<void> {
+    const ftp = getFtp()
+    await ftp.removeFile(`APM/scripts/${filename}`).catch((e) => {
+      if (e instanceof MavFtpError && e.errCode === 10)
+        return
+      throw e
+    })
   }
 
   // Is a wizard's applet currently present on the FC? Install-and-keep
@@ -440,6 +495,8 @@ export function useLuaEngine() {
     uploadApplet,
     removeApplet,
     uploadModule,
+    installEncryptedApplet,
+    removeEncryptedApplet,
     isAppletInstalled,
     installedApplets,
     restartScripting,

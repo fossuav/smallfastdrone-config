@@ -32,8 +32,9 @@
 //
 // All asset uploads route through the lua-engine, which is the consumer of the
 // security uploader seam (src/security/uploader.ts) — the same path DFU uses,
-// and where signed/encrypted Lua for paid tools lands later. See
-// docs/WIZARDS.md "Field tools catalogue".
+// and where signed Lua for paid tools lands later. That was aspirational when
+// written and became true on 2026-09-07; encrypted applets from SFD go the same
+// way. See docs/WIZARDS.md "Field tools catalogue".
 
 import motorCheckApplet from '../wizards/motor-check/applet.lua?raw'
 import motorCheckHelper from '../wizards/motor-check/crsf_helper.lua?raw'

@@ -25,14 +25,65 @@
 // registry + asset model is in workflow/field-tools.ts; design in
 // docs/WIZARDS.md "Field tools catalogue".
 
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { isLxa, LxaError, lxaMatchesFc, parseLxaHeader } from '../protocol/lxa'
 import { useFieldToolsStore } from '../stores/fieldTools'
 import { useSessionStore } from '../stores/session'
 import { useUiStore } from '../stores/ui'
 import { installableTools, lockedTools } from '../workflow/field-tools'
+import { useLuaEngine } from '../workflow/lua-engine'
 
 const session = useSessionStore()
+const lua = useLuaEngine()
+
+/*
+  Installing an applet SmallFastDrone sent for this drone.
+
+  Not behind expert mode, unlike the custom-applet seam below it: a
+  custom applet is one the operator wrote, and this is the opposite -
+  something they cannot read or write, addressed to their airframe. It is
+  an ordinary thing for a customer to be given.
+
+  The tool never opens it. What it does check, before uploading
+  anything, is the drone written on the outside - so choosing the wrong
+  file says so immediately rather than after an upload, a scripting
+  restart, and a warning in a log nobody is watching.
+*/
+const appletInput = ref<HTMLInputElement | null>(null)
+const appletState = ref<'idle' | 'working' | 'done' | 'failed'>('idle')
+const appletMessage = ref<string | null>(null)
+
+async function chooseApplet(event: Event): Promise<void> {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (appletInput.value)
+    appletInput.value.value = ''
+  if (!file)
+    return
+
+  appletState.value = 'working'
+  appletMessage.value = null
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (!isLxa(bytes))
+      throw new LxaError('That file isn\'t an applet from SmallFastDrone. They end in .lxa.')
+    const header = parseLxaHeader(bytes)
+    if (!lxaMatchesFc(header, session.fcUid)) {
+      throw new LxaError(
+        `That applet was made for a different drone (${header.uid.slice(0, 12)}…). `
+        + 'Only the drone it was made for can read it.',
+      )
+    }
+    await lua.installEncryptedApplet(file.name, bytes)
+    await lua.restartScripting()
+    appletState.value = 'done'
+    appletMessage.value = `${file.name} is on your drone. It will run from now on.`
+  }
+  catch (e) {
+    appletState.value = 'failed'
+    appletMessage.value = e instanceof Error ? e.message : String(e)
+  }
+}
 const ui = useUiStore()
 // Shared install state — the same the wizard cards + header badge read.
 // Connect-time refresh is owned by the app shell; this just covers landing
@@ -199,6 +250,48 @@ onMounted(() => {
             </li>
           </ul>
         </template>
+
+        <!-- Something SFD made for this airframe. Ordinary, so not
+             behind expert mode. -->
+        <div class="border-default mt-2 space-y-2 rounded-lg border p-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-48 flex-1">
+              <p class="text-default text-sm font-medium">
+                An applet from SmallFastDrone
+              </p>
+              <p class="text-muted text-xs">
+                Made for this drone and scrambled so only it can read them — not us, not you, not
+                another drone.
+              </p>
+            </div>
+            <UButton
+              :disabled="!session.connected || appletState === 'working'"
+              :loading="appletState === 'working'"
+              color="neutral"
+              variant="outline"
+              size="sm"
+              icon="i-lucide-file-plus"
+              @click="appletInput?.click()"
+            >
+              Install one…
+            </UButton>
+          </div>
+          <input ref="appletInput" type="file" accept=".lxa" class="hidden" @change="chooseApplet">
+          <UAlert
+            v-if="appletState === 'done'"
+            color="success"
+            variant="subtle"
+            icon="i-lucide-check"
+            :description="appletMessage ?? ''"
+          />
+          <UAlert
+            v-else-if="appletState === 'failed'"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :description="appletMessage ?? ''"
+          />
+        </div>
 
         <!-- Custom (operator-supplied) — expert-only seam. -->
         <div v-if="ui.expert" class="border-default mt-2 flex items-center justify-between gap-3 rounded-lg border border-dashed p-3">
