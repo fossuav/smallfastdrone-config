@@ -500,6 +500,115 @@ needs it. A backup encrypted to the **owner** key survives the wipe, because
 the owner key was never on the drone. The owner keypair is the only key in the
 system that outlives the airframe.
 
+## Remote key exchange
+
+The third leg of the outbound arc, and the one with no construction until
+now. **Designed 2026-09-07; not built, and one decision below is the
+operator's.**
+
+### The problem, precisely
+
+`SET_OWNER_KEY` is unsigned, because the tool holds no key it could sign
+with. What authorises it is physical presence: an operator on a bench,
+enabling a drone in one sitting. That is why an unsealed drone belongs to
+whoever plugs in first, and why sealing has to be the point where
+ownership stops changing.
+
+Remote provisioning is the case where nobody is at the drone. Presence
+therefore cannot be the authorisation, and nothing else currently is.
+
+Two situations want it, and only one is a convenience:
+
+- **Rotating a key you still hold.** A nuisance today: it means a bench.
+- **Replacing a key you have lost.** Today this is unrecoverable on a
+  sealed drone. The drone keeps recording, nobody can ever read it, and
+  the only way back is the exit ceremony's mass erase — which is a harsh
+  penalty for losing a file, and lands on the operator rather than on an
+  attacker.
+
+### The construction: an ownership grant SFD signs
+
+The drone already trusts exactly one key — SFD's, in the bootloader, and
+`check_signature()` already verifies a 64-byte signature against it. So
+the authorisation exists; it has simply never been used for this.
+
+```
+  0   6  magic "SFDOWN"
+  6   1  version
+  7   1  reserved
+  8  12  the drone's STM32 UID — this grant is for one airframe
+ 20  32  the owner public key being granted
+ 52   8  issued-at, so a grant can be ordered against another
+ 60  64  Ed25519 signature over bytes 0..59, by SFD's signing key
+```
+
+The flow moves files, not connections:
+
+1. The customer generates an owner keypair offline (`owner_key.py`) and
+   sends SFD the public half and the drone's `sfd-identity/1` file. Both
+   are already non-secret and already travel this way.
+2. SFD signs a grant offline, with the key it already signs firmware
+   with.
+3. The customer feeds the grant to the configurator, which relays it to
+   the drone as a signed `SET_OWNER_KEY`.
+4. The drone verifies it against the bootloader's key, checks the UID is
+   its own, and writes the owner key.
+
+**Nothing about the serverless design changes.** No key material reaches
+the tool, no service stands between customer and drone, and the whole
+exchange is two files and an email — the same shape as the identity file
+that already works.
+
+### What it costs, and this is the decision
+
+A signed grant works on a **sealed** drone, which is the point: it is
+what makes a lost owner key recoverable. But it means **SFD can re-point
+any drone's ownership at any time**, including at a key SFD holds — and
+therefore can arrange to read a customer's future recordings.
+
+The honest framing is that this is not a *new* power. SFD signs the
+firmware, so SFD can already ship a build that does anything, including
+dumping logs in the clear. A drone trusts SFD completely and always has.
+
+But it is a **cheaper** power, and cheapness matters. Shipping malicious
+firmware is an act the customer performs, on an artefact they can keep
+and inspect. A signed grant is a quiet write over a link. "SFD could, but
+it would take a firmware release someone might notice" is a meaningfully
+different promise from "SFD can, silently, today".
+
+Three ways to take it:
+
+- **Grants work on sealed drones.** Lost keys are recoverable; SFD can
+  re-point ownership silently. Simplest, and the only option that solves
+  the case that motivated this.
+- **Grants are refused once sealed.** Preserves "after sealing, ownership
+  is fixed and even SFD cannot move it". A lost key stays unrecoverable,
+  and remote provisioning only helps before sealing — which is the
+  cheaper half of the problem.
+- **A grant on a sealed drone wipes the recordings first.** Ownership
+  moves, but nothing written under the old owner survives it, so a
+  re-point cannot be used to read the past. Does not stop SFD reading the
+  *future*, and adds a destructive step to a support flow.
+
+### The half that needs no decision
+
+**An owner-signed re-claim** covers rotating a key you still hold, and
+involves SFD not at all: the grant is signed by the *current* owner
+rather than by SFD, and the drone verifies it against the owner key it
+already holds. Safe on a sealed drone by construction — only the current
+owner can authorise the change — and worth building whichever way the
+above goes. It just cannot help the case where the key is lost, which is
+the case that hurts.
+
+### What this does not solve
+
+The claiming window stays open. A drone that ships enabled but unowned
+can still be claimed by whoever plugs in first, because a drone with no
+owner has nobody to authorise a grant and no reason to demand one.
+Closing that needs the owner key written before the drone leaves — which
+is factory provisioning, not remote key exchange, and is a separate
+question about how drones are shipped.
+
 ## The enable ceremony
 
 Operator-facing: connect the drone, press **SFD enable**, wait. Everything below

@@ -307,11 +307,22 @@ never met an H743.
   it before the drone is sealed costs a re-claim; losing it after costs every
   log that drone will ever write. Whether the tool should nag about this, or
   refuse to seal a drone whose key has never been exported, is undecided.
-- **Remote key exchange (Phase 8).** Named by the operator as the third leg of
-  this arc, and the only one with no obvious construction: authorising an owner
-  key write without a person standing next to the drone. Every option so far
-  either reintroduces a server (against decision 10's serverless premise) or
-  needs a key the tool must not hold. **Genuinely open.**
+- **Remote key exchange — how far a signed grant reaches (Phase 8).**
+  **Designed 2026-09-07**, in docs/SECURITY.md "Remote key exchange": the
+  authorisation is a grant SFD signs offline with the key it already signs
+  firmware with, moved as a file, verified by `check_signature()` against the
+  bootloader's key. No server, and no key material in the tool — the serverless
+  premise survives intact.
+  The **open decision** is whether a grant works on a **sealed** drone. It is
+  what makes a lost owner key recoverable, and it is also what lets SFD
+  re-point any drone's ownership silently. Not a new power — SFD signs the
+  firmware and could ship a build that dumps logs — but a much cheaper one, and
+  cheapness is the difference between a promise and a policy. Three options are
+  written up: grants work when sealed, grants refused when sealed, or a grant on
+  a sealed drone wipes the existing recordings first. **Operator's call.**
+  An **owner-signed re-claim** — the current owner authorising a key rotation,
+  SFD not involved — is safe on a sealed drone by construction and is worth
+  building whichever way that goes.
 - **Encrypting the record while broadcasting the live signal (Phase 8).**
   `GLOBAL_POSITION_INT` streams in the clear on the same link. Encrypted logs
   and params are worth having, but they are not location privacy on their own,
