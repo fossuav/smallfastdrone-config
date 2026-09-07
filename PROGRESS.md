@@ -68,6 +68,20 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-07: **The pass-but-report-failure bug, found and fixed. It was never a timeout.**
+
+  Four instances by this point — `GENERATE_IDENTITY`, `SET_OWNER_KEY` twice, and `MAV_CMD_FLASH_BOOTLOADER` — all completing their work and reporting failure. The open question was whether the reply was late or lost, because only one of those is fixed by waiting longer.
+
+  **Measured: never sent.** Listening for forty seconds, nearly three times the client's allowance, produced no reply at all across three runs, while heartbeats carried on at 1 Hz with a one-second gap where the sector write stalled the board. So the board was neither stuck nor slow. Instrumenting the firmware with statustexts either side of the send showed it reaching the send with `ACCEPTED` — and those statustexts arriving while the reply did not.
+
+  **The cause is a silent discard by design.** `comm_send_lock()` sets `chan_discard` when `txspace()` is smaller than the message, and `comm_send_buffer()` then returns having sent nothing. `SECURE_COMMAND_REPLY` carries a 220-byte data field, needing ~240 bytes at the instant a second of backed-up telemetry is draining; a 54-byte statustext fits, and goes through the queued-and-retried statustext path besides. That is exactly why the instrumentation looked like the reply had been sent.
+
+  **Fixed in firmware** by waiting for room before replying, bounded at half a second against a handler that has already blocked far longer. Before: 0 replies in 40 s, three runs. After: a reply every time at 1.85 s. `MAV_CMD_FLASH_BOOTLOADER` got the same treatment — its failure was measured with a real write (no ack in 45 s), though the fix has **not** been re-observed under a stall, because the board now holds the bootloader being installed and takes the NO_CHANGE path; forcing a real write means manufacturing a different bootloader, which is not something to do casually to the sector the board boots from.
+
+  **And a tool-side defect that was ours alone.** The bootloader update explanation took the last statustext to arrive, so periodic arming-check narration became the reason: an update that succeeded was reported as failing *because the battery was low*. Prearm chatter is now excluded, and a drone that says "Flash OK" and then doesn't ack is no longer reported as a drone whose flash failed.
+
+  **The read-back rule stays.** Firmware without this fix will be out there for a long time, and the general lesson is bigger than these three: any MAVLink message sent straight after a flash write can be discarded for want of buffer space, silently. 405 → 407 unit.
+
 - 2026-09-07: **Log download, because a secured drone made it matter.** Encrypting logs meant the tool became the only convenient way to read one, so getting them off the drone stopped being a Phase 4 nicety.
 
   **The route changed, and the measurement is why** (decision 41). PLAN.md said `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`; it is now MAVLink FTP, which gives real filenames, is already hardware-proven here, and is the path the encrypted-log work already used. But plain `ReadFile` costs a round trip per 239 bytes — **28.7 KB/s on the bench board, thirty minutes for a 50 MB log**. The bottleneck is latency, not bandwidth, so `BurstReadFile` was added: the drone streams up to 2000 packets per request. Same file, same board, **420.6 KB/s** — a 14.7x improvement, and two minutes for that log. The accepted trade is that FTP needs a filesystem, so a board logging to internal dataflash is not covered.

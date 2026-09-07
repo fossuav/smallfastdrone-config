@@ -425,21 +425,40 @@ keeping it is the operator's job — which is a real burden the design places on
 them, not a detail. Losing it before the seal costs a re-claim; losing it after
 costs every log the drone will ever write.
 
-### Two write-once operations completed without answering
+### Why an operation that worked used to report failure
 
-`GENERATE_IDENTITY` and `SET_OWNER_KEY` both **rewrote their flash sector and
-delivered no verdict** inside the 15-second allowance. In every case a read
-immediately afterwards showed the write had landed — three times now, including
-a re-claim.
+`GENERATE_IDENTITY` and `SET_OWNER_KEY` rewrote their flash sector and
+delivered no verdict; so did `MAV_CMD_FLASH_BOOTLOADER`. **Diagnosed and fixed
+2026-09-07**, and the answer was not the one the timeout suggested.
 
-Whether the reply is late or lost is **not established** — a sector rewrite may
-simply exceed the allowance, or USB may go unserviced while flash is busy and
-the reply be dropped. Raising the timeout only helps in the first case.
+**It was never late — it was never sent.** Listening for forty seconds, nearly
+three times the client's allowance, produced no reply at all, while heartbeats
+carried on with a one-second gap where the sector write stalled the board.
+Instrumenting the firmware showed it reaching the send with `ACCEPTED`, and the
+statustexts on either side of that line arriving normally.
 
-So the rule for anything write-once here is **read back before concluding it
-failed**. It works either way, and the alternative is what the enable ceremony
-actually did on the bench: report "this drone isn't running SFD secure
-firmware" about a drone it had just keyed for good.
+The difference between those statustexts and the reply is **size and retry**.
+`comm_send_lock()` sets `chan_discard` when `txspace()` is smaller than the
+message, and `comm_send_buffer()` then returns without sending — silently, and
+by design. A `SECURE_COMMAND_REPLY` carries a 220-byte data field, so it needs
+roughly 240 bytes at the instant a second of backed-up telemetry is draining. A
+54-byte statustext fits, and is queued and retried besides.
+
+The firmware now waits for room before replying, bounded at half a second
+against a handler that has already blocked far longer. On the board the reply
+arrives every time, 1.85 s after the request — well inside the allowance that
+was never the problem. `MAV_CMD_FLASH_BOOTLOADER` got the same treatment; its
+failure was measured with a real write, but the fix has not been re-observed
+under a stall, because forcing one means manufacturing a different bootloader.
+
+**The rule stands anyway: read back before concluding a flash write failed.**
+Firmware without the fix will be out there for a long time, and a write-once
+operation is exactly where a caller must not trust silence.
+
+**The general lesson is bigger than these three.** Any MAVLink message sent
+straight after a flash write can be discarded for want of buffer space, and
+nothing reports it. If a new operation writes flash and then answers, it needs
+the same wait — or its caller needs to verify by reading.
 
 ### A log that is still open reads as 92 bytes
 
