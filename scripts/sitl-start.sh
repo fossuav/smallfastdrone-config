@@ -50,7 +50,12 @@ ln -s APM/scripts "$WORK/scripts"
 # layered on copter.parm. SERVO_BLH_BDMASK exists in SITL via the
 # blheli-sitl branch's HAL_WITH_BIDIR_DSHOT define (the telemetry itself is
 # a sim no-op, but the param + config path are exercisable).
-printf 'FRAME_CLASS 1\nFRAME_TYPE 1\nMOT_PWM_TYPE 6\nSERVO_BLH_BDMASK 15\nSERVO_BLH_POLES 14\n' >"$WORK/frame.parm"
+#
+# LOG_DISARMED so the sim actually records something. Without it a drone
+# only logs while armed, and the Logs view would have nothing to list -
+# an E2E for downloading recordings needs a recording to download, and
+# arming the sim to get one would be a far worse way to arrange that.
+printf 'FRAME_CLASS 1\nFRAME_TYPE 1\nMOT_PWM_TYPE 6\nSERVO_BLH_BDMASK 15\nSERVO_BLH_POLES 14\nLOG_DISARMED 1\n' >"$WORK/frame.parm"
 
 echo "Starting SITL in $WORK"
 # Wrapper subshell: loops arducopter on exit so PREFLIGHT_REBOOT_SHUTDOWN

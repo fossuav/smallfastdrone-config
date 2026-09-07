@@ -15,6 +15,7 @@
 
 import type { LogSource } from '../../src/workflow/logs'
 import { describe, expect, it } from 'vitest'
+import { MavFtpError } from '../../src/protocol/ftp'
 import { downloadFlightLog, formatSize, listFlightLogs } from '../../src/workflow/logs'
 
 // A drone's log directory as MavFtp reports it, including the things
@@ -25,9 +26,18 @@ import { downloadFlightLog, formatSize, listFlightLogs } from '../../src/workflo
 // which type-checked here and made listFlightLogs filter on a field the
 // real client never sets - so directories would have been listed as
 // flight logs, and these tests would have gone on passing.
-function source(entries: Array<{ name: string, size?: number, isDir?: boolean }>): LogSource {
+function source(
+  entries: Array<{ name: string, size?: number, isDir?: boolean }>,
+  only?: string,
+): LogSource {
   return {
-    listDirectory: async () => entries.map(e => ({ name: e.name, size: e.size, isDir: e.isDir ?? false })),
+    listDirectory: async (dir) => {
+      // A drone answers for the one directory it has and refuses the
+      // rest, which is what the search has to cope with.
+      if (only !== undefined && dir !== only)
+        throw new MavFtpError(10, undefined, 'FTP LIST_DIRECTORY failed: FileNotFound')
+      return entries.map(e => ({ name: e.name, size: e.size, isDir: e.isDir ?? false }))
+    },
     downloadFileBurst: async (path, onProgress) => {
       onProgress?.(10, 10)
       return new TextEncoder().encode(path)
@@ -61,6 +71,29 @@ describe('flight logs', () => {
   it('treats a size the drone did not give as zero', async () => {
     const logs = await listFlightLogs(source([{ name: '00000001.BIN' }]))
     expect(logs[0]?.size).toBe(0)
+  })
+
+  it('finds the logs wherever this drone keeps them', async () => {
+    // A real board answers for /APM/LOGS and SITL for /logs; neither
+    // knows about the other, and nothing on the wire says which.
+    for (const dir of ['/APM/LOGS', '/logs']) {
+      const logs = await listFlightLogs(source([{ name: '00000001.BIN', size: 9 }], dir))
+      expect(logs[0]?.path).toBe(`${dir}/00000001.BIN`)
+    }
+  })
+
+  it('reports a drone that answers for nowhere as empty', async () => {
+    expect(await listFlightLogs(source([{ name: '00000001.BIN', size: 9 }], '/nowhere'))).toEqual([])
+  })
+
+  it('does not report a link failure as an empty card', async () => {
+    // "Nothing recorded yet" has to mean it. A drone that never answered
+    // is a different thing and the operator can do something about it.
+    const broken: LogSource = {
+      listDirectory: async () => { throw new Error('FTP LIST_DIRECTORY timed out') },
+      downloadFileBurst: async () => new Uint8Array(),
+    }
+    await expect(listFlightLogs(broken)).rejects.toThrow(/timed out/)
   })
 
   it('reports an empty card as empty rather than failing', async () => {

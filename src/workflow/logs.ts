@@ -25,8 +25,21 @@
 // view wires it up.
 
 import type { FtpDirEntry } from '../protocol/ftp'
+import { MavFtpError } from '../protocol/ftp'
 
-const LOG_DIR = '/APM/LOGS'
+// The drone saying a directory isn't there. Distinguished from every
+// other failure on purpose: not-there means try the next candidate, and
+// anything else - a timeout, a dropped link - means we never found out
+// what the drone has, which must not be reported as "nothing".
+const FTP_FILE_NOT_FOUND = 10
+
+// Where a drone keeps its recordings, in the order worth trying. A real
+// board uses /APM/LOGS; SITL's filesystem root is its working directory,
+// so it uses /logs. Asking is not an option — nothing on the wire
+// reports the log directory — so this tries both and takes the first
+// that answers. A drone with no card fails both, which is the same
+// answer as an empty card and wants the same words.
+const LOG_DIRS = ['/APM/LOGS', '/logs'] as const
 // A log that is still being written reports the size it had at its last
 // sync, so it is offered but flagged rather than hidden — an operator
 // who just landed wants the flight they just flew.
@@ -52,11 +65,27 @@ export interface LogSource {
 // The drone's recordings, newest last — the names are sequential, so
 // sorting them is sorting by age.
 export async function listFlightLogs(source: LogSource): Promise<FlightLog[]> {
-  const entries = await source.listDirectory(LOG_DIR)
-  return entries
-    .filter(e => !e.isDir && LOG_NAME.test(e.name))
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(e => ({ name: e.name, path: `${LOG_DIR}/${e.name}`, size: e.size ?? 0 }))
+  for (const dir of LOG_DIRS) {
+    let entries
+    try {
+      entries = await source.listDirectory(dir)
+    }
+    catch (e) {
+      if (e instanceof MavFtpError && e.errCode === FTP_FILE_NOT_FOUND) {
+        // Not there. Try the next; only having tried all of them is this
+        // drone's answer "nothing".
+        continue
+      }
+      throw e
+    }
+    const logs = entries
+      .filter(e => !e.isDir && LOG_NAME.test(e.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(e => ({ name: e.name, path: `${dir}/${e.name}`, size: e.size ?? 0 }))
+    if (logs.length > 0)
+      return logs
+  }
+  return []
 }
 
 export async function downloadFlightLog(
