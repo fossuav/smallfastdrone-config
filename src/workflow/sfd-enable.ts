@@ -117,15 +117,28 @@ export async function runEnableCeremony(
       generated = true
     }
     catch (e) {
-      if (!(e instanceof SecureCommandError) || e.result !== MavResult.DENIED)
+      if (!(e instanceof SecureCommandError))
         throw translate(e)
-      // DENIED means armed, or an identity appeared between our read and
-      // the generate (another tool, a retry landing late). Only a read
-      // tells the two apart.
+      // A generate that reports failure may still have happened, so read
+      // before believing it. Generation is write-once and rewrites a
+      // flash sector: a reply that is lost or arrives late leaves the
+      // drone permanently keyed while the operator is told nothing
+      // happened, and told to go and install firmware. Seen on the bench
+      // 2026-09-07, where a timed-out generate had in fact written the
+      // key. DENIED is the other case, and means armed or that an
+      // identity appeared between our read and our write.
       const again = await readIdentity(client)
-      if (again === null)
-        throw new EnableError('armed', 'The drone is armed. Disarm it, then try again.')
+      if (again === null) {
+        throw e.result === MavResult.DENIED
+          ? new EnableError('armed', 'The drone is armed. Disarm it, then try again.')
+          : translate(e)
+      }
       expected = again
+      // A refusal means the firmware did not write; a timeout means we
+      // do not know that it didn't, and there was no identity a moment
+      // ago. Claiming this run keyed the drone is the honest reading,
+      // and it is the one an operator needs to hear.
+      generated = e.timedOut
     }
   }
 

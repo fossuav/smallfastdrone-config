@@ -147,6 +147,31 @@ describe('runEnableCeremony on a drone that already has an identity', () => {
     expect(outcome.generated).toBe(false)
     expect(outcome.identity.publicKey[0]).toBe(70)
   })
+
+  it('reads back after a generate that timed out, because it may have landed', async () => {
+    // Observed on the bench 2026-09-07. Generation is write-once and
+    // rewrites a flash sector; the write happened and the reply did not
+    // arrive, so the drone was permanently keyed while the operator was
+    // told to go and install firmware. A timeout is not evidence that
+    // nothing happened.
+    const drone = new FakeDrone()
+    drone.generateIdentity = async () => {
+      drone.stored = identityWithKey(90)
+      throw new SecureCommandError(SECURE_OP.GENERATE_IDENTITY, null, 'no answer', true)
+    }
+    const outcome = await runEnableCeremony(drone, ctx())
+    expect(outcome.identity.publicKey[0]).toBe(90)
+    // and it says the drone was keyed, which is the consequential half
+    expect(outcome.generated).toBe(true)
+  })
+
+  it('still fails a timed-out generate when the drone really has no identity', async () => {
+    const drone = new FakeDrone()
+    drone.generateIdentity = async () => {
+      throw new SecureCommandError(SECURE_OP.GENERATE_IDENTITY, null, 'no answer', true)
+    }
+    await expect(runEnableCeremony(drone, ctx())).rejects.toMatchObject({ reason: 'unsupported' })
+  })
 })
 
 describe('runEnableCeremony stops with a reason', () => {
