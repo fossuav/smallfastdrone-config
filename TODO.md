@@ -380,6 +380,22 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 ---
 
+- `[firmware]` **A successful bootloader update was reported as a failure.**
+  On the bench 2026-09-07 the drone narrated `Erasing` / `Flashing
+  bootloader.bin @08000000` / `Flash OK` and the new bootloader was
+  demonstrably installed (the owner key region answers), yet
+  `bun run bench:bootloader` reported
+  `FAILED: ... PreArm: Battery 1 low voltage failsafe`.
+  Two things are wrong and only one is understood.
+  `describeBootloaderUpdateFailure()` takes the **last** STATUSTEXT as the
+  explanation, so unrelated periodic prearm narration becomes the reason —
+  that part is clear. What is not established is why the run concluded
+  failure at all: the `COMMAND_ACK` for `MAV_CMD_FLASH_BOOTLOADER` was
+  either non-ACCEPTED or never arrived, and the bench script does not
+  print it. **Capture the ack before fixing**, rather than filtering the
+  message and calling it done — this is the same shape as the enable
+  timeout bug, where success was reported as failure.
+
 - `[tooling]` **`ArtifactKind` has drifted from the doc.**
   `src/security/uploader.ts` declares `'firmware' | 'lua-applet' | 'mission'`;
   docs/SECURITY.md's upload-seam section claims `param_blob` and
