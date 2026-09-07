@@ -357,6 +357,23 @@ break the raw-offset download path. The tag therefore covers the header only,
 so the ephemeral key and board id cannot be swapped, and the body is
 confidentiality-only. Do not describe an encrypted log as authenticated.
 
+### What has been verified, and what has not
+
+The envelope is **round-tripped against pymonocypher**, an independent
+implementation, at the firmware's own offsets — the same posture F5 got. A body
+encrypted in the ragged 64-byte chunks the logging io thread actually produces
+decrypts to its input, and a different owner key, a different drone identity, a
+tampered board id, a swapped ephemeral key and altered flags are each refused.
+
+**Not bench-run.** Nothing here has met a board: no log has been written on
+hardware, the throughput figure below is scaled from a host measurement, and
+`SET_OWNER_KEY` has never rewritten a real bootloader sector.
+
+One trap worth recording, because a test hit it and passed by accident.
+Flipping a low bit of byte 0 of an X25519 private key does **not** produce a
+different key — clamping discards those bits. A negative test that "proves" a
+wrong key is refused that way proves nothing.
+
 ### Cost, measured where it could be
 
 `crypto_xchacha20_ctr` from the vendored monocypher benchmarks at **~1.0 GB/s
@@ -722,8 +739,9 @@ Ordered by dependency, not priority. **Status 2026-09-07: F1–F10 have all land
 | F9 | Confirm x25519 isn't compiled out of the FC monocypher build | `AP_CheckFirmware/monocypher.{h,cpp}` | ✅ **Resolved 2026-08-28.** Nothing trims it — the only conditionals in `monocypher.cpp` are BLAKE2 unrolling and Argon2. It was merely linker-GC'd for lack of a caller; F4's `crypto_x25519_public_key()` now links (`nm` on the SmallFastDronev1 ELF shows it). F5 can rely on `crypto_key_exchange`. |
 | F10 | Re-key on-FC self-encryption | `AP_Scripting/lua_scripts.cpp` — `encrypt_all_scripts_in_dir()` | ✅ **Landed 2026-09-05** with F5. The drone makes an ephemeral pair from its TRNG, agrees a key against its **own** identity public key, wipes the private half immediately and writes only the public one — so a script the drone encrypts for itself is readable by itself and nothing else. Refused outright on a drone with no identity, rather than falling back to something weaker. |
 | F11 | Owner key region in `.apsec_data` | `AP_CheckFirmware.h` — `struct ap_owner_data`; accessors in `AP_CheckFirmware_secure_command.cpp` | ✅ **Landed 2026-09-07** (`8689b1d3f1`, **not pushed**). `find_owner_key()` (nullptr on a bootloader predating the region), `owner_key_is_set()`, write-once `set_owner_key()`. Placed after `ap_identity_data`, which is what makes it invisible to `make_secure_bl.py`. **Additionally refuses without an identity**, since the outbound agreement authenticates with the identity private key — that puts the ceremony's ordering in firmware, not only in the tool. No wipe after writing: the key is public, and wiping would imply otherwise. **Verified on a built signed TBS_LUCID_H7 bootloader:** region present at offset 368 of the secure data and all-zero; each of the three region signatures occurs **exactly once** in the image (the F7 lesson about unique markers); and `make_secure_bl.py --omit-ardupilot-keys` changes exactly 32 bytes, all inside `public_key[0]`, reaching neither region. Signed SmallFastDronev1 copter builds clean. **Not bench-run** — nothing writes the region until F12. |
-| F12 | `SET_OWNER_KEY` secure command | `AP_CheckFirmware_secure_command.cpp` | ⏳ **Not started, and the one with a real open question.** Write-once plus physical presence is the proposed authorisation, because the reasoning that makes `GENERATE_IDENTITY` safe unsigned does not carry: pre-empting an identity gains an attacker nothing, pre-empting an owner key gains them every future log. Vendor-private op `0x53464403`. See "Provisioning is the attack surface", and PLAN.md's open question on claiming an unowned drone. |
-| F13 | Encrypted log writer | `AP_Logger_File.cpp` — `_open_log()` and `_io_timer()` | ⏳ **Not started.** `.sfx` header written and fsync'd at file open; body encrypted with `crypto_xchacha20_ctr()` carrying the counter across calls. Same length in as out, so the ring-buffer drain, the partial-write handling and the fsync-boundary truncation all stand. Listing and download need no change — `_get_log_time()` uses the filesystem mtime and `get_log_data()` is a raw `lseek` + `read`. Nonces from `hal.util->get_true_random_vals()`, never `rand()`. |
+| F12 | `SET_OWNER_KEY` secure command | `AP_CheckFirmware_secure_command.cpp` | ✅ **Landed 2026-09-07** (`f279ba4341`). `SET_OWNER_KEY` (`0x53464403`) and `GET_OWNER_KEY` (`0x53464404`), both unsigned, both replying with UID + the key **read back out of flash** so an ACCEPTED is already evidence of what landed. Every refusal carries a status byte — armed / no region / already owned / no identity — because the remedies differ and a bare DENIED makes the caller guess; the same lesson `GET_IDENTITY` learned. **Still the one with a real open question.** Write-once plus physical presence is the proposed authorisation, because the reasoning that makes `GENERATE_IDENTITY` safe unsigned does not carry: pre-empting an identity gains an attacker nothing, pre-empting an owner key gains them every future log. Vendor-private op `0x53464403`. See "Provisioning is the attack surface", and PLAN.md's open question on claiming an unowned drone. |
+| F13 | Encrypted log writer | `AP_Logger_File.cpp`, and the envelope in `AP_CheckFirmware_outbound.cpp` | ✅ **Landed 2026-09-07** (`0d908dd9ba` envelope, `bcb268939c` logger, `4a4559c8ad` reader). Header written and fsync'd before any log data, and the open **fails** if it does not land — half a file cannot be read at all. Body encrypted **in place in the write buffer, in whole 64-byte blocks**: in place so a short write costs nothing (what the filesystem declines stays encrypted and the next pass carries on), whole blocks because the counter is a block counter. The sub-64-byte remainder waits, and is discarded at close — which is what `stop_logging()` already does to it, so this costs at most 63 bytes more than before. Listing and download are **unchanged**, as predicted. File backend only; block backends are on internal flash, already behind the seal. |
+| — | `Tools/scripts/signing/decrypt_sfx.py` | ✅ **Landed 2026-09-07** (`4a4559c8ad`). The owner-side reader, and the independent check on the construction — see the F13 verification note below. |
 | F14 | Encrypted parameter endpoint | `GCS_FTP.cpp`, `AP_Param` | ⏸ **Deferred by operator decision 2026-09-07** — logs first, params when there is a reason. The rest of the outbound arc does not wait on it. When taken up: `@PARAM/param.sfx` alongside `@PARAM/param.pck`, and withdrawal of the cleartext endpoint (and of `PARAM_REQUEST_LIST`, and of the mission / rally / fence protocols) once an owner key is set. **Scope is an open product decision** — everything, or only the location-bearing subset; the first makes the drone unreadable by any other ground station. |
 
 ## Tool work list
