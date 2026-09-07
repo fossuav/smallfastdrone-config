@@ -95,7 +95,12 @@ export async function flashRomfsBootloader(
       // carries the only actionable detail.
       if (msg.msgid === MSGID_STATUSTEXT) {
         const text = String((msg.data as { text: string }).text).replace(/\0.*$/, '')
-        if (text.length > 0)
+        // Arming-check narration is periodic and has nothing to do with
+        // this command, but it arrives during it and used to become the
+        // reported reason: a bootloader update that had in fact
+        // succeeded was reported as failing because the battery was
+        // low. Seen on the bench 2026-09-07.
+        if (text.length > 0 && !/^(?:PreArm|Arm)\s*:/i.test(text))
           messages.push(text)
         return
       }
@@ -138,6 +143,12 @@ export async function flashRomfsBootloader(
 // cases where it said nothing.
 export function describeBootloaderUpdateFailure(outcome: BootloaderUpdateOutcome): string {
   const said = outcome.messages[outcome.messages.length - 1]
+  // The drone saying "Flash OK" and then not acking is a real case, and
+  // it is not a failure of the flash — reporting its own success back as
+  // the reason it failed is the worst of both. Older firmware drops the
+  // ack when its transmit buffer is full; ours waits for room now.
+  if (/flash ok/i.test(said ?? ''))
+    return 'Your drone flashed its startup software but didn\'t confirm it. Reconnect and check its startup software version before trying again.'
   if (said)
     return `Your drone couldn't update its startup software: ${said}`
   switch (outcome.reason) {

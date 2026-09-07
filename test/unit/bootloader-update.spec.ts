@@ -104,6 +104,36 @@ describe('flashRomfsBootloader', () => {
     expect(describeBootloaderUpdateFailure(outcome)).toContain('Bootloader not signed')
   })
 
+  it('never blames arming-check narration that happened to arrive', async () => {
+    // On the bench 2026-09-07 a bootloader update that succeeded was
+    // reported as failing because the battery was low. Prearm messages
+    // are periodic and have nothing to do with this command.
+    const link = new FakeLink()
+    const pending = flashRomfsBootloader(link.send, link.subscribe, SYSID, COMPID)
+    await Promise.resolve()
+    link.say('Bootloader not signed')
+    link.say('PreArm: Battery 1 low voltage failsafe')
+    link.ack(MavResult.FAILED)
+
+    const outcome = await pending
+    expect(outcome.messages).not.toContain('PreArm: Battery 1 low voltage failsafe')
+    expect(describeBootloaderUpdateFailure(outcome)).toContain('Bootloader not signed')
+  })
+
+  it('does not report a flash the drone said was fine as a failed flash', async () => {
+    // The drone completed the write and its ack was dropped, which older
+    // firmware does when its transmit buffer is full. Saying the update
+    // failed, quoting the drone's own "Flash OK", is the worst answer.
+    const link = new FakeLink()
+    const pending = flashRomfsBootloader(link.send, link.subscribe, SYSID, COMPID, 20)
+    await Promise.resolve()
+    link.say('Flash OK')
+
+    const outcome = await pending
+    expect(outcome.ok).toBe(false)
+    expect(describeBootloaderUpdateFailure(outcome)).toMatch(/didn't confirm it/)
+  })
+
   it('distinguishes a firmware that has no such command', async () => {
     const link = new FakeLink()
     const pending = flashRomfsBootloader(link.send, link.subscribe, SYSID, COMPID)
