@@ -138,6 +138,14 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   means that retry is load-bearing rather than belt-and-braces, and a bench
   check that cross-validates the two counts will flap.
 
+- `[firmware]` **`create_nonce()` takes nonces from `rand()`.**
+  `AP_Scripting/lua_scripts.cpp` fills all 24 nonce bytes from `rand()`. Safe
+  today only because every `.lxa` carries a unique ephemeral key, so a repeat
+  costs nothing — but it becomes keystream reuse the moment any long-lived key
+  exists, which Phase 8's owner keypair introduces.
+  `hal.util->get_true_random_vals()` is what F4 already uses. Fix with or
+  before F13.
+
 ## 3D / visuals
 
 - `[3d]` **Drop the motor "donuts" in the copter graphic.** The ring indicators
@@ -371,6 +379,13 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   generalise from one).
 
 ---
+
+- `[tooling]` **`ArtifactKind` has drifted from the doc.**
+  `src/security/uploader.ts` declares `'firmware' | 'lua-applet' | 'mission'`;
+  docs/SECURITY.md's upload-seam section claims `param_blob` and
+  `esc_firmware`. The doc is ahead of the code. Reconcile when Phase 8 adds an
+  encrypted param blob, or sooner — a seam that lies about what routes through
+  it is worse than one that is merely incomplete.
 
 ## Inbox — to triage
 

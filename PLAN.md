@@ -46,11 +46,14 @@ See [docs/UX.md](docs/UX.md) for the operator-first design playbook.
 | 7 | Source of truth | Live FC | Tool is a viewer/editor. Snapshots are deliberate operator exports, not background sync. |
 | 8 | Fleet model | Single-drone session | Matches betaflight-configurator UX; cheapest. |
 | 9 | Workflow primitive | Pluggable wizards (recipes subsumed as degenerate wizards) | Single runtime, single contract. Wizards are independent units declared via manifest, bundled at build time, surfaced in a wizard library. Engine choice (Lua-on-FC / log-replay / desktop-pure) is internal — runtime picks per FC capability, operator never picks. Log-replay engine guarantees universal coverage for FCs without scripting. Pluggability enables a commercial gating seam (`locked: true` flag) for paid Pro wizards. Recipes become wizards with `engines: [desktop]`, one step, no live state. Bringup workflow becomes a meta-wizard that chains sub-wizards. See [docs/WIZARDS.md](docs/WIZARDS.md). |
-| 10 | Crypto in this tool | **None — the tool orchestrates, never holds** | **Revised 2026-08-27** (was "tool-side seam only; real crypto exists elsewhere"). The seam stays, but SFD enablement is now in scope rather than deferred. The rule tightened rather than loosened: all cryptography lives on the FC or in SFD's offline build tooling, and the tool holds no key material of any kind — no master secret, no signing key, no per-drone key. It moves opaque blobs and drives ceremonies. If the tool ever needs to hold a key, the design has drifted. See [docs/SECURITY.md](docs/SECURITY.md). |
+| 10 | Crypto in this tool | **No SFD key material, ever; one brokered operator key for outbound artefacts** | **Revised 2026-09-07** (was "None — the tool orchestrates, never holds", itself a 2026-08-27 tightening of "tool-side seam only"). The rule held for as long as every encrypted thing ran *inbound* — SFD to the drone, decrypted on the FC. Encrypting params and logs runs *outbound*, and an outbound artefact needs a reader that is not the drone. So the rule is now: the tool holds **no SFD master secret, no signing key and no drone private key**, and it never will; it may broker the **operator's own** keypair for decrypting what their drone sends them, and where the platform allows that key must live outside the tool's storage (decision 37). This is a real loosening and is recorded as one rather than argued away — it is the price of the customer-facing half of the security story. See [docs/SECURITY.md](docs/SECURITY.md) "Outbound confidentiality". |
 | 32 | SFD enablement — key architecture | **Drone-generated per-drone X25519 identity; ephemeral-static ECDH per applet** | The customer's laptop is untrusted, so any key we *deliver* to a drone has passed through the customer's hands and they can decrypt with it. The only construction satisfying "customer presses SFD enable" + "customer cannot decrypt" + "no server" is one where the drone generates its own keypair and never emits the private half. Per-drone (not per-batch) so a compromise contains to one airframe. `crypto_key_exchange`/`crypto_x25519` and a hardware TRNG are already present in the firmware tree (confirmed to link, F9), so this is wiring, not new crypto. Applet ephemeral keys are *derived* from an SFD master secret + drone identity + applet content hash, making every shipped artefact reproducible without a key database — which is what lets the design stay serverless. |
 | 33 | SFD enablement — key custody | **Build time, via `--omit-ardupilot-keys`** | SFD builds bootloaders carrying only SFD's public signing key. The board therefore trusts nothing else from first boot, with no runtime key installation in any customer flow. This supersedes an earlier sketch that had the configurator `SET_PUBLIC_KEYS` then `REMOVE_PUBLIC_KEYS` at enable time — that would have required the customer's tool to hold an SFD *private* key, which is impossible. It also moots the upstream `all_zero_keys() → check_signature() == true` fail-open trap, since the key array is never mutated. `SET_PUBLIC_KEYS`/`REMOVE_PUBLIC_KEYS` are compiled out of SFD builds as dead attack surface, and an empty key set fails closed — both under `AP_CHECK_FIRMWARE_FIXED_KEYS`, set from the `SmallFastDronev1` hwdef (F2 + F3, landed 2026-08-28). |
 | 34 | SFD enablement — the exit ceremony | **Unlock → mass erase → vanilla reflash → param restore; never SFD-signed** | STM32 RDP 1→0 mass-erases; that is silicon, not a choice, and it is also the security property (no state exists where the customer holds an unlocked chip *and* a live key). The unlock deliberately requires no SFD signature so a customer can exit unaided — that is what makes it an escape hatch rather than a hostage situation, and it is the crux of the GPLv3 §6 anti-tivoization position (engineering reading; needs a lawyer's eye). **Lock and unlock are `BRD_OPTIONS` bits acting on next boot** (operator decision 2026-08-28) — the same shape ArduPilot already uses for flash write protection (bits 4/5/6), so neither needs a bespoke secure command, and next-boot semantics sequence the ceremony for free. The parameter route needs a drone that still boots, so the DfuSe `READ_UNPROTECT` command remains the fallback for a dead board — letting the ST bootloader do the transition rather than hand-writing option bytes, where a wrong value sets the irreversible Level 2. RDP Level 2 must never be used — irreversible, and it would remove the exit entirely. Accepted risk: RDP1 is not a secure element and is vulnerable to fault injection with lab equipment; accepted by operator decision 2026-08-27. |
 | 35 | SFD enablement — identity commands | **Unsigned and sessionless; vendor-private op numbers; posture from hwdef** | Upstream `SECURE_COMMAND` requires a signature from a key in the bootloader, which on an SFD build is SFD's alone — a key the tool must not hold (decision 10). So `GENERATE_IDENTITY` / `GET_IDENTITY` bypass `check_signature()` by design, which is safe because generation is write-once and both replies are public data. Op numbers are `0x53464401` / `0x53464402` as C++ constants rather than XML additions, so the MAVLink submodule and the tool's `mavlink-mappings` stay untouched. The lockdown posture (`AP_CHECK_FIRMWARE_FIXED_KEYS`: F2 + F3, and the identity commands) is a hwdef define on `SmallFastDronev1`, not a waf flag, so a product build cannot forget it. See [docs/SECURITY.md](docs/SECURITY.md) "Why the identity commands are unsigned". |
+| 36 | Encrypting params + logs | **A second keypair, mirrored — the drone identity runs inbound, an owner keypair runs outbound** | Operator decision 2026-09-07. The identity keypair cannot do this job: its public half is in every `sfd-identity/1` file, so "encrypted to the drone" restricts nobody. The drone therefore also carries the **operator's public key**, written once at enable time, and encrypts params and logs so only the owner's private key opens them. One artefact mixes two X25519 agreements — an ephemeral against the owner key for confidentiality, the drone's identity key against the owner key for authenticity — which gets both properties from primitives already linked, with no session handshake, no replay window and no server. The access control is then not a protocol at all: an owned drone simply stops offering the cleartext endpoint. See [docs/SECURITY.md](docs/SECURITY.md). |
+| 37 | Owner key custody | **Open — WebAuthn PRF preferred, non-extractable WebCrypto as fallback** | The key must survive a reinstalled laptop and must not sit in the tool's own storage, or decision 10 has been loosened further than intended. WebAuthn's PRF extension keeps the private half in an authenticator and hands the page a derived secret per session; a non-extractable WebCrypto key in IndexedDB is easier but dies with the browser profile; an exported key file is the honest worst case. **Decide before T8**, because everything outbound waits on it. |
+| 38 | Cleartext withdrawal scope | **Open — everything, or the location-bearing subset** | Withdrawing cleartext params makes an owned drone unreadable by Mission Planner and QGC, which is either the point or an unacceptable cost depending on who the customer is. The middle setting withholds only missions, rally points, fences and coordinate-bearing parameters, so a third-party GCS still flies the aircraft but cannot read where it has been sent. **Product decision, needed before F14.** |
 | 11 | Package manager + runtime | Bun | Fast install, native TS execution, single tool. Vite still does the bundling. |
 | 12 | Lint + format | `@antfu/eslint-config` (ESLint flat config + stylistic formatter) | De facto standard in modern Vue/Vite/Nuxt ecosystem. Includes Vue Style Guide rules, TS rules, and a built-in formatter (no Prettier needed). Maintained by a Vue core team member. **Revised from earlier Biome choice** — Biome's Vue SFC support is not first-class in 2026. See [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md). |
 | 13 | HTTPS dev | vite-plugin-mkcert | Required for WebSerial in some browsers and WebAuthn later. |
@@ -224,6 +227,48 @@ Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md)
 
 **Testing:** protocol layer against fixtures + SITL where the firmware supports it; both ceremonies are **bench-hardware verified** on TBS_LUCID_H7 — same posture as the firmware-flashing paths, since neither RDP nor DFU exists in SITL. Bootloader changes get hardware-verified every time.
 
+### Phase 8 — Outbound confidentiality (params + logs to the owner keypair)
+
+**Designed 2026-09-07, not started.** Phase 7 gave the drone an identity so SFD
+could send it things nobody else can read. This phase is the mirror: the drone
+sends *out* things nobody but the owner can read. Architecture in
+[docs/SECURITY.md](docs/SECURITY.md) "Outbound confidentiality"; decisions 36–38.
+
+- **Owner keypair** — generated by the operator, public half written once into
+  the drone's `.apsec_data` during the enable ceremony (F11, F12, T8, T9). The
+  private half never touches the drone and, per decision 37, should not touch
+  the tool's storage either.
+- **Encrypted logs at rest** (F13) — the `.sfx` envelope over a seekable
+  XChaCha20 stream. **Take this first:** it is the cheapest item and it closes
+  the only hole the seal does not, since the SD card sits outside F6 entirely.
+  Neither `LOG_REQUEST_LIST` nor `LOG_REQUEST_DATA` changes.
+- **Encrypted parameter endpoint** (F14) — **deferred by operator decision
+  2026-09-07.** Params are the least valuable and most expensive third of this:
+  the storage region is internal flash, so F6's seal already read-protects them
+  on a sealed drone, and withdrawing cleartext access is a product decision
+  (38) nobody needs to take yet. The envelope and the owner keypair are
+  designed to carry them when it is wanted; nothing else waits on it.
+- **Outbound decryption in the tool** (T10) — the point at which decision 10's
+  loosening becomes real code. One module, taking an agreement from the custody
+  layer rather than a raw key.
+- **Remote key exchange** — the third leg the operator named, and the hard one.
+  It is the case where the operator is *not* physically present, so presence
+  cannot be what authorises writing the owner key, and nothing else currently
+  can. Design before building; it may need a decision row of its own.
+
+**Ordering is load-bearing, again:** the owner key is written in the same
+sitting as the identity and the seal, because an enabled but unowned drone can
+be claimed by whoever plugs in first.
+
+**Done when:** An operator can enable a drone, hold the only key that reads its
+logs, download a flight and open it — and a second laptop, with the same tool
+and the same drone, cannot.
+
+**Testing:** the envelope round-trips against pymonocypher at the firmware's own
+offsets, the way F5 was proven. The logging path needs a **bench** run — the
+throughput estimate in SECURITY.md is scaled from a host measurement and has
+never met an H743.
+
 ## Open architectural questions / risks
 
 **Resolved (kept for the record):**
@@ -245,6 +290,25 @@ Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md)
 - **Drone identity capture (Phase 7).** Does the identity file (UID + public key) get captured by SFD at order/manufacture time, or exported by the customer from the configurator and sent in? Doesn't change the crypto at all, but decides whether "SFD enable" is one click or a two-step with a wait in the middle — i.e. whether the flow has a support ticket in it. **Open; needs an operator decision before the enable wizard's UX is designed.**
 - **GPLv3 §6 anti-tivoization (Phase 7).** Locked bootloader + signed-only firmware is the shape that clause addresses. The exit ceremony looks like the answer — the customer can install modified GPL firmware on hardware they own, losing only the commercial applets. That is an engineering reading, **not a legal opinion**, and wants a qualified check before a product line depends on it.
 - **RDP is STM32H7-only** in the current firmware implementation (`stm32_flash_read_protect_flash()` is `#if defined(STM32H7)`). Accepted — SmallFastDronev1 is H7 — but it caps which boards can ever be SFD-enabled. Revisit if the board range widens.
+- **Owner key custody (Phase 8).** WebAuthn PRF, non-extractable WebCrypto, or
+  an exported key file — decision 37, and everything outbound waits on it. The
+  question underneath it is what happens when an operator loses the key: the
+  answer today is the exit ceremony, i.e. a mass erase, which is a harsh
+  recovery for a lost password.
+- **Claiming an unowned drone (Phase 8, firmware).** Write-once plus physical
+  presence is the proposed authorisation for `SET_OWNER_KEY`, which leaves a
+  window: a drone that ships enabled but unowned belongs to whoever plugs in
+  first. Closing it properly needs either factory provisioning or the remote
+  key exchange below. **Decide before F12.**
+- **Remote key exchange (Phase 8).** Named by the operator as the third leg of
+  this arc, and the only one with no obvious construction: authorising an owner
+  key write without a person standing next to the drone. Every option so far
+  either reintroduces a server (against decision 10's serverless premise) or
+  needs a key the tool must not hold. **Genuinely open.**
+- **Encrypting the record while broadcasting the live signal (Phase 8).**
+  `GLOBAL_POSITION_INT` streams in the clear on the same link. Encrypted logs
+  and params are worth having, but they are not location privacy on their own,
+  and the product copy must not imply otherwise.
 - **Fork delta in `AP_CheckFirmware` + bootloader (Phase 7).** F1–F7 in docs/SECURITY.md cannot be upstreamed; SFD-specific lockdown is the point. `AP_CheckFirmware` is small and stable so rebase burden is low, but the bootloader is the one component where a bug bricks boards with no recovery but BOOT0 + DFU. Bench-verify bootloader changes on real hardware every time.
 
 ## SITL test environment (quick reference for the next session)
