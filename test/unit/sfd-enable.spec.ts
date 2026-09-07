@@ -76,6 +76,31 @@ class FakeDrone implements IdentityClient {
     return this.stored
   }
 
+  // The outbound half. An unclaimed drone answers null, which is the
+  // ordinary state of one nobody has enabled.
+  storedOwner: Uint8Array | null = null
+  ownerSealed = false
+  ownerSetThrows: Error | null = null
+
+  getOwnerKey = async (): Promise<Uint8Array | null> => {
+    this.calls.push('get-owner')
+    this.refuseIfNotSfd(SECURE_OP.GET_OWNER_KEY)
+    return this.storedOwner
+  }
+
+  setOwnerKey = async (publicKey: Uint8Array): Promise<Uint8Array> => {
+    this.calls.push('set-owner')
+    this.refuseIfNotSfd(SECURE_OP.SET_OWNER_KEY)
+    if (this.ownerSetThrows)
+      throw this.ownerSetThrows
+    if (this.storedOwner !== null && this.ownerSealed)
+      throw new SecureCommandError(SECURE_OP.SET_OWNER_KEY, MavResult.DENIED, 'sealed')
+    if (this.stored === null)
+      throw new SecureCommandError(SECURE_OP.SET_OWNER_KEY, MavResult.DENIED, 'no identity')
+    this.storedOwner = publicKey
+    return publicKey
+  }
+
   private refuseIfNotSfd(op: number): void {
     if (this.unsupported)
       throw new SecureCommandError(op, MavResult.UNSUPPORTED, 'unsupported')
@@ -100,7 +125,7 @@ describe('runEnableCeremony on a fresh drone', () => {
     const phases: EnablePhase[] = []
     const outcome = await runEnableCeremony(drone, ctx(), p => phases.push(p))
 
-    expect(drone.calls).toEqual(['get', 'generate', 'get'])
+    expect(drone.calls).toEqual(['get', 'generate', 'get', 'get-owner'])
     expect(phases).toEqual(['checking', 'generating', 'verifying', 'ready'])
     expect(outcome.generated).toBe(true)
     expect(outcome.file.uid).toBe(UID_HEX)
@@ -124,7 +149,7 @@ describe('runEnableCeremony on a drone that already has an identity', () => {
     const phases: EnablePhase[] = []
     const outcome = await runEnableCeremony(drone, ctx(), p => phases.push(p))
 
-    expect(drone.calls).toEqual(['get', 'get'])
+    expect(drone.calls).toEqual(['get', 'get', 'get-owner'])
     expect(phases).toEqual(['checking', 'verifying', 'ready'])
     expect(outcome.generated).toBe(false)
     expect(outcome.identity.publicKey[0]).toBe(50)
@@ -146,6 +171,71 @@ describe('runEnableCeremony on a drone that already has an identity', () => {
     const outcome = await runEnableCeremony(drone, ctx())
     expect(outcome.generated).toBe(false)
     expect(outcome.identity.publicKey[0]).toBe(70)
+  })
+
+  it('still finishes on firmware that has no owner commands at all', async () => {
+    // F1-F4 without F11/F12 - which is every drone enabled before the
+    // outbound arc landed. The identity half is what was asked for and
+    // it succeeded, so the ceremony must not fail on the owner read.
+    const drone = new FakeDrone()
+    drone.getOwnerKey = async () => {
+      throw new SecureCommandError(SECURE_OP.GET_OWNER_KEY, MavResult.UNSUPPORTED, 'unsupported')
+    }
+    const outcome = await runEnableCeremony(drone, ctx())
+    expect(outcome.ownerPublicKey).toBeNull()
+    expect(outcome.claimed).toBe(false)
+  })
+
+  it('leaves the drone unclaimed when no owner key is loaded', async () => {
+    const drone = new FakeDrone()
+    const outcome = await runEnableCeremony(drone, ctx())
+    expect(outcome.claimed).toBe(false)
+    expect(outcome.ownerPublicKey).toBeNull()
+    expect(drone.calls).not.toContain('set-owner')
+  })
+
+  it('claims the drone when an owner key is loaded, and verifies by reading back', async () => {
+    const drone = new FakeDrone()
+    const owner = new Uint8Array(32).fill(11)
+    const phases: string[] = []
+    const outcome = await runEnableCeremony(drone, ctx({ ownerPublicKey: owner }), p => phases.push(p))
+    expect(outcome.claimed).toBe(true)
+    expect(outcome.ownerPublicKey).toEqual(owner)
+    expect(phases).toContain('claiming')
+    // the last owner call is a fresh read, not the write's own answer
+    expect(drone.calls[drone.calls.length - 1]).toBe('get-owner')
+  })
+
+  it('does not rewrite an owner key that is already the right one', async () => {
+    const drone = new FakeDrone()
+    const owner = new Uint8Array(32).fill(11)
+    drone.storedOwner = owner
+    const outcome = await runEnableCeremony(drone, ctx({ ownerPublicKey: owner }))
+    expect(outcome.claimed).toBe(false)
+    expect(drone.calls).not.toContain('set-owner')
+  })
+
+  it('reads back after a claim that timed out, because it may have landed', async () => {
+    // The same trap as the identity generate, and seen on the bench for
+    // this operation too: the sector was rewritten and no verdict came.
+    const drone = new FakeDrone()
+    const owner = new Uint8Array(32).fill(12)
+    drone.setOwnerKey = async (publicKey: Uint8Array) => {
+      drone.storedOwner = publicKey
+      throw new SecureCommandError(SECURE_OP.SET_OWNER_KEY, null, 'no answer', true)
+    }
+    const outcome = await runEnableCeremony(drone, ctx({ ownerPublicKey: owner }))
+    expect(outcome.claimed).toBe(true)
+    expect(outcome.ownerPublicKey).toEqual(owner)
+  })
+
+  it('reports a refused claim as a claim refusal, not as unsupported firmware', async () => {
+    const drone = new FakeDrone()
+    drone.storedOwner = new Uint8Array(32).fill(1)
+    drone.ownerSealed = true
+    await expect(runEnableCeremony(drone, ctx({ ownerPublicKey: new Uint8Array(32).fill(2) })))
+      .rejects
+      .toMatchObject({ reason: 'claim-refused' })
   })
 
   it('reads back after a generate that timed out, because it may have landed', async () => {

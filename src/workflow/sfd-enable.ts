@@ -47,10 +47,14 @@ import {
 export interface IdentityClient {
   getIdentity: () => Promise<DroneIdentity | null>
   generateIdentity: () => Promise<DroneIdentity>
+  // The outbound half: who the drone encrypts its logs to. Null when
+  // nobody has claimed it.
+  getOwnerKey: () => Promise<Uint8Array | null>
+  setOwnerKey: (publicKey: Uint8Array) => Promise<Uint8Array>
 }
 
 // Where the ceremony has got to, for the UI's status copy.
-export type EnablePhase = 'checking' | 'generating' | 'verifying' | 'ready'
+export type EnablePhase = 'checking' | 'generating' | 'verifying' | 'claiming' | 'ready'
 
 export interface EnableContext {
   // APJ_BOARD_ID from the session, or null if the drone hasn't said.
@@ -60,6 +64,10 @@ export interface EnableContext {
   fcUid: string | null
   // ISO 8601 timestamp for the file, injected so this stays pure.
   now: () => string
+  // The owner's public key, if the operator has one loaded. Absent means
+  // do the identity half only, which is what a drone that is being
+  // enabled without an owner yet gets.
+  ownerPublicKey?: Uint8Array
 }
 
 // Why a ceremony stopped, for the UI to pick the right next step:
@@ -71,7 +79,7 @@ export interface EnableContext {
 //                 upgrade. Distinct from `unsupported` because the fix is
 //                 to update the bootloader, not the firmware
 //   failed      — the drone reported an error; its message is in `message`
-export type EnableFailure = 'unsupported' | 'armed' | 'mismatch' | 'no-region' | 'failed'
+export type EnableFailure = 'unsupported' | 'armed' | 'mismatch' | 'no-region' | 'failed' | 'claim-refused'
 
 export class EnableError extends Error {
   constructor(public readonly reason: EnableFailure, message: string) {
@@ -90,6 +98,76 @@ export interface EnableOutcome {
   // already had one and the ceremony read it instead. Either way the
   // identity is verified and the outcome is the same.
   generated: boolean
+  // The owner key the drone now holds, verified by a fresh read, or null
+  // when no owner key was supplied and the drone had none.
+  ownerPublicKey: Uint8Array | null
+  // True when this run wrote that owner key.
+  claimed: boolean
+}
+
+// Tell the drone who owns it, after its identity is verified and never
+// before: the outbound key agreement authenticates with the identity
+// key, so an owner key on a drone without one buys nothing. The firmware
+// enforces that too, and this ordering is what keeps the tool from
+// having to be trusted about it.
+//
+// Skipped entirely when the operator has no owner key loaded, which is a
+// perfectly good state — the drone gets an identity now and an owner
+// later, and it can be claimed right up until it is sealed.
+async function claimStep(
+  client: IdentityClient,
+  ctx: EnableContext,
+  onPhase: (phase: EnablePhase) => void,
+): Promise<{ ownerPublicKey: Uint8Array | null, claimed: boolean }> {
+  let existing: Uint8Array | null = null
+  try {
+    existing = await client.getOwnerKey()
+  }
+  catch (e) {
+    // Firmware older than the owner commands cannot answer this. With no
+    // owner key to write that is not worth failing the whole ceremony
+    // over: the identity half succeeded, and an identity is what the
+    // operator asked for. With one to write, it is a real refusal.
+    if (ctx.ownerPublicKey === undefined)
+      return { ownerPublicKey: null, claimed: false }
+    if (e instanceof SecureCommandError)
+      throw new EnableError('claim-refused', e.message)
+    throw translate(e)
+  }
+  if (ctx.ownerPublicKey === undefined)
+    return { ownerPublicKey: existing, claimed: false }
+  if (existing !== null && sameKey(existing, ctx.ownerPublicKey))
+    return { ownerPublicKey: existing, claimed: false }
+
+  onPhase('claiming')
+  try {
+    await client.setOwnerKey(ctx.ownerPublicKey)
+  }
+  catch (e) {
+    // The same trap the identity generate had: this rewrites a flash
+    // sector and has been seen to complete the write and answer nothing.
+    // Reading is what settles it; only a read that still disagrees is a
+    // failure. See docs/SECURITY.md.
+    const after = await client.getOwnerKey().catch(() => null)
+    if (after === null || !sameKey(after, ctx.ownerPublicKey)) {
+      if (e instanceof SecureCommandError)
+        throw new EnableError('claim-refused', e.message)
+      throw translate(e)
+    }
+  }
+
+  // Verified by a fresh read, for the same reason the identity is: what
+  // the drone will actually encrypt to is what is in its flash, not what
+  // a reply said.
+  const readBack = await client.getOwnerKey()
+  if (readBack === null || !sameKey(readBack, ctx.ownerPublicKey)) {
+    throw new EnableError('mismatch', 'The drone didn\'t keep the owner key it was given. Don\'t secure this drone — reconnect and try again.')
+  }
+  return { ownerPublicKey: readBack, claimed: true }
+}
+
+function sameKey(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i])
 }
 
 // Run the identity half of the ceremony. Resolves with a verified
@@ -154,11 +232,15 @@ export async function runEnableCeremony(
   if (!identityMatchesFc(readBack, ctx.fcUid))
     throw new EnableError('mismatch', 'The identity doesn\'t belong to the connected drone. Reconnect and try again.')
 
+  const { ownerPublicKey, claimed } = await claimStep(client, ctx, onPhase)
+
   const file = buildIdentityFile(readBack, ctx.boardId, ctx.now())
   onPhase('ready')
   return {
     identity: readBack,
     file,
+    ownerPublicKey,
+    claimed,
     text: serializeIdentityFile(file),
     filename: identityFilename(file),
     generated,

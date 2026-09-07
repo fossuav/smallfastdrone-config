@@ -44,6 +44,8 @@ import { MavResult } from 'mavlink-mappings/dist/lib/common'
 export const SECURE_OP = {
   GENERATE_IDENTITY: 0x53464401,
   GET_IDENTITY: 0x53464402,
+  SET_OWNER_KEY: 0x53464403,
+  GET_OWNER_KEY: 0x53464404,
 } as const
 
 export const IDENTITY_UID_LEN = 12
@@ -60,6 +62,20 @@ export const IDENTITY_KEY_LEN = 32
 export const IDENTITY_STATUS = {
   NOT_SET: 1,
   NO_REGION: 2,
+} as const
+
+// Why an owner key operation failed. Values 1 and 2 line up with the
+// identity statuses but mean their own thing, so they are named
+// separately rather than shared. ALREADY_SET is no longer sent — an
+// unsealed drone accepts a re-claim (PLAN.md decision 39) — and is kept
+// because an older firmware still sends it.
+export const OWNER_STATUS = {
+  NOT_SET: 1,
+  NO_REGION: 2,
+  ARMED: 3,
+  ALREADY_SET: 4,
+  NO_IDENTITY: 5,
+  SEALED: 6,
 } as const
 const IDENTITY_REPLY_LEN = IDENTITY_UID_LEN + IDENTITY_KEY_LEN
 
@@ -156,6 +172,46 @@ export class SecureCommandClient {
     return decodeIdentity(SECURE_OP.GENERATE_IDENTITY, resp.data)
   }
 
+  // Read the owner key a drone encrypts its outbound artefacts to.
+  // Resolves null when the drone has none — an unclaimed drone, which is
+  // the ordinary state of one nobody has enabled — so the caller decides
+  // whether to claim it.
+  async getOwnerKey(): Promise<Uint8Array | null> {
+    const resp = await this.request(SECURE_OP.GET_OWNER_KEY, EMPTY, GET_TIMEOUT_MS)
+    if (resp.result === MavResult.FAILED) {
+      if (resp.data.byteLength === 1 && resp.data[0] === OWNER_STATUS.NO_REGION) {
+        throw new SecureCommandError(
+          SECURE_OP.GET_OWNER_KEY,
+          resp.result,
+          'This drone can\'t be given an owner yet — its startup software is older than the drone\'s firmware. Update it from the Firmware page, then try again.',
+          false,
+          true,
+        )
+      }
+      return null
+    }
+    if (resp.result !== MavResult.ACCEPTED)
+      throw resultError(SECURE_OP.GET_OWNER_KEY, resp.result)
+    return decodeIdentity(SECURE_OP.GET_OWNER_KEY, resp.data).publicKey
+  }
+
+  // Claim the drone for an owner. The firmware builds the reply from the
+  // key it just wrote to flash, so this resolves a read-back rather than
+  // an echo. Gets the long allowance: it rewrites the bootloader sector.
+  //
+  // A refusal carries a status byte saying which refusal it is, and the
+  // messages differ because the remedies do — disarm, generate an
+  // identity, update the startup software, or accept that a sealed drone
+  // is claimed for good.
+  async setOwnerKey(publicKey: Uint8Array): Promise<Uint8Array> {
+    if (publicKey.byteLength !== IDENTITY_KEY_LEN)
+      throw new SecureCommandError(SECURE_OP.SET_OWNER_KEY, null, `An owner key must be ${IDENTITY_KEY_LEN} bytes; this one is ${publicKey.byteLength}.`)
+    const resp = await this.request(SECURE_OP.SET_OWNER_KEY, publicKey, GENERATE_TIMEOUT_MS)
+    if (resp.result !== MavResult.ACCEPTED)
+      throw ownerRefusal(resp.result, resp.data)
+    return decodeIdentity(SECURE_OP.SET_OWNER_KEY, resp.data).publicKey
+  }
+
   // Send one unsigned SECURE_COMMAND and await the reply that echoes its
   // sequence and operation. Resolves with whatever verdict the drone
   // gave — interpreting it is the caller's job — and rejects on timeout
@@ -226,6 +282,23 @@ export function decodeIdentity(operation: number, data: Uint8Array): DroneIdenti
     uid: data.slice(0, IDENTITY_UID_LEN),
     publicKey: data.slice(IDENTITY_UID_LEN, IDENTITY_REPLY_LEN),
   }
+}
+
+// Turn a refused claim into an error an operator can act on. Each status
+// has its own remedy, and a caller given a bare DENIED has to guess
+// between four quite different situations.
+function ownerRefusal(result: MavResult, data: Uint8Array): SecureCommandError {
+  const status = data.byteLength === 1 ? (data[0] ?? 0) : 0
+  const message = {
+    [OWNER_STATUS.ARMED]: 'The drone is armed. Disarm it, then try again.',
+    [OWNER_STATUS.NO_IDENTITY]: 'This drone needs its own identity first. Run the enable step, then try again.',
+    [OWNER_STATUS.NO_REGION]: 'This drone can\'t be given an owner yet — its startup software is older than the drone\'s firmware. Update it from the Firmware page, then try again.',
+    [OWNER_STATUS.SEALED]: 'This drone is already secured for another owner, and a secured drone can\'t be given a new one.',
+    [OWNER_STATUS.ALREADY_SET]: 'This drone already has an owner.',
+  }[status]
+  if (message !== undefined)
+    return new SecureCommandError(SECURE_OP.SET_OWNER_KEY, result, message)
+  return resultError(SECURE_OP.SET_OWNER_KEY, result)
 }
 
 // Turn a non-ACCEPTED verdict into an error whose message an operator
