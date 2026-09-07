@@ -19,9 +19,15 @@ import { downloadFlightLog, formatSize, listFlightLogs } from '../../src/workflo
 
 // A drone's log directory as MavFtp reports it, including the things
 // that are not flight logs.
-function source(entries: Array<{ name: string, size: number, isDirectory?: boolean }>): LogSource {
+//
+// The entry shape is MavFtp's `FtpDirEntry` and not a convenient
+// approximation of it. An earlier version of this file invented one,
+// which type-checked here and made listFlightLogs filter on a field the
+// real client never sets - so directories would have been listed as
+// flight logs, and these tests would have gone on passing.
+function source(entries: Array<{ name: string, size?: number, isDir?: boolean }>): LogSource {
   return {
-    listDirectory: async () => entries.map(e => ({ ...e, isDirectory: e.isDirectory ?? false })),
+    listDirectory: async () => entries.map(e => ({ name: e.name, size: e.size, isDir: e.isDir ?? false })),
     downloadFileBurst: async (path, onProgress) => {
       onProgress?.(10, 10)
       return new TextEncoder().encode(path)
@@ -35,11 +41,26 @@ describe('flight logs', () => {
       { name: '00000010.BIN', size: 20 },
       { name: 'LASTLOG.TXT', size: 3 },
       { name: '00000002.BIN', size: 10 },
-      { name: 'subdir', size: 0, isDirectory: true },
+      { name: 'subdir', isDir: true },
       { name: 'notes.bin.txt', size: 1 },
     ]))
     expect(logs.map(l => l.name)).toEqual(['00000002.BIN', '00000010.BIN'])
     expect(logs[0]?.path).toBe('/APM/LOGS/00000002.BIN')
+  })
+
+  it('never mistakes a directory for a flight log', async () => {
+    // A directory named like a log is the case the invented interface
+    // would have got wrong, silently.
+    const logs = await listFlightLogs(source([
+      { name: '00000009.BIN', isDir: true },
+      { name: '00000008.BIN', size: 4 },
+    ]))
+    expect(logs.map(l => l.name)).toEqual(['00000008.BIN'])
+  })
+
+  it('treats a size the drone did not give as zero', async () => {
+    const logs = await listFlightLogs(source([{ name: '00000001.BIN' }]))
+    expect(logs[0]?.size).toBe(0)
   })
 
   it('reports an empty card as empty rather than failing', async () => {

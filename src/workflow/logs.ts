@@ -24,6 +24,8 @@
 // Pure of Vue and of the session store so it can be unit-tested; the
 // view wires it up.
 
+import type { FtpDirEntry } from '../protocol/ftp'
+
 const LOG_DIR = '/APM/LOGS'
 // A log that is still being written reports the size it had at its last
 // sync, so it is offered but flagged rather than hidden — an operator
@@ -34,13 +36,16 @@ export interface FlightLog {
   name: string
   path: string
   // Bytes as the drone's filesystem reports them, which lags behind for
-  // a log still open.
+  // a log still open. Zero when the drone didn't say.
   size: number
 }
 
-// What the view needs from the drone. MavFtp satisfies it.
+// What the view needs from the drone. MavFtp satisfies it, and the entry
+// shape is MavFtp's own rather than a restatement: an interface that
+// merely resembles it type-checks against a fake and then filters on a
+// field the real client never sets.
 export interface LogSource {
-  listDirectory: (path: string) => Promise<Array<{ name: string, size: number, isDirectory: boolean }>>
+  listDirectory: (path: string) => Promise<FtpDirEntry[]>
   downloadFileBurst: (path: string, onProgress?: (received: number, total: number) => void) => Promise<Uint8Array>
 }
 
@@ -49,9 +54,9 @@ export interface LogSource {
 export async function listFlightLogs(source: LogSource): Promise<FlightLog[]> {
   const entries = await source.listDirectory(LOG_DIR)
   return entries
-    .filter(e => !e.isDirectory && LOG_NAME.test(e.name))
+    .filter(e => !e.isDir && LOG_NAME.test(e.name))
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map(e => ({ name: e.name, path: `${LOG_DIR}/${e.name}`, size: e.size }))
+    .map(e => ({ name: e.name, path: `${LOG_DIR}/${e.name}`, size: e.size ?? 0 }))
 }
 
 export async function downloadFlightLog(
