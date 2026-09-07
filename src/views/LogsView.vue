@@ -14,17 +14,26 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Flight logs. Pulling them off the drone is Phase 4 and isn't here yet;
-// what is here is the half that already has something to do, because a
-// secured drone writes recordings nobody can read without the operator's
-// key — including every other log tool. An operator who copies one off
-// the card has a file that looks like nothing, and this is where it
-// becomes a flight log again.
+// Flight logs: take them off the drone, and turn a secured drone's
+// recordings back into readable ones.
+//
+// The two halves are separate on purpose. A recording can be opened
+// without the drone present — an operator who pulled the card, or who
+// was sent a file — and the drone can be emptied without any key,
+// because an unsecured drone's logs need none.
 
+import type { FlightLog } from '../workflow/logs'
 import { computed, onMounted, ref } from 'vue'
-import { openSfx, parseSfxHeader, SFX_FLAG_STREAM } from '../protocol/sfx'
+import { MavFtp } from '../protocol/ftp'
+import { isSfx, openSfx, parseSfxHeader, SFX_FLAG_STREAM } from '../protocol/sfx'
+import { useSessionStore } from '../stores/session'
 import { parseIdentityFile } from '../workflow/drone-identity'
+import { downloadFlightLog, formatSize, listFlightLogs } from '../workflow/logs'
 import { useOwnerKey } from '../workflow/use-owner-key'
+
+const COMP_ID_AUTOPILOT = 1
+
+const session = useSessionStore()
 
 const { ownerKey, ownerLabel, ownerError, loadOwnerKey, importOwnerKeyFile, forgetOwnerKey } = useOwnerKey()
 
@@ -44,8 +53,66 @@ const opened = ref<{ name: string, bytes: Uint8Array } | null>(null)
 
 const ready = computed(() => ownerKey.value !== null && identityPublicKey.value !== null)
 
+// What's on the drone.
+const logs = ref<FlightLog[]>([])
+const listState = ref<'idle' | 'listing' | 'listed' | 'failed'>('idle')
+const listError = ref<string | null>(null)
+const fetching = ref<string | null>(null)
+const progress = ref(0)
+
+function ftp(): MavFtp | null {
+  if (!session.connected || session.sysid === null)
+    return null
+  return new MavFtp(session.sendMessage, session.subscribeMessages, session.sysid, COMP_ID_AUTOPILOT)
+}
+
+async function refresh(): Promise<void> {
+  const client = ftp()
+  if (!client)
+    return
+  listState.value = 'listing'
+  listError.value = null
+  try {
+    logs.value = await listFlightLogs(client)
+    listState.value = 'listed'
+  }
+  catch (e) {
+    listState.value = 'failed'
+    listError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+// Fetch one and treat it exactly as a file the operator picked, so a
+// scrambled recording off the drone and one off the card go through the
+// same path.
+async function fetchLog(log: FlightLog): Promise<void> {
+  const client = ftp()
+  if (!client)
+    return
+  fetching.value = log.name
+  progress.value = 0
+  status.value = 'working'
+  message.value = null
+  opened.value = null
+  try {
+    const bytes = await downloadFlightLog(client, log, (received, total) => {
+      progress.value = total > 0 ? Math.round((received / total) * 100) : 0
+    })
+    await handleRecording(bytes, log.name)
+  }
+  catch (e) {
+    status.value = 'failed'
+    message.value = e instanceof Error ? e.message : String(e)
+  }
+  finally {
+    fetching.value = null
+  }
+}
+
 onMounted(() => {
   void loadOwnerKey()
+  if (session.connected)
+    void refresh()
 })
 
 async function chooseKey(event: Event): Promise<void> {
@@ -82,17 +149,34 @@ async function chooseRecording(event: Event): Promise<void> {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (recordingInput.value)
     recordingInput.value.value = ''
-  if (!file || ownerKey.value === null || identityPublicKey.value === null)
+  if (!file)
     return
-
   status.value = 'working'
   message.value = null
   opened.value = null
+  await handleRecording(new Uint8Array(await file.arrayBuffer()), file.name)
+}
+
+// One path for both sources. A recording that isn't scrambled needs no
+// key and is handed straight back — an operator with an ordinary drone
+// should not be asked for one.
+async function handleRecording(bytes: Uint8Array, filename: string): Promise<void> {
+  const stem = filename.replace(/\.[^.]*$/, '') || 'flight'
   try {
-    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (!isSfx(bytes)) {
+      opened.value = { name: stem, bytes }
+      message.value = 'This recording isn\'t scrambled, so there was nothing to unlock.'
+      status.value = 'done'
+      return
+    }
+    if (ownerKey.value === null || identityPublicKey.value === null) {
+      status.value = 'failed'
+      message.value = 'This recording is scrambled. Load your key and the drone\'s identity file to open it.'
+      return
+    }
     const header = parseSfxHeader(bytes)
     const { plaintext } = await openSfx(bytes, ownerKey.value, identityPublicKey.value)
-    opened.value = { name: file.name.replace(/\.[^.]*$/, '') || 'flight', bytes: plaintext }
+    opened.value = { name: stem, bytes: plaintext }
     message.value = (header.flags & SFX_FLAG_STREAM) === SFX_FLAG_STREAM
       ? 'Opened. The recording is readable but not tamper-proof — it can\'t be, because a drone that loses power mid-flight never gets to sign off.'
       : 'Opened.'
@@ -129,9 +213,67 @@ function save(): void {
     </template>
 
     <p class="text-muted">
-      A secured drone scrambles what it records, so only you can read it. Copy a recording off
-      the drone's card and open it here to get an ordinary flight log back.
+      Take flight recordings off your drone. A secured drone scrambles what it records, so only
+      you can read it — load your key below and it comes back as an ordinary flight log.
     </p>
+
+    <!-- On the drone. Needs no key: an unsecured drone's recordings need
+         none, and a secured one's are unscrambled after the download. -->
+    <div class="border-default mt-4 rounded-lg border p-3">
+      <div class="flex flex-wrap items-center gap-3">
+        <UIcon name="i-lucide-hard-drive" class="text-primary size-5 shrink-0" />
+        <p class="text-highlighted min-w-40 flex-1 text-sm font-medium">
+          On your drone
+        </p>
+        <UButton
+          :disabled="!session.connected || listState === 'listing'"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+          icon="i-lucide-refresh-cw"
+          @click="refresh"
+        >
+          {{ listState === 'listing' ? 'Looking…' : 'Look again' }}
+        </UButton>
+      </div>
+
+      <p v-if="!session.connected" class="text-dimmed mt-2 text-xs">
+        Connect to your drone to see what it has recorded.
+      </p>
+      <UAlert
+        v-else-if="listState === 'failed'"
+        class="mt-2"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        :description="listError ?? ''"
+      />
+      <p v-else-if="listState === 'listed' && logs.length === 0" class="text-dimmed mt-2 text-xs">
+        Nothing recorded yet — or there's no card in the drone.
+      </p>
+
+      <ul v-else-if="logs.length > 0" class="divide-default mt-2 divide-y">
+        <li v-for="log in logs" :key="log.name" class="flex items-center gap-3 py-2">
+          <UIcon name="i-lucide-file-text" class="text-dimmed size-4 shrink-0" />
+          <span class="text-highlighted flex-1 font-mono text-sm">{{ log.name }}</span>
+          <span class="text-muted text-xs">{{ formatSize(log.size) }}</span>
+          <UButton
+            :disabled="fetching !== null"
+            :loading="fetching === log.name"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            icon="i-lucide-download"
+            @click="fetchLog(log)"
+          >
+            {{ fetching === log.name ? `${progress}%` : 'Get it' }}
+          </UButton>
+        </li>
+      </ul>
+      <p v-if="logs.length > 0" class="text-dimmed mt-2 text-xs">
+        A recording still being written shows the size it had when it was last saved.
+      </p>
+    </div>
 
     <div class="mt-4 space-y-3">
       <!-- Both halves are needed, and the reason differs, so they are
@@ -187,16 +329,16 @@ function save(): void {
       <UAlert v-if="identityError" color="error" variant="subtle" icon="i-lucide-triangle-alert" :description="identityError" />
 
       <UButton
-        :disabled="!ready || status === 'working'"
+        :disabled="status === 'working'"
         color="primary"
         icon="i-lucide-file-search"
         @click="recordingInput?.click()"
       >
-        Open a recording
+        Open a recording from a file
       </UButton>
       <input ref="recordingInput" type="file" class="hidden" @change="chooseRecording">
       <p v-if="!ready" class="text-dimmed text-xs">
-        Load both files above first.
+        A scrambled recording needs both files above. One that isn't scrambled opens without them.
       </p>
 
       <UAlert
@@ -219,7 +361,8 @@ function save(): void {
     </div>
 
     <p class="text-dimmed mt-6 text-xs">
-      Downloading recordings from the drone itself is still to come.
+      Flight logs are read with a log analysis tool — this page gets them off the drone and
+      makes them readable.
     </p>
   </UCard>
 </template>
