@@ -169,12 +169,30 @@ async function main(): Promise<void> {
 
   console.log(`[claim] claiming with ${hex(ownerPub)}`)
   // 15s, as GENERATE gets: this rewrites the bootloader sector
-  const set = await client.request(OP_SET_OWNER_KEY, ownerPub, 15_000)
-  if (set.result !== MavResult.ACCEPTED) {
-    console.log(`[claim] refused — ${describe(set.result, set.data)}`)
-    process.exit(1)
+  let stored: Uint8Array
+  try {
+    const set = await client.request(OP_SET_OWNER_KEY, ownerPub, 15_000)
+    if (set.result !== MavResult.ACCEPTED) {
+      console.log(`[claim] refused — ${describe(set.result, set.data)}`)
+      process.exit(1)
+    }
+    stored = set.data.subarray(12, 44)
   }
-  const stored = set.data.subarray(12, 44)
+  catch {
+    // A write-once operation that does not answer has not necessarily
+    // failed. This rewrites a flash sector, and on the bench 2026-09-07
+    // both this and GENERATE_IDENTITY completed the write and delivered
+    // no verdict - whether the reply was late or lost is not known. Read
+    // before reporting, because "it failed" about a drone that is now
+    // permanently claimed is the worst answer available.
+    console.log('[claim] no verdict — reading back, because the write may still have landed')
+    const after = await client.request(OP_GET_OWNER_KEY, new Uint8Array(0), 5000)
+    if (after.result !== MavResult.ACCEPTED) {
+      console.log(`[claim] not claimed — ${describe(after.result, after.data)}`)
+      process.exit(1)
+    }
+    stored = after.data.subarray(12, 44)
+  }
   console.log(`[claim] stored     ${hex(stored)}`)
   // the reply is read back out of flash, so comparing it is a real check
   console.log(hex(stored) === hex(ownerPub)
