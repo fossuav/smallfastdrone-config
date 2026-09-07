@@ -63,7 +63,34 @@ const params = useParamsStore()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
-const { phase, busy, error, failure, outcome, run } = useSfdEnable()
+const {
+  phase,
+  busy,
+  error,
+  failure,
+  outcome,
+  run,
+  ownerKey,
+  ownerLabel,
+  ownerError,
+  loadOwnerKey,
+  importOwnerKeyFile,
+  forgetOwnerKey,
+} = useSfdEnable()
+
+// The operator's key file, picked from disk. Only the private half's
+// import matters; the file is never kept, because it is their backup and
+// the only copy that outlives this browser.
+const ownerInput = ref<HTMLInputElement | null>(null)
+
+async function chooseOwnerKey(event: Event): Promise<void> {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file)
+    return
+  await importOwnerKeyFile(await file.text())
+  if (ownerInput.value)
+    ownerInput.value.value = ''
+}
 const { reconnectAndReload } = useReconnect()
 
 const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
@@ -91,6 +118,8 @@ const SEAL_PHRASE = 'SEAL'
 onMounted(() => {
   if (session.connected && params.count === 0 && !params.loading)
     void params.load()
+  // A key imported in an earlier session is still held by the browser.
+  void loadOwnerKey()
 })
 
 const boardOptions = computed(() => params.params.get(LOCK_PARAM)?.value)
@@ -299,6 +328,57 @@ function cancel(): void {
         title="This drone already has its identity"
         description="It was given one before. You can save its file again — the identity itself won't change."
       />
+      <!-- Who gets to read this drone's flight data. Optional on purpose:
+           a drone can take its identity now and an owner later, right up
+           until it is secured. -->
+      <div class="border-default space-y-3 rounded-lg border p-4">
+        <div class="flex items-start gap-3">
+          <UIcon name="i-lucide-key-round" class="text-primary mt-0.5 size-5 shrink-0" />
+          <div class="space-y-1">
+            <p class="text-highlighted text-sm font-medium">
+              Who can read this drone's flight data
+            </p>
+            <p class="text-muted text-sm">
+              Load your key and this drone will scramble its flight recordings so only you can read them.
+              Without one it records normally, and you can come back to this any time before you secure it.
+            </p>
+          </div>
+        </div>
+
+        <div v-if="ownerKey" class="flex flex-wrap items-center gap-3">
+          <UBadge color="success" variant="subtle" icon="i-lucide-check">
+            Your key is loaded
+          </UBadge>
+          <span class="text-muted font-mono text-xs">{{ ownerLabel }}</span>
+          <UButton color="neutral" variant="ghost" size="xs" @click="forgetOwnerKey">
+            Use a different one
+          </UButton>
+        </div>
+        <div v-else class="space-y-2">
+          <UButton color="neutral" variant="subtle" icon="i-lucide-folder-open" @click="ownerInput?.click()">
+            Load your key
+          </UButton>
+          <p class="text-dimmed text-xs">
+            Keep that file safe. It is the only copy, and once this drone is secured, nothing else will ever
+            read what it records.
+          </p>
+        </div>
+        <input
+          ref="ownerInput"
+          type="file"
+          accept="application/json,.json"
+          class="hidden"
+          @change="chooseOwnerKey"
+        >
+        <UAlert
+          v-if="ownerError"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          :description="ownerError"
+        />
+      </div>
+
       <UButton color="primary" icon="i-lucide-shield-plus" @click="run">
         {{ situation === 'secured' ? 'Give this drone its identity' : 'Get its identity file' }}
       </UButton>
@@ -308,9 +388,11 @@ function cancel(): void {
       <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
       {{ phase === 'generating'
         ? 'Your drone is making its identity — don\'t unplug it.'
-        : phase === 'verifying'
-          ? 'Checking it came back the same…'
-          : 'Asking your drone…' }}
+        : phase === 'claiming'
+          ? 'Telling your drone who to scramble its recordings for — don\'t unplug it.'
+          : phase === 'verifying'
+            ? 'Checking it came back the same…'
+            : 'Asking your drone…' }}
     </div>
 
     <!-- Stopped. The ceremony names the reason; a missing identity region

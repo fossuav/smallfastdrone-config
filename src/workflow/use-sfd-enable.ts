@@ -21,10 +21,13 @@
 // needs a DOM anchor — and the outcome carries the text and filename
 // ready for it.
 
+import type { OwnerKey } from './owner-key'
 import type { EnableFailure, EnableOutcome, EnablePhase } from './sfd-enable'
 import { computed, ref } from 'vue'
 import { SecureCommandClient } from '../protocol/secure-command'
 import { useSessionStore } from '../stores/session'
+import { importOwnerKey, ownerFingerprint, parseOwnerKeyFile } from './owner-key'
+import { indexedDbOwnerKeyStore } from './owner-key-store'
 import { EnableError, runEnableCeremony } from './sfd-enable'
 
 // MAV_COMP_ID_AUTOPILOT1 — the FC's component id.
@@ -37,7 +40,47 @@ export function useSfdEnable() {
   const error = ref<string | null>(null)
   const failure = ref<EnableFailure | null>(null)
   const outcome = ref<EnableOutcome | null>(null)
-  const busy = computed(() => phase.value === 'checking' || phase.value === 'generating' || phase.value === 'verifying')
+  const busy = computed(() => phase.value === 'checking' || phase.value === 'generating' || phase.value === 'verifying' || phase.value === 'claiming')
+
+  // The owner key, if the operator has loaded one. Held by the browser
+  // and unreadable by us — see owner-key.ts. Absent is a normal state:
+  // the drone gets its identity now and an owner whenever one is ready.
+  const ownerKey = ref<OwnerKey | null>(null)
+  const ownerLabel = ref<string | null>(null)
+  const ownerError = ref<string | null>(null)
+  const store = indexedDbOwnerKeyStore()
+
+  async function remember(key: OwnerKey | null): Promise<void> {
+    ownerKey.value = key
+    ownerLabel.value = key === null ? null : await ownerFingerprint(key.publicKey)
+  }
+
+  // Pick up a key imported in an earlier session.
+  async function loadOwnerKey(): Promise<void> {
+    await remember(await store.load())
+  }
+
+  // Take the operator's key file, hand the private half to the browser,
+  // and keep it for next time. The file itself is never stored — it is
+  // the operator's backup and the only copy that survives this browser.
+  async function importOwnerKeyFile(text: string): Promise<boolean> {
+    ownerError.value = null
+    try {
+      const key = await importOwnerKey(parseOwnerKeyFile(text))
+      await store.save(key)
+      await remember(key)
+      return true
+    }
+    catch (e) {
+      ownerError.value = e instanceof Error ? e.message : String(e)
+      return false
+    }
+  }
+
+  async function forgetOwnerKey(): Promise<void> {
+    await store.forget()
+    await remember(null)
+  }
 
   function reset(): void {
     phase.value = 'idle'
@@ -69,7 +112,12 @@ export function useSfdEnable() {
     try {
       outcome.value = await runEnableCeremony(
         client,
-        { boardId: session.boardId, fcUid: session.fcUid, now: () => new Date().toISOString() },
+        {
+          boardId: session.boardId,
+          fcUid: session.fcUid,
+          now: () => new Date().toISOString(),
+          ownerPublicKey: ownerKey.value?.publicKey,
+        },
         (p) => { phase.value = p },
       )
       return outcome.value
@@ -82,5 +130,19 @@ export function useSfdEnable() {
     }
   }
 
-  return { phase, busy, error, failure, outcome, run, reset }
+  return {
+    phase,
+    busy,
+    error,
+    failure,
+    outcome,
+    run,
+    reset,
+    ownerKey,
+    ownerLabel,
+    ownerError,
+    loadOwnerKey,
+    importOwnerKeyFile,
+    forgetOwnerKey,
+  }
 }
