@@ -21,6 +21,7 @@
 // needs a DOM anchor — and the outcome carries the text and filename
 // ready for it.
 
+import type { OwnerGrant } from '../protocol/owner-grant'
 import type { EnableFailure, EnableOutcome, EnablePhase } from './sfd-enable'
 import { computed, ref } from 'vue'
 import { SecureCommandClient } from '../protocol/secure-command'
@@ -44,6 +45,50 @@ export function useSfdEnable() {
   // and unreadable by us — see owner-key.ts. Absent is a normal state:
   // the drone gets its identity now and an owner whenever one is ready.
   const { ownerKey, ownerLabel, ownerError, loadOwnerKey, importOwnerKeyFile, forgetOwnerKey } = useOwnerKey()
+  const grantError = ref<string | null>(null)
+
+  /*
+    Apply an ownership grant SFD signed.
+
+    The tool cannot verify one — the key that checks the signature is in
+    the drone's bootloader — so it relays the bytes untouched and lets
+    the drone judge. What the tool reads is only what the operator needs
+    shown, which is the key it would install.
+
+    Verified by a read-back, and a write that answers nothing is read
+    back before being called a failure: the same trap as the identity
+    generate, on the same flash path.
+  */
+  async function applyGrant(grant: OwnerGrant): Promise<boolean> {
+    grantError.value = null
+    if (!session.connected || session.sysid === null) {
+      grantError.value = 'Connect to your drone first.'
+      return false
+    }
+    const client = new SecureCommandClient(
+      session.sendMessage,
+      session.subscribeMessages,
+      session.sysid,
+      COMP_ID_AUTOPILOT,
+    )
+    const holds = (key: Uint8Array | null): boolean =>
+      key !== null && key.length === grant.publicKey.length && key.every((b, i) => b === grant.publicKey[i])
+
+    try {
+      await client.setOwnerGrant(grant.bytes)
+    }
+    catch (e) {
+      if (!holds(await client.getOwnerKey().catch(() => null))) {
+        grantError.value = e instanceof Error ? e.message : String(e)
+        return false
+      }
+    }
+    if (!holds(await client.getOwnerKey().catch(() => null))) {
+      grantError.value = 'The drone didn\'t keep the owner it was given. Reconnect and try again.'
+      return false
+    }
+    return true
+  }
 
   function reset(): void {
     phase.value = 'idle'
@@ -94,6 +139,8 @@ export function useSfdEnable() {
   }
 
   return {
+    applyGrant,
+    grantError,
     phase,
     busy,
     error,

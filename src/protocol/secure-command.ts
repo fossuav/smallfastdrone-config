@@ -46,6 +46,7 @@ export const SECURE_OP = {
   GET_IDENTITY: 0x53464402,
   SET_OWNER_KEY: 0x53464403,
   GET_OWNER_KEY: 0x53464404,
+  SET_OWNER_GRANT: 0x53464405,
 } as const
 
 export const IDENTITY_UID_LEN = 12
@@ -76,6 +77,10 @@ export const OWNER_STATUS = {
   ALREADY_SET: 4,
   NO_IDENTITY: 5,
   SEALED: 6,
+  BAD_GRANT: 7,
+  OTHER_DRONE: 8,
+  UNSIGNED: 9,
+  STALE: 10,
 } as const
 const IDENTITY_REPLY_LEN = IDENTITY_UID_LEN + IDENTITY_KEY_LEN
 
@@ -212,6 +217,17 @@ export class SecureCommandClient {
     return decodeIdentity(SECURE_OP.SET_OWNER_KEY, resp.data).publicKey
   }
 
+  // Hand the drone an ownership grant SFD signed. The drone verifies it
+  // against the key in its own bootloader — this tool holds nothing that
+  // could — and answers with the owner key it now holds, read back from
+  // flash. Gets the long allowance: it rewrites the bootloader sector.
+  async setOwnerGrant(grant: Uint8Array): Promise<Uint8Array> {
+    const resp = await this.request(SECURE_OP.SET_OWNER_GRANT, grant, GENERATE_TIMEOUT_MS)
+    if (resp.result !== MavResult.ACCEPTED)
+      throw ownerRefusal(resp.result, resp.data)
+    return decodeIdentity(SECURE_OP.SET_OWNER_GRANT, resp.data).publicKey
+  }
+
   // Send one unsigned SECURE_COMMAND and await the reply that echoes its
   // sequence and operation. Resolves with whatever verdict the drone
   // gave — interpreting it is the caller's job — and rejects on timeout
@@ -295,6 +311,10 @@ function ownerRefusal(result: MavResult, data: Uint8Array): SecureCommandError {
     [OWNER_STATUS.NO_REGION]: 'This drone can\'t be given an owner yet — its startup software is older than the drone\'s firmware. Update it from the Firmware page, then try again.',
     [OWNER_STATUS.SEALED]: 'This drone is already secured for another owner, and a secured drone can\'t be given a new one.',
     [OWNER_STATUS.ALREADY_SET]: 'This drone already has an owner.',
+    [OWNER_STATUS.BAD_GRANT]: 'That permission file isn\'t one this drone understands.',
+    [OWNER_STATUS.OTHER_DRONE]: 'That permission was issued for a different drone.',
+    [OWNER_STATUS.UNSIGNED]: 'This drone doesn\'t recognise who issued that permission. It has to come from SmallFastDrone.',
+    [OWNER_STATUS.STALE]: 'That permission has been superseded — a newer one was already used on this drone. Ask for a fresh one.',
   }[status]
   if (message !== undefined)
     return new SecureCommandError(SECURE_OP.SET_OWNER_KEY, result, message)

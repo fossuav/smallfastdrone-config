@@ -36,8 +36,10 @@
 // beside the primary button, the way the DFU unlock does on the Firmware
 // page.
 
+import type { OwnerGrant } from '../../protocol/owner-grant'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { grantMatchesFc, parseOwnerGrant } from '../../protocol/owner-grant'
 import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
@@ -52,6 +54,7 @@ import {
   lockBlocker,
   withLockBit,
 } from '../../workflow/drone-lock'
+import { ownerFingerprint } from '../../workflow/owner-key'
 import { useReconnect } from '../../workflow/reconnect'
 import { useSfdEnable } from '../../workflow/use-sfd-enable'
 import IdentityMark from './IdentityMark.vue'
@@ -73,6 +76,8 @@ const {
   ownerKey,
   ownerLabel,
   ownerError,
+  applyGrant,
+  grantError,
   loadOwnerKey,
   importOwnerKeyFile,
   forgetOwnerKey,
@@ -82,6 +87,60 @@ const {
 // import matters; the file is never kept, because it is their backup and
 // the only copy that outlives this browser.
 const ownerInput = ref<HTMLInputElement | null>(null)
+
+/*
+  Applying a permission SFD issued for this drone.
+
+  The tool cannot check the signature — the key that does is in the
+  drone's bootloader — so the check that matters here is a human one.
+  The likely attack is not on the crypto but on the customer, relaying a
+  file somebody sent them; so this shows the key the permission would
+  install and asks them to confirm it is theirs before anything is sent.
+*/
+const grantInput = ref<HTMLInputElement | null>(null)
+const pendingGrant = ref<OwnerGrant | null>(null)
+const pendingGrantLabel = ref<string | null>(null)
+const grantState = ref<'idle' | 'working' | 'done'>('idle')
+const grantParseError = ref<string | null>(null)
+
+const grantIsMine = computed(() => {
+  const mine = ownerKey.value?.publicKey
+  const theirs = pendingGrant.value?.publicKey
+  if (!mine || !theirs)
+    return false
+  return mine.length === theirs.length && mine.every((b, i) => b === theirs[i])
+})
+
+async function chooseGrant(event: Event): Promise<void> {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (grantInput.value)
+    grantInput.value.value = ''
+  pendingGrant.value = null
+  grantParseError.value = null
+  grantState.value = 'idle'
+  if (!file)
+    return
+  try {
+    const grant = parseOwnerGrant(new Uint8Array(await file.arrayBuffer()))
+    if (!grantMatchesFc(grant, session.fcUid))
+      throw new Error(`That permission was issued for a different drone (${grant.uid.slice(0, 12)}…).`)
+    pendingGrant.value = grant
+    pendingGrantLabel.value = await ownerFingerprint(grant.publicKey)
+  }
+  catch (e) {
+    grantParseError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function confirmGrant(): Promise<void> {
+  if (!pendingGrant.value)
+    return
+  grantState.value = 'working'
+  const ok = await applyGrant(pendingGrant.value)
+  grantState.value = ok ? 'done' : 'idle'
+  if (ok)
+    pendingGrant.value = null
+}
 
 async function chooseOwnerKey(event: Event): Promise<void> {
   const file = (event.target as HTMLInputElement).files?.[0]
@@ -402,6 +461,76 @@ function cancel(): void {
           class="hidden"
           @change="chooseOwnerKey"
         >
+
+        <!-- A permission SFD issued, for a drone nobody is standing next
+             to. The confirmation is the point: this tool cannot check
+             the signature, and the likely attack is on the person
+             relaying the file, not on the crypto. -->
+        <div class="border-default border-t pt-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-muted text-xs">
+              Sent a permission by SmallFastDrone? It can set this drone's owner without a bench.
+            </p>
+            <UButton color="neutral" variant="ghost" size="xs" icon="i-lucide-file-check" @click="grantInput?.click()">
+              Open a permission…
+            </UButton>
+          </div>
+          <input ref="grantInput" type="file" class="hidden" @change="chooseGrant">
+
+          <div v-if="pendingGrant" class="border-default mt-2 space-y-2 rounded-md border p-3">
+            <p class="text-highlighted text-sm font-medium">
+              This would make {{ pendingGrantLabel }} the owner of this drone
+            </p>
+            <p class="text-muted text-xs">
+              <template v-if="grantIsMine">
+                That is the key you have loaded, so it is yours.
+              </template>
+              <template v-else>
+                That is <strong>not</strong> the key you have loaded. Only whoever holds it will be able to
+                read this drone's recordings. Don't go on unless you know it is yours.
+              </template>
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <UButton
+                :color="grantIsMine ? 'primary' : 'warning'"
+                :loading="grantState === 'working'"
+                size="sm"
+                icon="i-lucide-check"
+                @click="confirmGrant"
+              >
+                {{ grantIsMine ? 'Yes, that\'s my key' : 'Use it anyway' }}
+              </UButton>
+              <UButton color="neutral" variant="ghost" size="sm" @click="pendingGrant = null">
+                Cancel
+              </UButton>
+            </div>
+          </div>
+
+          <UAlert
+            v-if="grantParseError"
+            class="mt-2"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :description="grantParseError"
+          />
+          <UAlert
+            v-else-if="grantError"
+            class="mt-2"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :description="grantError"
+          />
+          <UAlert
+            v-else-if="grantState === 'done'"
+            class="mt-2"
+            color="success"
+            variant="subtle"
+            icon="i-lucide-check"
+            description="This drone's owner is set. Recordings from now on are for that key."
+          />
+        </div>
         <UAlert
           v-if="ownerError"
           color="error"

@@ -25,6 +25,7 @@
 import type { FlightLog } from '../workflow/logs'
 import { computed, onMounted, ref } from 'vue'
 import { MavFtp } from '../protocol/ftp'
+import { SecureCommandClient } from '../protocol/secure-command'
 import { isSfx, openSfx, parseSfxHeader, SFX_FLAG_STREAM } from '../protocol/sfx'
 import { useSessionStore } from '../stores/session'
 import { parseIdentityFile } from '../workflow/drone-identity'
@@ -66,10 +67,44 @@ function ftp(): MavFtp | null {
   return new MavFtp(session.sendMessage, session.subscribeMessages, session.sysid, COMP_ID_AUTOPILOT)
 }
 
+/*
+  Whether this drone still answers to the key we hold.
+
+  PLAN.md decision 42 accepts that SFD can re-point a drone's ownership,
+  on the grounds that doing so announces itself: the old owner's key
+  stops opening new recordings. That is only true if somebody notices, and
+  leaving an operator to infer it from a decryption failure is not
+  noticing - so it is said here, plainly, the moment the page can tell.
+*/
+const droneOwner = ref<Uint8Array | null>(null)
+const ownerChanged = computed(() => {
+  const mine = ownerKey.value?.publicKey
+  const theirs = droneOwner.value
+  if (!mine || !theirs)
+    return false
+  return !(mine.length === theirs.length && mine.every((b, i) => b === theirs[i]))
+})
+
+async function readDroneOwner(): Promise<void> {
+  droneOwner.value = null
+  if (!session.connected || session.sysid === null)
+    return
+  const client = new SecureCommandClient(
+    session.sendMessage,
+    session.subscribeMessages,
+    session.sysid,
+    COMP_ID_AUTOPILOT,
+  )
+  // A drone that has no owner, or firmware that has never heard of one,
+  // simply has nothing to disagree with.
+  droneOwner.value = await client.getOwnerKey().catch(() => null)
+}
+
 async function refresh(): Promise<void> {
   const client = ftp()
   if (!client)
     return
+  void readDroneOwner()
   listState.value = 'listing'
   listError.value = null
   try {
@@ -325,6 +360,13 @@ function save(): void {
         <input ref="identityInput" type="file" accept="application/json,.json" class="hidden" @change="chooseIdentity">
       </div>
 
+      <UAlert
+        v-if="ownerChanged"
+        color="warning"
+        icon="i-lucide-user-x"
+        title="This drone's owner is not your key"
+        description="Recordings it makes from now on are for somebody else's key, and yours won't open them. If you didn't arrange that, ask SmallFastDrone why the owner changed."
+      />
       <UAlert v-if="ownerError" color="error" variant="subtle" icon="i-lucide-triangle-alert" :description="ownerError" />
       <UAlert v-if="identityError" color="error" variant="subtle" icon="i-lucide-triangle-alert" :description="identityError" />
 

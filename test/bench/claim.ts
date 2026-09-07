@@ -30,6 +30,7 @@
 // Run:
 //   bun run bench:claim                        # read-only report
 //   bun run bench:claim --owner-key <file>     # claim, with a raw 32-byte public key
+//   bun run bench:claim --grant <file>         # claim with a permission SFD signed
 //
 // Needs a signed SmallFastDronev1 build with the owner key region:
 // SECURE_COMMAND exists only in signed builds, so SITL cannot stand in.
@@ -55,6 +56,7 @@ const COMP_ID_AUTOPILOT = 1
 const OP_GET_IDENTITY = 0x53464402
 const OP_SET_OWNER_KEY = 0x53464403
 const OP_GET_OWNER_KEY = 0x53464404
+const OP_SET_OWNER_GRANT = 0x53464405
 
 // the status byte a refusal carries, so this reports the remedy rather
 // than a bare DENIED
@@ -65,6 +67,10 @@ const OWNER_STATUS: Record<number, string> = {
   4: 'already claimed (no longer sent — an unsealed drone accepts a re-claim)',
   5: 'no identity yet — generate one first (bun run bench:enable)',
   6: 'already claimed and sealed — a sealed drone cannot be re-claimed',
+  7: 'that permission is malformed or a version this drone does not know',
+  8: 'that permission was issued for a different drone',
+  9: 'that permission is not signed by a key this drone trusts',
+  10: 'that permission has been superseded — a newer one was already applied',
 }
 
 function hex(bytes: Uint8Array): string {
@@ -84,6 +90,8 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const keyArg = args.indexOf('--owner-key')
   const keyPath = keyArg === -1 ? null : args[keyArg + 1]
+  const grantArg = args.indexOf('--grant')
+  const grantPath = grantArg === -1 ? null : args[grantArg + 1]
 
   let ownerPub: Uint8Array | null = null
   if (keyPath != null) {
@@ -164,8 +172,23 @@ async function main(): Promise<void> {
     console.log(`[claim] owner key  ${describe(owner.result, owner.data)}`)
   }
 
+  // A permission SFD signed, which works without anyone at the drone -
+  // and unlike a bare key, works on a sealed one.
+  if (grantPath != null) {
+    const grant = new Uint8Array(readFileSync(grantPath))
+    console.log(`[claim] applying a ${grant.length}-byte permission`)
+    const applied = await client.request(OP_SET_OWNER_GRANT, grant, 15_000)
+    if (applied.result !== MavResult.ACCEPTED) {
+      console.log(`[claim] refused — ${describe(applied.result, applied.data)}`)
+      process.exit(1)
+    }
+    console.log(`[claim] owner now  ${hex(applied.data.subarray(12, 44))}`)
+    console.log('[claim] PASS — the drone applied it and read the key back')
+    process.exit(0)
+  }
+
   if (ownerPub == null) {
-    console.log('[claim] read-only; pass --owner-key <file> to claim this drone')
+    console.log('[claim] read-only; pass --owner-key <file> or --grant <file>')
     process.exit(0)
   }
 
