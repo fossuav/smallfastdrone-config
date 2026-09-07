@@ -17,10 +17,11 @@
 // drone's identity and owner key, and optionally claim it.
 //
 // Claiming is the step that lets a drone encrypt its logs to somebody.
-// It is **write-once**: the owner public key goes into the bootloader
-// sector and there is no rewrite short of erasing the chip, because a
-// second write would silently redirect every artefact the drone encrypts
-// from then on. Reading is always safe; `--owner-key` is not.
+// An **unsealed** drone can be re-claimed, so a mistake on the bench is
+// a correction rather than a mass erase; once sealed it cannot, because
+// then a re-claim is somebody with link access re-pointing a deployed
+// drone's logs at themselves. Reading is always safe; `--owner-key` is
+// not - it changes who can read every log written from then on.
 //
 // Only the *public* half is ever passed here, so this script holds no key
 // material - the private half stays wherever the operator keeps it, which
@@ -61,8 +62,9 @@ const OWNER_STATUS: Record<number, string> = {
   1: 'no owner key has been set',
   2: 'this bootloader has no owner key region — update it',
   3: 'the drone is armed',
-  4: 'already claimed — write-once, so this cannot be changed',
+  4: 'already claimed (no longer sent — an unsealed drone accepts a re-claim)',
   5: 'no identity yet — generate one first (bun run bench:enable)',
+  6: 'already claimed and sealed — a sealed drone cannot be re-claimed',
 }
 
 function hex(bytes: Uint8Array): string {
