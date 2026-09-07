@@ -16,6 +16,7 @@
     "bench:bootloader": "bun run test/bench/update-bootloader.ts",
     "bench:enable": "bun run test/bench/enable.ts",
     "bench:claim": "bun run test/bench/claim.ts",
+    "bench:logs": "bun run test/bench/logs.ts",
     "bench:calibration": "bun run test/bench/calibration.ts",
     "params:rebuild": "python3 ./scripts/build-param-metadata.py",
     "dev": "vite",
