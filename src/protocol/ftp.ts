@@ -56,8 +56,7 @@ const MAX_DATA_BYTES = 239
 const EMPTY = new Uint8Array(0)
 
 // FTP opcodes — subset of MAV_FTP_OPCODE we use. Full list is in
-// MAVLink common dialect; the rest (BurstReadFile, CalcFileCRC32, etc.)
-// aren't needed for the wizard runtime's upload-and-delete lifecycle.
+// MAVLink common dialect; the rest (CalcFileCRC32, etc.) aren't needed.
 export const FTP_OP = {
   TERMINATE_SESSION: 1,
   RESET_SESSIONS: 2,
@@ -72,6 +71,7 @@ export const FTP_OP = {
   OPEN_FILE_WO: 11,
   TRUNCATE_FILE: 12,
   RENAME: 13,
+  BURST_READ_FILE: 15,
   ACK: 128,
   NAK: 129,
 } as const
@@ -246,6 +246,141 @@ export class MavFtp {
     finally {
       await this.sendOp(FTP_OP.TERMINATE_SESSION, session, 0, EMPTY).catch(() => {})
     }
+  }
+
+  /*
+    Download a file the fast way.
+
+    `downloadFile` costs a round trip per chunk, which on a bench USB
+    link measured 28.7 KB/s — fine for an applet, and thirty minutes for
+    a 50 MB flight log. The bottleneck is latency, not bandwidth.
+
+    BurstReadFile asks the drone to stream instead: it sends up to 2000
+    packets for one request, marking the last with `burst_complete`.
+    ArduPilot paces itself to about a third of the link's bandwidth on
+    ports without flow control, which is why this loses fewer packets
+    than hammering it would.
+
+    Nothing retransmits. A dropped packet shows up as a gap, and the
+    remedy is to ask again from the end of what arrived contiguously —
+    so this tracks contiguous progress rather than trusting the stream.
+  */
+  async downloadFileBurst(
+    remotePath: string,
+    onProgress?: (received: number, total: number) => void,
+  ): Promise<Uint8Array> {
+    const opened = await this.sendOp(FTP_OP.OPEN_FILE_RO, 0, 0, encodePath(remotePath))
+    const session = opened.session
+    // OpenFileRO answers with the file's size in its data field.
+    const total = opened.data.byteLength >= 4
+      ? new DataView(opened.data.buffer, opened.data.byteOffset, 4).getUint32(0, true)
+      : 0
+
+    try {
+      const out = new Uint8Array(total)
+      let contiguous = 0
+      let idle = 0
+      while (contiguous < total) {
+        const before = contiguous
+        contiguous = await this.runBurst(session, contiguous, out, total, onProgress)
+        if (contiguous === before) {
+          // The drone sent nothing usable. Retry a couple of times —
+          // a burst can be entirely lost — then give up rather than
+          // spin, because a stuck transfer that never ends is worse
+          // than one that says it failed.
+          if (++idle >= 3)
+            throw new Error(`FTP burst read stalled at ${contiguous} of ${total} bytes.`)
+        }
+        else {
+          idle = 0
+        }
+      }
+      return out
+    }
+    finally {
+      await this.sendOp(FTP_OP.TERMINATE_SESSION, session, 0, EMPTY).catch(() => {})
+    }
+  }
+
+  // One burst: request from `start` and absorb packets until the drone
+  // marks the last one, a gap appears, or it goes quiet. Returns how far
+  // the contiguous run now reaches.
+  private runBurst(
+    session: number,
+    start: number,
+    out: Uint8Array,
+    total: number,
+    onProgress?: (received: number, total: number) => void,
+  ): Promise<number> {
+    const seq = this.seq++ & 0xFFFF
+    const frame = buildFrame(seq, session, FTP_OP.BURST_READ_FILE, start, EMPTY, MAX_DATA_BYTES)
+    const msg = new FileTransferProtocol()
+    msg.targetNetwork = 0
+    msg.targetSystem = this.targetSystem
+    msg.targetComponent = this.targetComponent
+    msg.payload = frame as unknown as number[]
+
+    return new Promise<number>((resolve, reject) => {
+      let contiguous = start
+      let timer: ReturnType<typeof setTimeout> | null = null
+      let unsubscribe: (() => void) | null = null
+      const done = (value: number) => {
+        if (timer)
+          clearTimeout(timer)
+        unsubscribe?.()
+        resolve(value)
+      }
+      // Each packet refreshes the clock: a burst of a large file
+      // legitimately takes longer than one response would.
+      const bump = () => {
+        if (timer)
+          clearTimeout(timer)
+        timer = setTimeout(done, RESPONSE_TIMEOUT_MS, contiguous)
+      }
+
+      unsubscribe = this.subscribe((message) => {
+        if (message.msgid !== MSGID_FILE_TRANSFER_PROTOCOL)
+          return
+        const ftp = message.data as FileTransferProtocol
+        const response = parseFrame(Uint8Array.from(ftp.payload as unknown as ArrayLike<number>))
+        if (response.reqOpcode !== FTP_OP.BURST_READ_FILE)
+          return
+        if (response.opcode === FTP_OP.NAK) {
+          // EOF is how a burst that runs off the end reports itself,
+          // and is not an error.
+          const errCode = response.data[0] ?? 0
+          if (errCode === 6) {
+            done(contiguous)
+            return
+          }
+          if (timer)
+            clearTimeout(timer)
+          unsubscribe?.()
+          reject(new MavFtpError(errCode, undefined, `FTP burst read failed: ${FTP_ERR_NAMES[errCode] ?? `err${errCode}`}`))
+          return
+        }
+        bump()
+        // Out-of-order or duplicate packets are dropped rather than
+        // stored: only the contiguous run is trusted, and the next
+        // request restarts from its end.
+        if (response.offset === contiguous && response.data.byteLength > 0) {
+          const room = Math.min(response.data.byteLength, total - contiguous)
+          out.set(response.data.subarray(0, room), contiguous)
+          contiguous += room
+          onProgress?.(contiguous, total)
+        }
+        if (response.burstComplete || contiguous >= total)
+          done(contiguous)
+      })
+
+      bump()
+      this.send(msg).catch((e) => {
+        if (timer)
+          clearTimeout(timer)
+        unsubscribe?.()
+        reject(e instanceof Error ? e : new Error(String(e)))
+      })
+    })
   }
 
   // List a directory's entries. A session-less op (unlike download, which
