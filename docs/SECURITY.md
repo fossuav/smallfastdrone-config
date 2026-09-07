@@ -924,10 +924,18 @@ owner key's agreement, not to become a log parser.
 - **Don't add direct ESC-firmware-flash paths.** The 4-way `flash` primitive is
   only callable via `security/uploader.ts` with `kind: 'esc_firmware'`.
 - **Don't bake cleartext-only assumptions into the log pipeline.**
+- **Don't widen what the crypto library is used for.** `@noble/*` is here to
+  read `.sfx` and nothing else (decision 40). The owner key itself stays a
+  non-extractable WebCrypto key; if you find yourself passing raw private key
+  bytes to a library, the custody property is gone and decision 37 with it.
 - **Don't introduce a backend service** "to handle key exchange" without a
   PLAN.md decision. The design is deliberately serverless.
-- **Don't import a competing crypto library.** If client-side crypto ever proves
-  necessary (it should not), use the Web Crypto API.
+- ~~**Don't import a competing crypto library.**~~ **Superseded 2026-09-07**
+  (decision 40). It held while the tool performed no cryptography. Reading a
+  `.sfx` needs XChaCha20-Poly1305 and BLAKE2b and Chromium has neither, so
+  `@noble/ciphers` and `@noble/hashes` are in — for that and nothing else. Use
+  the Web Crypto API wherever it can do the job, which for the key agreement
+  it can and must.
 - **Don't re-enable `string.dump` or the `debug`/`os`/`package` Lua libraries.**
   They are already disabled in `linit.c` and `lstrlib.c`; that is what stops a
   customer's own script extracting bytecode from a Pro applet sharing the
