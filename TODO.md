@@ -140,6 +140,27 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   means that retry is load-bearing rather than belt-and-braces, and a bench
   check that cross-validates the two counts will flap.
 
+- `[firmware]` **A DFU-recovered drone pays 2.5x the memory for every
+  bootloader write, and nothing says so.** `read_bootloader()` buffers from the
+  start of the boot sector to the first *erased* 1 KB block, so the cost
+  depends on how the board was last flashed: the ROMFS path writes only the
+  bootloader and leaves the rest erased (~52 KB), while a `_with_bl.hex` writes
+  contiguous 64 KB segments from `0x08000000` and fills the sector (128 KB).
+
+  Measured on the bench 2026-09-08: with Lua scripting running and **377 KB
+  free**, a 128 KB contiguous request failed. So ownership grants and identity
+  generation are blocked on a DFU-recovered drone running scripts, and work on
+  an otherwise identical ROMFS-flashed one. That is the recovery path for a
+  lost owner key failing on the drones it exists for.
+
+  Allocating from AXI SRAM (`MEM_FILESYSTEM`) was tried and does **not** help;
+  reverted rather than kept for no measured benefit. Three real options: stop
+  padding the bootloader region in `_with_bl.hex`, which fixes the cause in
+  build tooling rather than in the code that rewrites the sector a board boots
+  from, and is the lowest-risk; hold the sector in 1 KB chunks rather than one
+  buffer, which needs the `memmem` callers reworking; or leave it and rely on
+  the message, which now names the remedy. **Not decided.**
+
 - `[firmware]` **`create_nonce()` takes nonces from `rand()`.**
   `AP_Scripting/lua_scripts.cpp` fills all 24 nonce bytes from `rand()`. Safe
   today only because every `.lxa` carries a unique ephemeral key, so a repeat
