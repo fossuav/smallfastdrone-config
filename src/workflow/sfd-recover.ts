@@ -182,7 +182,11 @@ export async function runExitCeremony(
   catch (e) {
     throw new RecoverError(
       'flash-failed',
-      `Your drone was wiped but the new software didn't finish installing, so it won't start up yet. Keep it plugged in and try again. ${message(e)}`,
+      // Not "try again": this ceremony starts by reading the drone's
+      // settings, and a wiped drone has nothing to read them over. What
+      // finishes the job is the Firmware page's recovery tab, which
+      // installs over USB alone.
+      `Your drone was wiped but the new software didn't finish installing, so it won't start up yet. Unplug it and plug it back in, then finish the install from the Firmware page's recovery tab — your settings are saved and can go back afterwards. ${message(e)}`,
       backup,
       true,
     )

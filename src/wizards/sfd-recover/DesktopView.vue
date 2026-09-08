@@ -88,6 +88,10 @@ const imageError = ref<string | null>(null)
 
 const savedFilename = ref<string | null>(null)
 const dfuError = ref<string | null>(null)
+// True while the wizard is waiting for the operator to replug a drone
+// that left the bus when it was erased.
+const needsReplug = ref(false)
+let resolveReplug: ((ok: boolean) => void) | null = null
 
 // The two operator gates, held as resolvers the buttons complete.
 let resolveSaved: ((ok: boolean) => void) | null = null
@@ -174,24 +178,53 @@ function awaitDroneGate(): Promise<boolean> {
   })
 }
 
+// After the wipe. Waits on the operator, not on a clock — see
+// reacquireDfu().
+function awaitReplugGate(): Promise<boolean> {
+  return gate((r) => {
+    resolveReplug = r
+  })
+}
+
 // The chip resets itself the instant readout protection drops, so the
 // handle we unlocked through is gone. It stays authorised, though, so it
 // can be reopened without another permission prompt.
-async function reacquireDfu(timeoutMs = 30_000): Promise<OpenedDfuDevice> {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const found = await listAuthorisedDfuDevices()
-    if (found.length > 0) {
-      try {
-        return await openDfuDevice(found[0]!.device)
+/*
+  Find the drone again after the wipe.
+
+  Dropping readout protection mass-erases the chip, and on real silicon
+  the board does not merely reset - it leaves the USB bus entirely and
+  needs unplugging and plugging back in before it appears again. This
+  used to poll for thirty seconds and then give up saying the drone
+  hadn't come back, while telling the operator to keep it plugged in:
+  the one instruction guaranteed not to work.
+
+  So it looks first, in case the board did come back on its own, and
+  otherwise asks and waits. No timeout: a person is doing something, and
+  failing them on a stopwatch after the drone has already been erased
+  helps nobody. The permission is not needed again - the device is still
+  authorised.
+ */
+async function reacquireDfu(): Promise<OpenedDfuDevice> {
+  for (let attempt = 0; ; attempt++) {
+    const deadline = Date.now() + (attempt === 0 ? 8000 : 60_000)
+    while (Date.now() < deadline) {
+      const found = await listAuthorisedDfuDevices()
+      if (found.length > 0) {
+        try {
+          return await openDfuDevice(found[0]!.device)
+        }
+        catch {
+          // still settling after the reset; fall through and retry
+        }
       }
-      catch {
-        // Still settling after the reset; fall through and retry.
-      }
+      await new Promise(r => setTimeout(r, 500))
     }
-    if (Date.now() >= deadline)
-      throw new Error('Your drone didn\'t come back in update mode after being wiped.')
-    await new Promise(r => setTimeout(r, 500))
+    needsReplug.value = true
+    const carryOn = await awaitReplugGate()
+    needsReplug.value = false
+    if (!carryOn)
+      throw new Error('Stopped while waiting for the drone to come back in update mode.')
   }
 }
 
@@ -291,6 +324,28 @@ function cancel(): void {
         :destructive="stopped?.destructive ?? (phase === 'flashing' || phase === 'reconnecting' || phase === 'restoring' || phase === 'done')"
         :failed="stopped !== null"
       />
+    </div>
+
+    <!-- The drone left the bus when it was erased. Nothing can proceed
+         until a person plugs it back in, so say so rather than counting
+         down against them. -->
+    <div v-if="needsReplug" class="border-warning bg-warning/5 space-y-3 rounded-md border p-4">
+      <p class="text-highlighted text-sm font-medium">
+        Unplug your drone and plug it back in
+      </p>
+      <p class="text-muted text-sm">
+        Wiping it took it off the bus completely — that is expected, and it is how the wipe
+        proves it worked. It comes back ready to be given its software. You won't be asked for
+        permission again.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <UButton color="primary" icon="i-lucide-refresh-cw" @click="resolveReplug?.(true)">
+          I've plugged it back in
+        </UButton>
+        <UButton color="neutral" variant="ghost" @click="resolveReplug?.(false)">
+          Stop
+        </UButton>
+      </div>
     </div>
 
     <!-- Before anything: the cost, in full, while it is still avoidable. -->
