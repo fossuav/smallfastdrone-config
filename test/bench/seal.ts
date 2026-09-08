@@ -148,10 +148,30 @@ async function main(): Promise<void> {
     COMP_ID_AUTOPILOT,
   )
 
-  console.log('[seal] a re-claim by presence, which a sealed drone must refuse:')
-  const bare = await client.request(OP_SET_OWNER_KEY, new Uint8Array(32).fill(0x42), 15_000)
-    .catch(e => ({ result: MavResult.FAILED, data: new Uint8Array(0), err: String(e) }))
-  console.log(`[seal]   ${'err' in bare ? bare.err : why(bare.result, bare.data)}`)
+  /*
+    Does a re-claim by presence get refused?
+
+    Probed with the drone's *existing* owner key, never an invented one.
+    This test expects a refusal, and a test that performs a real
+    irreversible write when its expectation fails is a bad test: the
+    first version sent 0x42... and, on a sealed drone that happened to
+    have no owner yet, claimed it for a key nobody holds. Re-sending the
+    key already installed makes a surprise ACCEPTED a no-op.
+
+    With no owner there is nothing to re-claim and nothing safe to send,
+    so it says so rather than inventing a key to find out.
+   */
+  const current = await client.getOwnerKey().catch(() => null)
+  if (current === null) {
+    console.log('[seal] no owner set, so there is no re-claim to refuse — skipped.')
+    console.log('[seal]   note: sealing does NOT stop a first claim on an unowned drone.')
+  }
+  else {
+    console.log('[seal] a re-claim by presence, which a sealed drone must refuse:')
+    const bare = await client.request(OP_SET_OWNER_KEY, current, 15_000)
+      .catch(e => ({ result: MavResult.FAILED, data: new Uint8Array(0), err: String(e) }))
+    console.log(`[seal]   ${'err' in bare ? bare.err : why(bare.result, bare.data)}`)
+  }
 
   if (grantPath != null) {
     console.log('[seal] a permission SFD signed, which a sealed drone must still take:')
