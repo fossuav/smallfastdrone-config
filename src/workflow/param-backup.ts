@@ -30,6 +30,7 @@
 // restore slice.
 
 import type { ParamRecord } from '../protocol/params'
+import { LOCK_OPTION_BIT, LOCK_PARAM } from './drone-lock'
 
 // Bumped only when the document shape changes incompatibly. parseBackup
 // refuses anything it doesn't recognise rather than guessing, because a
@@ -193,6 +194,27 @@ export function isAbsentAccelCalibration(
 // accelerometer the drone doesn't have - see isAbsentAccelCalibration(),
 // where keeping it can permanently stop the restored drone arming.
 //
+/*
+  Strip the "seal my memory" request out of a saved BRD_OPTIONS.
+
+  It is a completed instruction, not a setting. Restoring it onto the
+  same drone does nothing, because that drone is already sealed and the
+  firmware never lowers protection; restoring it anywhere else is
+  actively wrong. The case that matters is the exit ceremony: it wipes a
+  drone precisely to unseal it, and a backup that carries the bit would
+  re-arm the seal in the same breath - inert on stock ArduPilot, which is
+  what the wipe leaves behind, and a landmine the day that drone is
+  flashed with SFD firmware again.
+
+  Every other bit is the operator's configuration and is kept.
+ */
+function withoutSealRequest(name: string, value: number): number {
+  if (name !== LOCK_PARAM)
+    return value
+
+  return value & ~LOCK_OPTION_BIT
+}
+
 // Parameter *index* is deliberately dropped: indexes shift between
 // firmware builds, so name is the only stable key.
 export function buildBackup(
@@ -208,7 +230,7 @@ export function buildBackup(
     const record = params.get(name)!
     if (isAbsentAccelCalibration(name, record.value, params))
       continue
-    out[name] = { value: record.value, type: record.type }
+    out[name] = { value: withoutSealRequest(name, record.value), type: record.type }
   }
   return { schema: BACKUP_SCHEMA, createdAt, vehicle, params: out }
 }
