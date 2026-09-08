@@ -45,6 +45,8 @@ export class WebSerialTransport implements Transport {
   description = 'USB serial'
 
   private port: SerialPort | null = null
+  // Serialises send(); see the comment there.
+  private sendQueue: Promise<void> = Promise.resolve()
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null
   private readerTask: Promise<void> | null = null
   private readonly listeners = {
@@ -122,21 +124,45 @@ export class WebSerialTransport implements Transport {
     }
   }
 
-  // Synchronously write a chunk of bytes to the FC. Acquires + releases the
-  // writable-stream lock per send so concurrent senders don't deadlock — the
-  // expected sender is the MavLinkSession, which serialises by construction.
+  /*
+    Write a chunk of bytes to the FC.
+
+    Sends are queued, one at a time. A WritableStream allows exactly one
+    writer, and this method awaits between taking the lock and releasing
+    it — so two callers that do not await each other collide, and the
+    second gets "WritableStream is already locked".
+
+    That is not hypothetical and the previous comment here asserted the
+    opposite: it said the only sender was MavLinkSession, "which
+    serialises by construction". Nothing enforced that, and asking the
+    drone for telemetry on connect added a second sender alongside the
+    AUTOPILOT_VERSION request. Reported from a real board, where the
+    connect failed with "couldn't request telemetry"; the bench bridge
+    never showed it, because a WebSocket has no such lock.
+
+    Chaining rather than locking means a failed write cannot wedge the
+    queue: the chain continues, and the caller still sees its own error.
+  */
   async send(bytes: Uint8Array): Promise<void> {
     const port = this.port
     if (!port?.writable) {
       throw new Error('Serial port not open')
     }
-    const writer = port.writable.getWriter()
-    try {
-      await writer.write(bytes)
-    }
-    finally {
-      writer.releaseLock()
-    }
+    const write = this.sendQueue.then(async () => {
+      const writable = this.port?.writable
+      if (!writable) {
+        throw new Error('Serial port not open')
+      }
+      const writer = writable.getWriter()
+      try {
+        await writer.write(bytes)
+      }
+      finally {
+        writer.releaseLock()
+      }
+    })
+    this.sendQueue = write.catch(() => {})
+    return write
   }
 
   // Subscribe to a transport event ('data' | 'close' | 'error'). Returns
@@ -319,6 +345,8 @@ class PortRawSerial implements RawSerial {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null
   private waiter: { need: number, resolve: (b: Uint8Array) => void, reject: (e: Error) => void, timer: ReturnType<typeof setTimeout> | null } | null = null
   private closed = false
+  // Serialises write(); see the comment there.
+  private writeQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly port: SerialPort) {
     void this.pump()
@@ -347,18 +375,31 @@ class PortRawSerial implements RawSerial {
     this.bufferedBytes = 0
   }
 
+  // Queued for the same reason WebSerialTransport.send() is: a
+  // WritableStream takes one writer at a time, and this awaits while
+  // holding it. The bootloader protocol is request/response so it has
+  // no concurrent senders today, but nothing stops one arriving and the
+  // failure would look like a protocol fault rather than a lock.
   async write(bytes: Uint8Array): Promise<void> {
     if (this.closed)
       throw new Error('RawSerial: closed')
     if (!this.port.writable)
       throw new Error('RawSerial: port not writable')
-    const writer = this.port.writable.getWriter()
-    try {
-      await writer.write(bytes)
-    }
-    finally {
-      writer.releaseLock()
-    }
+    const write = this.writeQueue.then(async () => {
+      if (this.closed)
+        throw new Error('RawSerial: closed')
+      if (!this.port.writable)
+        throw new Error('RawSerial: port not writable')
+      const writer = this.port.writable.getWriter()
+      try {
+        await writer.write(bytes)
+      }
+      finally {
+        writer.releaseLock()
+      }
+    })
+    this.writeQueue = write.catch(() => {})
+    return write
   }
 
   async close(): Promise<void> {
