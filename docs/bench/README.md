@@ -16,3 +16,4 @@ could not be. That distinction is what the records are for.
 | Record | Board | What it covers |
 |---|---|---|
 | [2026-09-05-lucid-h7.html](2026-09-05-lucid-h7.html) | TBS_LUCID_H7 | Stock ArduPilot to signed SFD firmware, secure bootloader, per-drone identity, sealing, and the exit ceremony back to stock. Eight defects found. |
+| [2026-09-08-lucid-h7-seal.html](2026-09-08-lucid-h7-seal.html) | TBS_LUCID_H7 | Ownership grants, sealing, and the exit ceremony run against a drone that had an owner key. Nine defects found, none of them in the cryptography. |

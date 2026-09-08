@@ -1,0 +1,769 @@
+<title>Sealing the Lucid H7</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+
+<style>
+  :root {
+    --paper:      #f3f5f7;
+    --surface:    #ffffff;
+    --surface-2:  #e9edf1;
+    --ink:        #0e131a;
+    --ink-2:      #3d4854;
+    --ink-3:      #6a7684;
+    --rule:       #cfd7de;
+    --accent:     #1c6b78;
+    --accent-ink: #12505a;
+    --verified:   #2c7a58;
+    --offline:    #4a5f8a;
+    --caution:    #9a6608;
+    --destruct:   #a4402a;
+
+    --measure: 68ch;
+    --s1: 0.35rem; --s2: 0.7rem; --s3: 1.1rem; --s4: 1.8rem; --s5: 2.8rem; --s6: 4.2rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0d1116;
+      --surface:    #141a21;
+      --surface-2:  #1c242d;
+      --ink:        #e8edf2;
+      --ink-2:      #b3bec9;
+      --ink-3:      #7d8b99;
+      --rule:       #2a343f;
+      --accent:     #4fb3c1;
+      --accent-ink: #7fcdd8;
+      --verified:   #56b98b;
+      --offline:    #8aa2d4;
+      --caution:    #d3a13c;
+      --destruct:   #e0765c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0d1116;
+    --surface:    #141a21;
+    --surface-2:  #1c242d;
+    --ink:        #e8edf2;
+    --ink-2:      #b3bec9;
+    --ink-3:      #7d8b99;
+    --rule:       #2a343f;
+    --accent:     #4fb3c1;
+    --accent-ink: #7fcdd8;
+    --verified:   #56b98b;
+    --offline:    #8aa2d4;
+    --caution:    #d3a13c;
+    --destruct:   #e0765c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: var(--s5) var(--s3) var(--s6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+  }
+
+  h1, h2, h3, .eyebrow, .chip, th, .metric-label, .step-n {
+    font-family: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  code, .mono, td.num, .fingerprint {
+    font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+
+  .eyebrow {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+  }
+
+  h1 {
+    font-size: clamp(2.1rem, 5.2vw, 3.1rem);
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    margin: var(--s2) 0 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    max-width: var(--measure);
+    font-size: 1.12rem;
+    color: var(--ink-2);
+    margin: var(--s3) 0 0;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: 0.005em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+  section { display: flex; flex-direction: column; gap: var(--s3); }
+  .stack-tight { display: flex; flex-direction: column; gap: var(--s2); }
+
+  header.masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: var(--s4);
+  }
+
+  .runline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1) var(--s3);
+    margin-top: var(--s3);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.78rem;
+    color: var(--ink-3);
+  }
+  .runline span { white-space: nowrap; }
+  .runline b { color: var(--ink-2); font-weight: 500; }
+
+  /* ---- evidence chips: the spine of the document ---- */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0.22em 0.6em;
+    border-radius: 2px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .chip::before {
+    content: "";
+    width: 0.5em; height: 0.5em;
+    background: currentColor;
+    border-radius: 50%;
+  }
+  .c-hw  { color: var(--verified); }
+  .c-off { color: var(--offline); }
+  .c-not { color: var(--caution); }
+  .c-not::before { border-radius: 0; transform: rotate(45deg); }
+
+  /* ---- evidence rows ---- */
+  .rows { display: flex; flex-direction: column; }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s2) var(--s3);
+    align-items: start;
+    padding: var(--s3) 0;
+    border-top: 1px solid var(--rule);
+  }
+  .row:last-child { border-bottom: 1px solid var(--rule); }
+  .row p { font-size: 0.94rem; color: var(--ink-2); margin-top: 0.3em; }
+  .row .mono { font-size: 0.82rem; color: var(--ink-3); }
+
+  /* ---- the one genuine sequence ---- */
+  .track { display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: grid;
+    grid-template-columns: 2.6rem minmax(0, 1fr);
+    gap: var(--s3);
+    padding-bottom: var(--s3);
+    position: relative;
+  }
+  .step:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    left: 1.05rem; top: 1.9rem; bottom: 0;
+    width: 2px;
+    background: var(--rule);
+  }
+  .step-n {
+    width: 2.1rem; height: 2.1rem;
+    display: grid; place-items: center;
+    border: 2px solid var(--accent);
+    color: var(--accent-ink);
+    background: var(--surface);
+    border-radius: 50%;
+    font-size: 0.8rem; font-weight: 700;
+    position: relative; z-index: 1;
+  }
+  .step.destructive .step-n { border-color: var(--destruct); color: var(--destruct); }
+  .step-body { display: flex; flex-direction: column; gap: 0.3em; padding-top: 0.15rem; }
+  .step-body p { font-size: 0.92rem; color: var(--ink-2); }
+  .step .mono { font-size: 0.8rem; color: var(--ink-3); }
+
+  /* ---- tables ---- */
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.87rem; }
+  caption {
+    text-align: left;
+    font-family: "IBM Plex Sans Condensed", sans-serif;
+    font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding-bottom: var(--s2);
+  }
+  th {
+    text-align: left;
+    font-size: 0.7rem; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 0 var(--s3) var(--s2) 0;
+    border-bottom: 1px solid var(--ink);
+    white-space: nowrap;
+  }
+  td {
+    padding: var(--s2) var(--s3) var(--s2) 0;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink-2);
+    vertical-align: top;
+  }
+  td.num { font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+  td:last-child, th:last-child { padding-right: 0; }
+  .stall { color: var(--caution); font-weight: 500; }
+  .clean { color: var(--verified); font-weight: 500; }
+
+  /* ---- findings ---- */
+  .findings { display: grid; gap: var(--s3); grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); }
+  .finding {
+    display: flex; flex-direction: column; gap: 0.45em;
+    padding-left: var(--s3);
+    border-left: 3px solid var(--rule);
+  }
+  .finding.keystone { border-left-color: var(--accent); }
+  .finding.open { border-left-color: var(--caution); }
+  .finding p { font-size: 0.9rem; color: var(--ink-2); }
+  .finding .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem; color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+
+  /* ---- pull quote / caveat block ---- */
+  .caveat {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--caution);
+    padding: var(--s3) var(--s4);
+    display: flex; flex-direction: column; gap: var(--s2);
+  }
+  .caveat h3 { color: var(--caution); }
+  .caveat p { font-size: 0.94rem; color: var(--ink-2); }
+
+  /* ---- metrics ---- */
+  .metrics {
+    display: grid;
+    gap: var(--s3) var(--s4);
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    padding: var(--s3) 0;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .metric { display: flex; flex-direction: column; gap: 0.15em; }
+  .metric-v {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 1.42rem; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .metric-label {
+    font-size: 0.68rem; font-weight: 600;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .fingerprint {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--accent-ink);
+    word-break: break-all;
+    background: var(--surface-2);
+    padding: var(--s2) var(--s3);
+    border-left: 3px solid var(--accent);
+  }
+
+  code {
+    font-size: 0.87em;
+    background: var(--surface-2);
+    padding: 0.08em 0.34em;
+    border-radius: 2px;
+    color: var(--ink);
+  }
+
+  em { font-style: italic; }
+  strong { font-weight: 500; color: var(--ink); }
+
+  footer {
+    border-top: 2px solid var(--ink);
+    padding-top: var(--s3);
+    font-size: 0.82rem;
+    color: var(--ink-3);
+    max-width: var(--measure);
+  }
+
+  a { color: var(--accent-ink); }
+  a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .row, .step, .finding { transition: none; }
+  }
+
+  @media (max-width: 34rem) {
+    .row { grid-template-columns: minmax(0, 1fr); }
+    .step { grid-template-columns: 2.1rem minmax(0, 1fr); gap: var(--s2); }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Bench session &middot; 7&ndash;8 September 2026</div>
+    <h1>Sealing a drone, and getting back out again</h1>
+    <p class="standfirst">
+      One TBS_LUCID_H7, taken through the two operations the security design had only ever
+      argued about: sealing it against readout, and unsealing it again. Three claims that
+      existed as reasoning went onto silicon. One of them was wrong. Nine defects fell out,
+      and every single one sat in the handover between steps rather than in any of the
+      cryptography.
+    </p>
+    <div class="runline">
+      <span><b>board</b> TBS_LUCID_H7 &middot; id 5250</span>
+      <span><b>uid</b> 350053000551333530343432</span>
+      <span><b>start</b> signed SmallFastDrone 4.7.0, unsealed</span>
+      <span><b>end</b> unsigned SFD, unsealed, settings restored</span>
+      <span><b>defects</b> 9</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>How to read this</h2>
+    <p>
+      Every result carries one of three marks, as in the previous record. The distinction is
+      the whole point: this session exists because a claim marked <em>Offline</em> turned out
+      to be false the moment it met hardware, and nothing but hardware would have said so.
+    </p>
+    <div class="rows" style="max-width: var(--measure);">
+      <div class="row">
+        <div class="stack-tight">
+          <h3>On hardware</h3>
+          <p>Observed on the board itself, under the conditions it will actually meet.</p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>Offline</h3>
+          <p>Proven against a reference implementation or by construction, not on the board.</p>
+        </div>
+        <span class="chip c-off">Offline</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>Not proven</h3>
+          <p>Stated with the reason it could not be shown, rather than left to look proven.</p>
+        </div>
+        <span class="chip c-not">Not proven</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What was owed</h2>
+    <p>
+      Three things had been designed, built and written down, and none had met a board. Each
+      had been recorded honestly as reasoning rather than measurement, which is what made it
+      obvious they were still owed.
+    </p>
+    <div class="rows">
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A signed grant works on a sealed drone</h3>
+          <p>
+            The claim decision&nbsp;42 rests on: a drone whose owner key is lost can be
+            re-pointed by a permission SFD signs, without erasing the airframe. Written off as
+            safe because &ldquo;the grant path never consults the seal&rdquo;.
+          </p>
+        </div>
+        <span class="chip c-not">Was not proven</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The DFU unlock works on protected silicon</h3>
+          <p>
+            <code>DfuClient.readUnprotect()</code> waits a poll timeout and then requires the
+            status read to <em>fail</em> &mdash; success looks like a stall. Never run against a
+            board that was actually read-protected; a Python mirror of it got the reading
+            backwards in September.
+          </p>
+        </div>
+        <span class="chip c-not">Was not proven</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The exit ceremony returns a drone intact</h3>
+          <p>
+            Run once before, but on a drone with no owner key and no grant counter. Both exist
+            now, and both live in the sector the exit erases.
+          </p>
+        </div>
+        <span class="chip c-off">Partly</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The sequence</h2>
+    <p>
+      Drawn as a sequence because it is one. Step&nbsp;4 is only meaningful after step&nbsp;3,
+      and step&nbsp;5 cannot be undone without steps&nbsp;6 and&nbsp;7 &mdash; the ordering is the
+      security property, not a workflow.
+    </p>
+    <div class="track">
+
+      <div class="step">
+        <div class="step-n">1</div>
+        <div class="step-body">
+          <h3>Claimed by presence, unsealed</h3>
+          <p>
+            <code>SET_OWNER_KEY</code> with a bench owner key, authorised by nothing but
+            standing at the drone. Re-claimed a second time to a different key, which an
+            unsealed drone is meant to allow.
+          </p>
+          <span class="fingerprint">7272865e7f61aabe4f7cc55f1fafed4d0d7332a458aea91eb03d700186585d7c</span>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">2</div>
+        <div class="step-body">
+          <h3>Ownership grants, five ways</h3>
+          <p>
+            A permission signed offline by SFD&rsquo;s firmware key, verified by the drone against
+            the key already in its bootloader. Applied; <em>replayed and refused as
+            superseded</em>; refused for another drone; refused when signed by an untrusted key;
+            and a newer counter accepted, rotating the owner.
+          </p>
+          <div class="mono">SFDOWN &middot; 124 bytes &middot; uid + key + counter + 64-byte signature</div>
+        </div>
+      </div>
+
+      <div class="step destructive">
+        <div class="step-n">3</div>
+        <div class="step-body">
+          <h3>Sealed</h3>
+          <p>
+            <code>BRD_OPTIONS</code> 1&nbsp;&rarr;&nbsp;1025, raising readout protection at the
+            next boot. One way: the firmware never lowers it.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">4</div>
+        <div class="step-body">
+          <h3>The claim that was wrong</h3>
+          <p>
+            A bare re-claim was refused &mdash; <code>already claimed and sealed</code> &mdash; which is
+            correct. The grant was refused too, which is not. <code>apply_owner_grant()</code>
+            passed every check and then called <code>set_owner_key()</code>, where the presence
+            rule lives one call deeper than anyone had looked. Fixed, reflashed onto the sealed
+            board, and re-run: accepted, owner changed, replay still refused.
+          </p>
+        </div>
+      </div>
+
+      <div class="step destructive">
+        <div class="step-n">5</div>
+        <div class="step-body">
+          <h3>Unlocked, and everything with it</h3>
+          <p>
+            DFU read-unprotect through the tool&rsquo;s own <code>DfuClient</code>, in a browser.
+            The chip mass-erased &mdash; firmware, bootloader, identity, owner key and counter &mdash;
+            and left the USB bus entirely. That erase is the proof: it happens only on a real
+            RDP&nbsp;1&nbsp;&rarr;&nbsp;0 transition.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">6</div>
+        <div class="step-body">
+          <h3>Reflashed from blank</h3>
+          <p>
+            A full <code>_with_bl.hex</code> over DFU, because the erase took the bootloader
+            too. The board came back as the SFD fork built vanilla &mdash; unsigned, no key
+            region, no identity region, nothing to seal.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">7</div>
+        <div class="step-body">
+          <h3>Settings back</h3>
+          <p>
+            Fourteen of fourteen, none missing, none differing. <code>BRD_OPTIONS</code>
+            returned as&nbsp;<b>1</b> where the drone had held 1025: the backup strips the seal
+            request, so a drone wiped in order to unseal it does not quietly ask to be sealed
+            again on the way back.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>What the hardware settled</h2>
+    <div class="rows">
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A sealed drone refuses a re-claim by presence</h3>
+          <p>Decision&nbsp;39, observed: <code>DENIED &mdash; already claimed and sealed</code>.</p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A sealed drone accepts a signed grant</h3>
+          <p>Decision&nbsp;42 &mdash; after the fix in step&nbsp;4, and not before it.</p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A replayed grant is refused</h3>
+          <p>
+            The counter doing the job it was added for: an old permission cannot restore a key
+            the operator rotated away from. Refused sealed and unsealed alike.
+          </p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The unlock works on protected silicon</h3>
+          <p>
+            Through the tool&rsquo;s own WebUSB client, not a Python stand-in. &ldquo;Success looks like
+            a stall&rdquo; holds.
+          </p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A drone survives the round trip</h3>
+          <p>
+            Sealed, wiped, reflashed and restored, with an owner key and grant counter in the
+            erased sector for the first time. 14/14 settings, seal request stripped.
+          </p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A secure command reply is composed and then discarded</h3>
+          <p>
+            Zero replies in forty seconds &mdash; nearly three times the client&rsquo;s allowance &mdash;
+            while heartbeats carried on. Firmware instrumentation showed it reaching the send
+            with <code>ACCEPTED</code>. After the fix: every time, at 1.85&nbsp;s.
+          </p>
+        </div>
+        <span class="chip c-hw">On hardware</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Nine defects, none of them in the cryptography</h2>
+    <p>
+      That is the finding worth carrying forward. The key agreements, the signatures and the
+      envelopes all behaved. What failed, repeatedly, was the seam between one step and the
+      next &mdash; and every one of these sits in a path the simulator cannot reach.
+    </p>
+    <div class="rows">
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A reply the transmit buffer silently dropped</h3>
+          <p>
+            <code>comm_send_lock()</code> discards a message that will not fit, by design. A
+            220-byte reply follows a flash write that fills the buffer; a 54-byte statustext
+            fits, and is retried besides &mdash; which is why the instrumentation looked like the
+            reply had gone out. Two write-once operations reported failure after succeeding.
+          </p>
+        </div>
+        <span class="chip c-hw">Firmware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The same, for a bootloader flash</h3>
+          <p>
+            &ldquo;Flash OK&rdquo; and then no <code>COMMAND_ACK</code> in forty-five seconds, on the one
+            command a ground station most needs to know succeeded.
+          </p>
+        </div>
+        <span class="chip c-hw">Firmware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A low battery blamed for a failed update</h3>
+          <p>
+            The explanation took the last statustext to arrive, and arming checks narrate on
+            their own schedule. An update that had succeeded was reported as failing because
+            the battery was low.
+          </p>
+        </div>
+        <span class="chip c-hw">Tool</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A grant refused by the rule beneath it</h3>
+          <p>
+            The one this session was for. Reasoning said the path never consults the seal; it
+            did, one call deeper.
+          </p>
+        </div>
+        <span class="chip c-hw">Firmware</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>Two senders, one writer</h3>
+          <p>
+            <code>WritableStream is already locked</code> on connect. A comment asserted this
+            could not happen because the only sender &ldquo;serialises by construction&rdquo;; nothing
+            enforced it. The end-to-end suite runs over a WebSocket, which has no such lock &mdash;
+            so the assumption could sit there being wrong indefinitely.
+          </p>
+        </div>
+        <span class="chip c-hw">Tool</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A file dialog with nothing in it</h3>
+          <p>
+            <code>accept=".hex"</code> hid every other file, so choosing the recovery image
+            could fail with no name, no error, and a disabled button explaining neither.
+          </p>
+        </div>
+        <span class="chip c-hw">Tool</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>&ldquo;Keep it plugged in&rdquo;</h3>
+          <p>
+            The wipe takes the board off the USB bus &mdash; that is how it proves it worked. The
+            wizard polled thirty seconds and then gave the one instruction guaranteed not to
+            work, at the point where the drone is in its most broken state.
+          </p>
+        </div>
+        <span class="chip c-hw">Tool</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>An FTP handshake against a drone still waking up</h3>
+          <p>
+            A drone brings its filesystem up well after it answers heartbeats, and widest on a
+            first boot after a mass erase &mdash; exactly when the restore runs. One 1500&nbsp;ms
+            attempt, no retry.
+          </p>
+        </div>
+        <span class="chip c-hw">Tool</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>A backup that asked to be sealed</h3>
+          <p>
+            <code>BRD_OPTIONS</code> carries the seal request, so the file taken before the exit
+            held it. Inert on what the wipe leaves behind, and a landmine the day that drone is
+            flashed with SFD firmware again. Found by reading a real backup off the sealed
+            board.
+          </p>
+        </div>
+        <span class="chip c-hw">Tool</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What is still not proven</h2>
+    <div class="rows">
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The ceremony cannot finish what it starts</h3>
+          <p>
+            <code>runExitCeremony()</code> begins by reading settings over MAVLink, and a wiped
+            drone has none &mdash; so a failure after the erase leaves a board the wizard can only
+            describe. The Firmware page finished the job here, by hand.
+          </p>
+        </div>
+        <span class="chip c-not">Open</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The ack fix, under a real stall</h3>
+          <p>
+            Observed working during the bootloader update in this session &mdash; a genuine
+            erase-and-write &mdash; which is the stall it was written for. The earlier record left
+            this owed; it is owed no longer.
+          </p>
+        </div>
+        <span class="chip c-hw">Now proven</span>
+      </div>
+      <div class="row">
+        <div class="stack-tight">
+          <h3>The drone did not come back to upstream ArduPilot</h3>
+          <p>
+            It came back to the SFD fork built vanilla &mdash; unsigned, no secure regions &mdash;
+            because that is what the recovery image was built from. Functionally an exited
+            drone and the GPL position holds, but it is not the artefact the September run
+            used.
+          </p>
+        </div>
+        <span class="chip c-off">Noted</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The thread</h2>
+    <p>
+      September&rsquo;s record ended by saying what the hardware had proved and what it had not.
+      This one ends by saying where the faults were: not one of the nine was in a key
+      agreement, a signature or an envelope. They were in what happens between steps &mdash; a
+      reply that does not fit a buffer, a board that leaves the bus, a dialog with nothing in
+      it, a drone that is not awake yet.
+    </p>
+    <p>
+      All nine sit in paths a simulator structurally cannot reach. The clearest is the writer
+      lock: the end-to-end suite runs over a WebSocket, which has no writer to contend for, so
+      a comment asserting the contention could not happen was safe from every test in the
+      repository. That is what bench time buys, and it is not the cryptography.
+    </p>
+  </section>
+
+</div>
