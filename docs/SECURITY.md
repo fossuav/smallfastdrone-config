@@ -637,10 +637,20 @@ same grant replayed **refused as superseded**; a grant for another drone
 refused; one signed by an untrusted key refused; and a newer grant rotating to a
 different key applied.
 
-**Not verified: the sealed case**, which is the whole point of decision 42.
-Testing it costs the board's identity to undo, so it is reasoned rather than
-observed — the code path does not consult the seal at all, which is what makes
-it work, but that is an argument rather than a measurement.
+**The sealed case is now verified too, and the reasoning that stood in for it
+was wrong.** A sealed board took no grant at all: `apply_owner_grant()` passed
+every check and then called `set_owner_key()`, where the presence rule lives —
+already-owned **and** sealed means refuse. That rule is decision 39 and is right
+for a claim authorised by somebody standing at the drone; it is wrong for one
+authorised by SFD, which is the way back for a sealed drone whose key was lost.
+The counter already told them apart, so the seal now blocks only the presence
+path.
+
+Recorded because the shape of the mistake matters more than the fix: this was
+written off as "the code path does not consult the seal", and it did, one call
+deeper. On a sealed TBS_LUCID_H7 the three behaviours now are — a bare re-claim
+**refused** as already claimed and sealed, a signed grant **accepted** with the
+owner changed, and that same grant replayed **refused** as superseded.
 
 **The region grew again.** A drone needs a bootloader carrying the counter
 field before it can take a grant, and updating a bootloader erases the identity,

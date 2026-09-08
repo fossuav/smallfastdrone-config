@@ -68,6 +68,16 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-08: **Sealed the bench board, and the test found the bug reasoning had missed.** Decision 42's whole claim is that a signed grant still works on a sealed drone. It did not.
+
+  `apply_owner_grant()` passed every check and then called `set_owner_key()`, where the presence rule lives — already-owned **and** sealed means refuse. That rule is decision 39 and is right for a claim authorised by somebody at the drone; it is wrong for one authorised by SFD, which is the entire way back for a sealed drone whose owner key was lost. The counter already distinguished them, so the seal now blocks only the presence path.
+
+  **The shape of the mistake is the point.** Yesterday this was recorded as *reasoned rather than measured*, on the grounds that the grant path "never consults the seal". It did, one call deeper. Nothing short of sealing a board would have shown it, and the honest label is what made it obvious this was still owed.
+
+  **Verified on a sealed TBS_LUCID_H7:** a bare re-claim refused as *already claimed and sealed*; a signed grant accepted with the owner changing to the granted key; the same grant replayed refused as *superseded*. Decisions 39 and 42 are both measured now.
+
+  `bun run bench:seal` is the driver, and it takes `--yes` because sealing is one way — the only route back is the DFU mass erase. **The board is now sealed**, so it can no longer be re-claimed by presence, and DFU reads are refused.
+
 - 2026-09-07: **Remote key exchange, built and bench-verified (F15 + T11).** A drone nobody is standing next to can now be claimed, by a permission SFD signs offline.
 
   **The authorisation was already in the board** — it trusts exactly one key, SFD's in the bootloader — and had simply never been used for this. The one structural departure: the signature lives *inside* the grant rather than in `SECURE_COMMAND`'s `sig` field, because `check_signature()` covers a session key the drone issues and a grant is signed weeks before use. `verify_signed_blob()` checks a detached signature over the grant alone.
