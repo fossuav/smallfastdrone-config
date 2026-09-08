@@ -175,6 +175,33 @@ export async function runExitCeremony(
     throw new RecoverError('unlock-failed', `Couldn't unlock your drone. ${message(e)}`, backup, true)
   }
 
+  return finishExitCeremony(driver, backup, onPhase)
+}
+
+/*
+  The half of the ceremony that can be run again.
+
+  Everything before this reads the drone over MAVLink, and past the
+  unlock there is no drone to read - so re-running the whole ceremony
+  after a failed wipe is impossible, not merely wasteful. That is what
+  the wizard used to offer, which is to say nothing: it told an operator
+  their drone needed finishing and had no way to finish it. Found on a
+  bench 2026-09-08 with a blank board and a wizard that could only
+  describe it.
+
+  So the steps that need no drone are separable, and take the backup as
+  an argument rather than capturing it. In the same session the caller
+  still holds it; after a reload the operator has the file they were made
+  to save, which is exactly what that gate was for.
+
+  Safe to call twice. Flashing an already-flashed drone and restoring
+  already-restored settings both land where they started.
+ */
+export async function finishExitCeremony(
+  driver: RecoveryDriver,
+  backup: ParamBackup,
+  onPhase: (phase: RecoverPhase) => void = () => {},
+): Promise<RecoverOutcome> {
   onPhase('flashing')
   try {
     await driver.flashWithBootloader()
@@ -182,11 +209,7 @@ export async function runExitCeremony(
   catch (e) {
     throw new RecoverError(
       'flash-failed',
-      // Not "try again": this ceremony starts by reading the drone's
-      // settings, and a wiped drone has nothing to read them over. What
-      // finishes the job is the Firmware page's recovery tab, which
-      // installs over USB alone.
-      `Your drone was wiped but the new software didn't finish installing, so it won't start up yet. Unplug it and plug it back in, then finish the install from the Firmware page's recovery tab — your settings are saved and can go back afterwards. ${message(e)}`,
+      `Your drone was wiped but the new software didn't finish installing, so it won't start up yet. Unplug it and plug it back in, then finish the install. ${message(e)}`,
       backup,
       true,
     )

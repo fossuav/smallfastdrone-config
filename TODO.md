@@ -398,15 +398,11 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   message and calling it done — this is the same shape as the enable
   timeout bug, where success was reported as failure.
 
-- `[ui]` **The exit ceremony cannot resume after the wipe.**
-  `runExitCeremony()` starts at `backing-up`, which reads the drone's settings
-  over MAVLink — and a wiped drone has no MAVLink. So a failure anywhere after
-  the erase leaves a blank board the wizard can only describe, never finish;
-  the outcome says "your drone needs finishing" and offers nothing that can.
-  Hit on the bench 2026-09-08. The Firmware page's recovery tab finishes the
-  job and the copy now points there, but the ceremony holding the backup is
-  where it belongs. Wants a resume that skips to flash-and-restore with the
-  backup it already has.
+- _Done 2026-09-08 → PROGRESS.md._ **The exit ceremony cannot resume after
+  the wipe.** `finishExitCeremony()` now runs the half that needs no drone —
+  flash, wait, restore — from the backup the ceremony already holds, or from
+  the saved file after a reload. "Start again" is gone once the erase has
+  happened, because it was never possible.
 
 - `[tooling]` **`ArtifactKind` has drifted from the doc.**
   `src/security/uploader.ts` declares `'firmware' | 'lua-applet' | 'mission'`;

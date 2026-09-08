@@ -68,6 +68,16 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-08: **The exit ceremony can finish what it starts.** `finishExitCeremony()` splits out the half that needs no drone — flash, wait for it, restore — and the wizard offers it as **Finish the install** whenever a run stopped after the wipe.
+
+  The old behaviour was worse than a missing feature: `runExitCeremony()` opens by reading the drone's settings over MAVLink, so re-running it on a wiped drone is impossible rather than merely wasteful. The wizard said *"your drone needs finishing"* and its only button was "Start again", which could never work. Hit on the bench with a blank board.
+
+  **Two ways back in.** In the same session the view still holds the backup. After a reload it does not — but the operator does, because the ceremony makes them confirm they saved the file before anything irreversible happens, and that gate now has a second job. Loading it resumes.
+
+  "Start again" is gone once the erase has happened. Offering an action that cannot work is worse than offering none, and the alert beside it had just promised the drone could be finished.
+
+  Both halves are safe to run twice: flashing an already-flashed drone and restoring already-restored settings land where they started. A test pins that the full ceremony runs the same code as the resume, so the two cannot drift. 430 → 434 unit.
+
 - 2026-09-08: **The exit ceremony, run end to end on a sealed drone with an owner key — the first time either was true.** Settings restored **14/14, none missing, none differing**, and `BRD_OPTIONS` came back as **1** where the drone had 1025: the seal-bit fix working on real hardware, so the drone that was wiped in order to unseal it did not quietly ask to be sealed again.
 
   **What this proved.** The unlock ran against genuinely read-protected silicon through the tool's own `DfuClient`, in a browser, rather than a Python mirror of it — and triggered the silicon mass erase, which happens only on a real RDP 1→0 transition. That closes a TODO standing since the DFU work landed: *"has never been run against a genuinely read-protected board"*.

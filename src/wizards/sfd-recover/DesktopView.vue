@@ -40,6 +40,7 @@
 
 import type { ParsedHex } from '../../protocol/intel-hex'
 import type { OpenedDfuDevice } from '../../transport/webusb'
+import type { ParamBackup } from '../../workflow/param-backup'
 import type { RecoverOutcome, RecoverPhase, RecoveryDriver } from '../../workflow/sfd-recover'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -56,12 +57,13 @@ import { downloadText } from '../../ui/download'
 import { useFirmwareFlash } from '../../workflow/firmware'
 import {
   backupFilename,
+  parseBackup,
   planRestore,
   restoreTouchesCalibration,
   serializeBackup,
 } from '../../workflow/param-backup'
 import { useSettingsBackup } from '../../workflow/settings-backup'
-import { hasUnfinishedBusiness, RecoverError, runExitCeremony } from '../../workflow/sfd-recover'
+import { finishExitCeremony, hasUnfinishedBusiness, RecoverError, runExitCeremony } from '../../workflow/sfd-recover'
 import RecoverySteps from './RecoverySteps.vue'
 
 const COMP_ID_AUTOPILOT = 1
@@ -281,6 +283,52 @@ const driver: RecoveryDriver = {
   },
 }
 
+/*
+  Finish an exit that stopped after the wipe.
+
+  Runs the half that needs no drone: flash, wait, restore. Re-running the
+  whole ceremony is not an option once the erase has happened, because it
+  begins by reading settings over a link the drone no longer has.
+
+  Safe to press twice - flashing an already-flashed drone and restoring
+  already-restored settings both land where they started.
+*/
+async function finishInstall(backup: ParamBackup): Promise<void> {
+  stopped.value = null
+  outcome.value = null
+  try {
+    outcome.value = await finishExitCeremony(driver, backup, (p) => {
+      phase.value = p
+    })
+    phase.value = 'done'
+  }
+  catch (e) {
+    phase.value = 'stopped'
+    stopped.value = e instanceof RecoverError
+      ? e
+      : new RecoverError('flash-failed', e instanceof Error ? e.message : String(e), backup, true)
+  }
+}
+
+// The saved file, for finishing after a reload took the in-memory copy.
+const backupInput = ref<HTMLInputElement | null>(null)
+const backupError = ref<string | null>(null)
+
+async function chooseBackup(event: Event): Promise<void> {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (backupInput.value)
+    backupInput.value.value = ''
+  backupError.value = null
+  if (!file)
+    return
+  try {
+    await finishInstall(parseBackup(await file.text()))
+  }
+  catch (e) {
+    backupError.value = `${file.name}: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
 async function start(): Promise<void> {
   stopped.value = null
   outcome.value = null
@@ -460,12 +508,37 @@ function cancel(): void {
         :description="stopped.message"
       />
       <div class="flex flex-wrap gap-2">
-        <UButton v-if="stopped.backup" color="primary" icon="i-lucide-download" @click="saveBackupAgain">
+        <!-- Past the wipe there is no starting again: the ceremony opens
+             by reading the drone's settings and a wiped drone has none.
+             Finishing is the only move, and it is the one the alert has
+             just promised. -->
+        <UButton
+          v-if="stopped.destructive && stopped.backup"
+          color="primary"
+          icon="i-lucide-play"
+          :loading="phase === 'flashing' || phase === 'reconnecting' || phase === 'restoring'"
+          @click="finishInstall(stopped.backup)"
+        >
+          Finish the install
+        </UButton>
+        <UButton v-if="stopped.backup" :color="stopped.destructive ? 'neutral' : 'primary'" variant="subtle" icon="i-lucide-download" @click="saveBackupAgain">
           Save your settings file
         </UButton>
-        <UButton color="neutral" variant="subtle" icon="i-lucide-rotate-ccw" @click="start">
+        <UButton v-if="!stopped.destructive" color="neutral" variant="subtle" icon="i-lucide-rotate-ccw" @click="start">
           Start again
         </UButton>
+      </div>
+
+      <!-- After a reload the backup is gone from memory but not from the
+           operator's disk - which is what the save gate was for. -->
+      <div v-if="stopped.destructive && !stopped.backup" class="border-default space-y-2 rounded-md border p-3">
+        <p class="text-muted text-xs">
+          Load the settings file you saved and this can finish the job.
+        </p>
+        <input ref="backupInput" type="file" class="text-sm" @change="chooseBackup">
+        <p v-if="backupError" class="text-error text-xs">
+          {{ backupError }}
+        </p>
       </div>
     </div>
 
