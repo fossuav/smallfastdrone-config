@@ -296,6 +296,18 @@ never met an H743.
 - **Drone identity capture (Phase 7).** Does the identity file (UID + public key) get captured by SFD at order/manufacture time, or exported by the customer from the configurator and sent in? Doesn't change the crypto at all, but decides whether "SFD enable" is one click or a two-step with a wait in the middle — i.e. whether the flow has a support ticket in it. **Open; needs an operator decision before the enable wizard's UX is designed.**
 - **GPLv3 §6 anti-tivoization (Phase 7).** Locked bootloader + signed-only firmware is the shape that clause addresses. The exit ceremony looks like the answer — the customer can install modified GPL firmware on hardware they own, losing only the commercial applets. That is an engineering reading, **not a legal opinion**, and wants a qualified check before a product line depends on it.
 - **RDP is STM32H7-only** in the current firmware implementation (`stm32_flash_read_protect_flash()` is `#if defined(STM32H7)`). Accepted — SmallFastDronev1 is H7 — but it caps which boards can ever be SFD-enabled. Revisit if the board range widens.
+- **Sealing does not freeze ownership (Phase 8, firmware). Found on the bench
+  2026-09-08.** The seal blocks a *re-claim*, because `set_owner_key()` refuses
+  only when the drone is already owned **and** sealed. A sealed drone that was
+  never claimed is therefore still claimable by whoever plugs in first — so
+  "sealed" does not mean what decision 39 and docs/SECURITY.md imply, which is
+  that ownership is settled.
+  **Recommendation: refuse a presence claim on any sealed drone, owned or not.**
+  The seal is the operator's statement that the drone is finished; after it,
+  ownership should move only by a grant, which is what decision 42 built. The
+  cost is that a drone sealed before it was claimed can then only be owned via
+  SFD — a support path, and arguably the correct one, since it is the
+  factory-provisioning story. **Operator's call.**
 - **Claiming an unsealed drone (Phase 8, firmware).** Physical presence is the
   only authorisation for `SET_OWNER_KEY`, so an unsealed drone belongs to
   whoever plugs in first — and since decision 39 that applies to re-claiming

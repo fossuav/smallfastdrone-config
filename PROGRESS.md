@@ -68,6 +68,20 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-08: **The feature the whole arc exists for, working on a sealed board: commercial Lua a customer cannot copy.** A script encrypted to one drone's identity ran on it; the byte-identical script encrypted to a different identity — with the **same board id**, so it passed the cheap gate and had to fail at the key agreement — was refused. Both 465 bytes, on the same sealed controller, at the same moment.
+
+  Installed through the real UI (*"premium_tune.lxa is on your drone. It will run from now on."*), and `PREMIUM` counted up over MAVLink as proof it was executing rather than merely present. Sealing is what makes this mean anything: unsealed, the identity private key can be lifted with a debugger and any script for that board decrypted. Sealed, it cannot.
+
+  An accidental confirmation as well: the card still held two `.lxa` files from the September session, encrypted to an identity two wipes ago. Same physical controller, unreadable. Removed — they were causing a standing PreArm warning.
+
+  **Two findings, and one of them blocks the feature in its shipping configuration.**
+
+  **A bootloader write needs memory Lua has taken.** Writing an owner key or an identity copies the used part of the boot sector into RAM — tens of kilobytes, contiguous — and scripting's heap comes from the same pool. An ownership grant was refused with scripting on and applied immediately with it off. So the recovery path for a lost owner key was blocked on precisely the drones it exists for: the ones running the code SFD sells. The drone now checks before writing and says which knob to turn; the underlying appetite is unfixed, and reading the sector in blocks would remove the competition altogether.
+
+  **Sealing does not freeze ownership.** The seal blocks a *re-claim*, not a first claim, because `set_owner_key()` refuses only when the drone is already owned **and** sealed. A sealed drone that was never claimed still belongs to whoever plugs in first. That is not what decision 39 implies and not what the bench record's summary line suggests. Recorded as an open question in PLAN.md with a recommendation: refuse presence claims on any sealed drone, and let decision 42's grants be the only way in.
+
+  **Found by my own test harness doing damage.** `bench:seal` probed the refusal by sending an invented key, expecting rejection — and on a sealed-but-unowned board it was accepted, claiming the drone for a key nobody holds. A test that performs a real irreversible write when its expectation fails is a bad test; it now re-sends the key already installed. Recovering from it exercised decision 42 in exactly its intended role, which is the one consolation.
+
 - 2026-09-08: **The exit ceremony can finish what it starts.** `finishExitCeremony()` splits out the half that needs no drone — flash, wait for it, restore — and the wizard offers it as **Finish the install** whenever a run stopped after the wipe.
 
   The old behaviour was worse than a missing feature: `runExitCeremony()` opens by reading the drone's settings over MAVLink, so re-running it on a wiped drone is impossible rather than merely wasteful. The wizard said *"your drone needs finishing"* and its only button was "Start again", which could never work. Hit on the bench with a blank board.
