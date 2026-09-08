@@ -140,29 +140,37 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   means that retry is load-bearing rather than belt-and-braces, and a bench
   check that cross-validates the two counts will flap.
 
-- `[firmware]` **A bootloader write asks for the whole 128 KB sector, and
-  nobody knows why.** `read_bootloader()` buffers from the start of the boot
-  sector to the first *erased* 1 KB block. On the bench 2026-09-08 it asked for
-  **131072 bytes** — the entire sector — meaning not one of its 128 blocks read
-  as erased. With Lua scripting running and **377 KB free**, that contiguous
-  request failed; with scripting off it succeeded. So ownership grants and
-  identity generation fail on a drone running scripts, which is the recovery
-  path for a lost owner key failing on the drones it exists for.
+- `[firmware]` **A bootloader write asks for the whole 128 KB sector, and the
+  sector is genuinely full.** `read_bootloader()` buffers from the start of the
+  boot sector to the first *erased* 1 KB block — ~52 KB if the bootloader is
+  followed by erased flash, the whole 128 KB if not. With Lua running and
+  **377 KB free**, the 128 KB contiguous request fails; with scripting off it
+  succeeds. So ownership grants and identity generation fail on a drone running
+  scripts: the lost-key recovery path failing on the drones it exists for.
 
-  **The symptom is measured; the cause is not.** Two explanations were tried
-  and both are wrong, so neither should be repeated: allocating from AXI SRAM
-  (`MEM_FILESYSTEM`) does not help, and the `_with_bl.hex` is not filling the
-  sector — its padding is `0xFF` and it leaves 88 erased blocks from offset
-  40960. `flash_bootloader()` writes only the bootloader's own size, so the
-  ROMFS path does not fill it either. What leaves the board's sector scanning
-  as fully non-empty is unexplained. **Dump the sector and look before
-  changing anything** — a sealed board cannot be read over DFU, so this wants
-  either an unsealed board or firmware that reports the first non-erased block.
+  **Measured on the bench 2026-09-08**, via the diagnostic now in
+  `read_bootloader()`: **0 of 128 blocks erased**. Sampling showed Thumb-2 code
+  at offsets 61440 and 122880, far past the 52 KB bootloader.
 
-  Once the cause is known: reducing the buffer is the fix if the sector really
-  is mostly erased, and holding it in 1 KB chunks rather than one allocation is
-  the fix if it genuinely is full. Today the message names the remedy (turn
-  scripting off), which works and is honest but treats a symptom.
+  **Three explanations were tested and all are wrong** — do not repeat them.
+  AXI SRAM (`MEM_FILESYSTEM`) does not help and was reverted. The
+  `_with_bl.hex` does not fill the sector: it pads with `0xFF` and leaves 88
+  erased blocks from offset 40960. `flash_bootloader()` writes only the
+  bootloader's own length. And the application does not share the sector —
+  `FLASH_RESERVE_START_KB` is 128 on this board, so the app starts exactly
+  where sector 0 ends.
+
+  **The remaining hypothesis, unverified:** `write_bootloader()` writes back
+  whatever `read_bootloader()` buffered, so once the sector is full it stays
+  full by its own hand, whatever first filled it. Testing it means reflashing
+  the bootloader and re-reading the diagnostic — which **erases the identity**,
+  so it wants a board that is not mid-experiment. Today's was sealed and
+  carrying the encrypted-Lua proof.
+
+  Once the cause is known: buffer less if the sector is mostly erased, or hold
+  it in 1 KB chunks if it is truly full (which needs the `memmem` callers
+  reworking). Today the message names the remedy — turn scripting off — which
+  works and is honest but treats a symptom.
 
 - `[firmware]` **`create_nonce()` takes nonces from `rand()`.**
   `AP_Scripting/lua_scripts.cpp` fills all 24 nonce bytes from `rand()`. Safe
