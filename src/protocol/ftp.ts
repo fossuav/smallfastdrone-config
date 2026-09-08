@@ -432,8 +432,34 @@ export class MavFtp {
   // Reset the server's session table. Useful at startup to clear any
   // sessions left over from a previous client (the FC won't free them
   // until we either close them or reset).
-  async resetSessions(): Promise<void> {
-    await this.sendOp(FTP_OP.RESET_SESSIONS, 0, 0, EMPTY)
+  /*
+    Free any FTP slots the FC is holding.
+
+    Retried, because this is almost always the first thing to touch FTP
+    after a connect or a reboot, and a drone brings its filesystem up
+    some time after it starts answering heartbeats. On a board's first
+    boot after a mass erase that gap is at its widest - it is
+    reinitialising storage - and that is exactly when the settings
+    restore runs, at the end of the exit ceremony. Reported from a real
+    bench as "FTP RESET_SESSIONS timed out after 1500ms" with nothing
+    wrong but timing.
+
+    Retrying rather than lengthening the timeout, because resetting
+    sessions twice is harmless by definition: a ready drone answers at
+    once and an unready one should be asked again, not waited on.
+   */
+  async resetSessions(attempts = 4): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.sendOp(FTP_OP.RESET_SESSIONS, 0, 0, EMPTY)
+        return
+      }
+      catch (e) {
+        if (attempt >= attempts)
+          throw e
+        await new Promise(resolve => setTimeout(resolve, 400))
+      }
+    }
   }
 
   // Send one FTP request, await the matching response, parse it,
