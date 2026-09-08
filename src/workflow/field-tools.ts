@@ -13,18 +13,26 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Registry of field tools — the catalogue behind the "Field tools" page, the
-// things an operator can install onto the radio to run from the transmitter's
-// own CRSF menu with no laptop. Deliberately a registry (not a single
-// hardcoded install) so the operator installs only what they choose, and so
-// the set can grow after the fact:
+// The Lua assets behind a field-capable wizard — the applet (+ any shared
+// modules) that gets installed onto the FC so the wizard can be run from the
+// transmitter's own CRSF menu with no laptop.
 //
-//   - Built-in tools carry their Lua assets (the applet + any shared modules)
-//     as ?raw imports and install via the lua-engine FTP path.
-//   - Paid tools are `locked` entries — they reuse the wizard library's
-//     commercial gating seam (the Pro badge + entitlement check). They appear
-//     greyed with "Unlock" until entitled; only then do they carry assets and
-//     become installable. v1 ships the seam, not a payment integration.
+// This is deliberately NOT a catalogue. Which recipes have a radio version is
+// declared by the wizard manifests (`field_capable: true`), and the operator
+// sees them in the one catalogue (PLAN decision 43); this registry holds only
+// what a manifest cannot carry, which is a .lua file. Keyed by wizard id, so
+// the join is exact. It used to double as the catalogue behind a `/field`
+// page, and a second list of the same things is how the two came to disagree.
+//
+// Deliberately a registry (not a single hardcoded install) so the operator
+// installs only what they choose, and so the set can grow after the fact:
+//
+//   - Built-in tools carry their Lua assets as ?raw imports and install via
+//     the lua-engine FTP path.
+//   - Paid ones are locked *wizard manifests* — the same commercial gating
+//     seam as everything else in the catalogue, not a parallel one. A locked
+//     entry ships no assets to a non-entitled build; entitlement is where the
+//     assets and the install become available.
 //   - Custom (operator-supplied) tools come in behind expert mode, the same
 //     posture as operator-supplied firmware DFU. The registry being data-
 //     driven is what lets a custom or downloaded tool be added without
@@ -34,7 +42,7 @@
 // security uploader seam (src/security/uploader.ts) — the same path DFU uses,
 // and where signed Lua for paid tools lands later. That was aspirational when
 // written and became true on 2026-09-07; encrypted applets from SFD go the same
-// way. See docs/WIZARDS.md "Field tools catalogue".
+// way. See docs/WIZARDS.md "Field-capable wizards".
 
 import motorCheckApplet from '../wizards/motor-check/applet.lua?raw'
 import motorCheckHelper from '../wizards/motor-check/crsf_helper.lua?raw'
@@ -47,22 +55,19 @@ export interface FieldModule {
 }
 
 export interface FieldTool {
-  // Applet id on the FC — the filename stem under APM/scripts/. Matches the
-  // owning wizard's id where the tool is a wizard's radio counterpart.
+  // Applet id on the FC — the filename stem under APM/scripts/. This is the
+  // owning wizard's id: it is what joins the assets to the manifest that
+  // declared `field_capable`.
   id: string
   // Operator-facing — no parameter names / MAVLink terms (docs/UX.md).
   name: string
   description: string
   icon: string
-  // Lua applet source + any shared modules. Absent on a locked entry until
-  // it's entitled (the seam): a locked tool advertises itself but ships no
-  // assets to a non-entitled build.
+  // Lua applet source + any shared modules. Optional because a paid entry
+  // ships no assets to a non-entitled build — the gating itself lives on the
+  // wizard manifest (`locked`), not here.
   applet?: string
   modules?: FieldModule[]
-  // Commercial gating — reuses the wizard library's locked/Pro seam.
-  locked?: boolean
-  // Why it's worth unlocking (shown on the Pro row), like a manifest's blurb.
-  unlock_blurb?: string
 }
 
 export const FIELD_TOOLS: FieldTool[] = [
@@ -74,25 +79,17 @@ export const FIELD_TOOLS: FieldTool[] = [
     applet: motorCheckApplet,
     modules: [{ name: 'crsf_helper.lua', source: motorCheckHelper }],
   },
-  // Paid-tool seam (no implementation yet) — demonstrates that the catalogue
-  // carries locked entries that slot in via the same gating as the wizard
-  // library. Same "coming soon" posture as the pid-autotune-pro stub.
-  {
-    id: 'field-tune',
-    name: 'Field tune',
-    description: 'Touch up filtering and response from the radio after a field tweak, without a laptop.',
-    icon: 'i-lucide-sparkles',
-    locked: true,
-    unlock_blurb: 'A paid field tool — coming soon.',
-  },
 ]
 
-// Tools that ship assets and aren't gated — installable right now.
+// Tools that actually ship assets — installable right now.
 export function installableTools(): FieldTool[] {
-  return FIELD_TOOLS.filter(t => !t.locked && t.applet)
+  return FIELD_TOOLS.filter(t => t.applet)
 }
 
-// Locked (paid) tools — shown as Pro rows until entitlement lands.
-export function lockedTools(): FieldTool[] {
-  return FIELD_TOOLS.filter(t => t.locked)
+// The assets for one field-capable wizard, or undefined if it declares a
+// radio version but nothing has been built yet. The catalogue lists the
+// manifest and looks the assets up here, so a manifest that promises a radio
+// version we cannot install simply doesn't offer one.
+export function fieldToolFor(wizardId: string): FieldTool | undefined {
+  return installableTools().find(t => t.id === wizardId)
 }

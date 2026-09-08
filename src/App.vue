@@ -56,10 +56,7 @@ const navItems = computed(() =>
     .map(r => ({
       label: r.meta!.label as string,
       icon: r.meta!.icon as string,
-      // navTo lets a route serve its real path while the nav link points
-      // somewhere else (e.g. "Bringup" routes to the ribbon, /wizard the
-      // library stays reachable via in-page links).
-      to: (r.meta?.navTo as string | undefined) ?? r.path,
+      to: r.path,
     })),
 )
 </script>
@@ -86,17 +83,18 @@ const navItems = computed(() =>
                  view. Renders nothing on an ordinary drone. -->
             <SecurityBadge compact />
             <MessageBell />
-            <!-- Entry point to the field-tools catalogue (run wizards from the
-                 radio). Cross-cutting, so it lives in the chrome; the page
-                 holds the catalogue. -->
-            <UTooltip text="Field tools — run from your radio">
+            <!-- How many tools are on the radio right now. An indicator,
+                 not a destination: it shows state (cheap) and links into
+                 the catalogue's radio filter rather than a page of its
+                 own (PLAN decision 43). -->
+            <UTooltip text="On the radio — tools you can run from your transmitter">
               <UButton
-                to="/field"
+                :to="{ path: '/recipes', query: { view: 'radio' } }"
                 icon="i-lucide-radio"
                 variant="ghost"
                 color="neutral"
                 size="sm"
-                aria-label="Field tools"
+                aria-label="On the radio"
               >
                 <template v-if="field.installedCount > 0" #trailing>
                   <UBadge color="success" variant="solid" size="sm" class="justify-center rounded-full px-1 text-[10px] leading-none">

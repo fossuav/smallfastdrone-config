@@ -59,7 +59,7 @@ const {
   applyError,
 } = useConnections()
 
-const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
+const returnTo = computed(() => String(route.query.returnTo ?? '/recipes'))
 
 onMounted(() => {
   if (!props.skipOverview)

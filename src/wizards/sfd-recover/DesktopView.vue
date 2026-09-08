@@ -77,7 +77,7 @@ const route = useRoute()
 const { capture } = useSettingsBackup()
 const { flashDfu, unlockDfu, phase: flashPhase, progress: flashProgress } = useFirmwareFlash()
 
-const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
+const returnTo = computed(() => String(route.query.returnTo ?? '/recipes'))
 
 const phase = ref<RecoverPhase | 'idle'>('idle')
 const outcome = ref<RecoverOutcome | null>(null)

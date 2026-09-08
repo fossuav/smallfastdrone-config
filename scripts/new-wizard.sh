@@ -161,8 +161,8 @@ const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
 
-// Back path: library by default; bringup passes ?returnTo=/wizard/bringup.
-const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
+// Back path: the catalogue by default; bringup passes ?returnTo=/wizard/bringup.
+const returnTo = computed(() => String(route.query.returnTo ?? '/recipes'))
 
 // Operator finished the wizard — record completion against this FC, then
 // return to wherever the wizard was launched from.

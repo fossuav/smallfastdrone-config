@@ -42,6 +42,7 @@ import WizardRibbon from '../../ui/components/WizardRibbon.vue'
 import { useConnections } from '../../workflow/connections'
 import { frameGeometry } from '../../workflow/motor-geometry'
 import { getWizard } from '../../workflow/wizard-runtime'
+import { BRINGUP_AREA_IDS, BRINGUP_OPTIONAL_AREA_IDS } from './areas'
 
 const session = useSessionStore()
 const params = useParamsStore()
@@ -49,19 +50,11 @@ const progress = useWizardProgressStore()
 const route = useRoute()
 const router = useRouter()
 
-// Ordered chain of bringup areas. Pre-arm readiness is deliberately NOT
-// surfaced here — that's a phase-05 (pre-first-flight) gate, not an
-// opening-step concern. See docs/BRINGUP.md.
-// Securing comes last: it is about the drone's identity rather than
-// whether it will fly, and on a drone that isn't an SFD drone the panel
-// says so rather than disappearing (WIZARDS.md, "never silently hide").
-const AREA_IDS = ['preflight', 'frame-select', 'connections-setup', 'motor-check', 'sfd-enable'] as const
-
-// Areas offered in the ribbon but which never gate its completion.
-// Bringup is about getting the drone flying; securing is about its
-// identity, and most drones cannot be secured at all — gating on it would
-// mean an ordinary ArduPilot drone could never finish bringup.
-const OPTIONAL_AREA_IDS = new Set<string>(['sfd-enable'])
+// The chain and its optional members are data shared with the catalogue
+// (src/wizards/bringup/areas.ts), so the two cannot drift on what
+// "done" means.
+const AREA_IDS = BRINGUP_AREA_IDS
+const OPTIONAL_AREA_IDS = BRINGUP_OPTIONAL_AREA_IDS
 
 // Where this DesktopView lives, for routing tabs + returnTo.
 const RIBBON_PATH = '/wizard/bringup'
@@ -315,13 +308,12 @@ onMounted(() => {
         Loading…
       </div>
 
-      <!-- Discoverability for wizards that don't live in the ribbon yet
-           (Pro PID stub, standalone access). Will retire once Pro PID
-           moves into Recipes. -->
+      <!-- The way back out to the catalogue. Bringup is the guided path;
+           everything else this drone can be given lives in Recipes. -->
       <p class="text-muted border-default mt-6 border-t pt-3 text-center text-xs">
-        Looking for a paid wizard or to run one on its own?
-        <RouterLink to="/wizard" class="text-primary hover:underline">
-          All wizards →
+        Looking for something else?
+        <RouterLink to="/recipes" class="text-primary hover:underline">
+          All recipes →
         </RouterLink>
       </p>
     </template>

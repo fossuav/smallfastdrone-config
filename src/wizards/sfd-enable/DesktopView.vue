@@ -152,7 +152,7 @@ async function chooseOwnerKey(event: Event): Promise<void> {
 }
 const { reconnectAndReload } = useReconnect()
 
-const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
+const returnTo = computed(() => String(route.query.returnTo ?? '/recipes'))
 
 // Updating the startup software is its own little job with its own
 // failure, so it gets its own state rather than borrowing the ceremony's.

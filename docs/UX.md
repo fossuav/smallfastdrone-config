@@ -131,7 +131,7 @@ Not a v1 polish target, but baseline:
 | `FirmwareView` | Animated DFU flow with visual stage indicators; firmware metadata card. |
 | `EscToolsView` | Per-ESC card with live data; "ESC profile" picker visible by default; raw 4-way settings only in expert mode. |
 | `SettingsView` | One card per feature toggle (switch + plain-language description + current-state line). Reboot-required toggles surface an Apply confirm; the restart + reconnect is handled for the operator. |
-| `FieldToolsView` | Catalogue of field-installable tools (one row per tool, Install / Remove inline); scripting-on indicator; commercial gating shown as locked "Pro" rows; expert-only "Add your own applet" affordance. Reached from a header radio-icon entry point that also carries the installed-count badge. |
+| `RecipesView` | The one catalogue. Guided-bringup banner with live step count, then a card grid grouped by what a recipe is *for*; bringup steps say which step they are. Locked "Pro" cards use the one gating seam. Its **On the radio** filter is where field-installable tools are installed / removed (one row each), and owns the scripting-on indicator, the SFD-applet install, and the expert-only "Add your own applet" affordance. The header's radio icon is an installed-count indicator that links into that filter. |
 
 ## Feature toggles & reboot-required changes
 

@@ -4,7 +4,7 @@
 
 A **wizard** is a self-contained, opinionated workflow that takes a drone from one named state to another — "frame configured," "notch tuned from a hover," "throw-mode set up," "first-flight failsafes wired." Wizards are the **primary delivery primitive** of this tool. The bringup workflow is itself a wizard (a meta-wizard that chains sub-wizards). Recipes are wizards too — the degenerate case with one step and no live state.
 
-Wizards are designed to be **pluggable**: ship in a folder, declared via a manifest, discovered at build time, surfaced in the wizard library. New wizards land without touching the runtime.
+Wizards are designed to be **pluggable**: ship in a folder, declared via a manifest, discovered at build time, surfaced in the catalogue. New wizards land without touching the runtime.
 
 ## Operating principles
 
@@ -304,7 +304,7 @@ Wizards that fail any of these aren't ready to ship:
 The Phase 2 deliverable:
 
 - Wizard runtime (`src/workflow/wizard-runtime.ts`) — capability detection, engine selection, lifecycle hooks, IndexedDB persistence
-- Wizard library view (`src/views/WizardLibraryView.vue`) — cards driven by manifests, filtered by FC capability, with locked-state rendering
+- The catalogue (`src/views/RecipesView.vue`) — cards driven by manifests, grouped by what a recipe is for, with locked-state rendering and the "On the radio" filter
 - Two real wizards end-to-end:
   - `frame-select` — desktop engine, writes `FRAME_CLASS` + `FRAME_TYPE`, demonstrates the contract
   - `bringup` — meta-wizard, walks through `frame-select` and a placeholder Pre-flight step, demonstrates the meta pattern

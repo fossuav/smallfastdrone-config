@@ -36,9 +36,8 @@ test('SFD enable refuses clearly on a drone that cannot hold an identity', async
   // Navigate inside the app rather than reloading: a fresh page load
   // drops the connection, and this wizard is entirely about what the
   // connected drone can do.
-  await page.getByRole('link', { name: 'Bringup' }).click()
-  await page.getByRole('link', { name: 'All wizards' }).click()
-  await page.getByRole('link', { name: /Open the Secure your drone wizard/ }).click()
+  await page.getByRole('link', { name: 'Recipes', exact: true }).click()
+  await page.getByRole('link', { name: /Open the Secure your drone recipe/ }).click()
   await expect(page.getByRole('heading', { name: 'Secure your drone' })).toBeVisible({ timeout: 15_000 })
 
   // The identity read is a round trip an unsigned build never answers, so

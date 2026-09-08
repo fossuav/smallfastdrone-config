@@ -35,7 +35,7 @@ const route = useRoute()
 // Where to navigate back to on Confirm or Cancel. Defaults to the
 // library; bringup passes returnTo=/wizard/bringup so the operator
 // flows back into the meta-wizard mid-bringup.
-const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
+const returnTo = computed(() => String(route.query.returnTo ?? '/recipes'))
 
 // Truncate the FC uid for display — the full hex is unambiguous but
 // noisy in a sidebar. Operators don't need to recognise the value,

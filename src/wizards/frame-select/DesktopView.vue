@@ -36,7 +36,7 @@ const route = useRoute()
 // Where to navigate back to on Done / Cancel. Defaults to the library;
 // bringup passes returnTo=/wizard/bringup so the operator continues the
 // meta-wizard sequence rather than getting dumped at the library.
-const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
+const returnTo = computed(() => String(route.query.returnTo ?? '/recipes'))
 
 // Frame option a card represents — visible to the operator under a
 // plain-language label, but the underlying FRAME_CLASS + FRAME_TYPE
@@ -374,7 +374,7 @@ function back() {
         </template>
       </p>
       <UButton class="mt-4" color="primary" @click="back">
-        Back to the wizard library
+        Done
       </UButton>
     </div>
 
@@ -391,7 +391,7 @@ function back() {
           Retry
         </UButton>
         <UButton color="neutral" @click="back">
-          Back to the library
+          Back
         </UButton>
       </div>
     </div>

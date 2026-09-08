@@ -36,9 +36,8 @@ test('exit ceremony states the cost and refuses to start unarmed', async ({ page
   await page.getByRole('button', { name: 'Connect drone' }).click()
   await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 20_000 })
 
-  await page.getByRole('link', { name: 'Bringup' }).click()
-  await page.getByRole('link', { name: 'All wizards' }).click()
-  await page.getByRole('link', { name: /Open the Remove your drone's security wizard/ }).click()
+  await page.getByRole('link', { name: 'Recipes', exact: true }).click()
+  await page.getByRole('link', { name: /Open the Remove your drone's security recipe/ }).click()
   await expect(page.getByRole('heading', { name: 'Remove your drone\'s security' })).toBeVisible({ timeout: 15_000 })
 
   // The cost, before it is avoidable — including the part an operator

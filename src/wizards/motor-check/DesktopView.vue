@@ -85,7 +85,7 @@ const router = useRouter()
 const route = useRoute()
 const { reconnectAndReload } = useReconnect()
 
-const returnTo = computed(() => String(route.query.returnTo ?? '/wizard'))
+const returnTo = computed(() => String(route.query.returnTo ?? '/recipes'))
 
 type Phase
   = | 'loading' | 'unsupported' | 'esc-setup' | 'safety' | 'testing' | 'review'
@@ -580,7 +580,7 @@ function labelStyle(angleDeg: number): Record<string, string> {
       </UAlert>
       <div class="flex justify-end">
         <UButton color="neutral" variant="outline" @click="leave">
-          Back to library
+          Back
         </UButton>
       </div>
     </div>
@@ -838,7 +838,7 @@ function labelStyle(angleDeg: number): Record<string, string> {
           Fix this for me
         </UButton>
         <UButton v-else color="primary" @click="leave">
-          Back to library
+          Back
         </UButton>
       </div>
     </div>
@@ -885,7 +885,7 @@ function labelStyle(angleDeg: number): Record<string, string> {
         {{ errorMessage }}
       </p>
       <UButton color="neutral" @click="leave">
-        Back to library
+        Back
       </UButton>
     </div>
   </div>

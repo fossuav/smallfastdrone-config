@@ -53,13 +53,20 @@ const wizardId = computed(() => String(route.params.id ?? ''))
 const wizard = computed(() => getWizard(wizardId.value))
 
 // Live FC capability snapshot for prereq evaluation. Mirrors the one
-// in WizardLibraryView so a wizard that the library said was startable
-// stays startable here.
+// in RecipesView so a wizard the catalogue said was startable stays
+// startable here.
 const caps = computed(() => ({
   connected: session.connected,
   heartbeat: session.hasHeartbeat,
   params_loaded: false,
 }))
+
+// Where the breadcrumb goes. Whoever linked here says so with
+// ?returnTo=, because a wizard can be opened from the catalogue or from
+// the bringup ribbon and "back" means a different place in each; the
+// catalogue is the fallback.
+const backTo = computed(() => String(route.query.returnTo ?? '/recipes'))
+const backLabel = computed(() => backTo.value.startsWith('/wizard/bringup') ? 'Bringup' : 'Recipes')
 
 // Evaluated against the current wizard's prereqs every time caps move.
 const prereqs = computed(() =>
@@ -121,11 +128,11 @@ watch(
   >
     <div class="flex items-center gap-2">
       <RouterLink
-        to="/wizard"
+        :to="backTo"
         class="text-muted hover:text-primary inline-flex items-center gap-1 text-sm"
       >
         <UIcon name="i-lucide-chevron-left" class="size-4" />
-        Wizard library
+        {{ backLabel }}
       </RouterLink>
     </div>
 

@@ -19,6 +19,11 @@
 // `expert: true` flag that hides the route from the menu when the
 // expert-mode toggle in the UI store is off. Views are lazily imported
 // so the initial bundle stays small.
+//
+// Two operator destinations for wizards, not four (PLAN decision 43):
+// "Bringup" is the guided ordered walk, "Recipes" is the one catalogue.
+// The old `/wizard` library and `/field` pages redirect into them, so a
+// bookmark from before the collapse still lands somewhere sensible.
 
 import type { RouteRecordRaw } from 'vue-router'
 import { createRouter, createWebHistory } from 'vue-router'
@@ -31,32 +36,33 @@ export const routes: RouteRecordRaw[] = [
     meta: { label: 'Connect', icon: 'i-lucide-plug' },
   },
   {
-    // The wizard library is still hosted at /wizard (Pro PID stub +
-    // standalone wizard access). But "Bringup" in the top nav now goes
-    // straight to the ribbon — the library is reached via the "All wizards"
-    // link in the bringup view (until Recipes carries the orphans). navTo
-    // overrides the nav target without changing the route path.
+    // "Bringup" in the nav is the guided ordered walk, which is the
+    // bringup meta-wizard's own runner route. This bare path carries the
+    // nav entry and redirects onto it, which also keeps the pre-collapse
+    // /wizard library URL alive.
     path: '/wizard',
     name: 'wizard',
-    component: () => import('./views/WizardLibraryView.vue'),
-    meta: { label: 'Bringup', icon: 'i-lucide-list-checks', navTo: '/wizard/bringup' },
+    redirect: '/wizard/bringup',
+    meta: { label: 'Bringup', icon: 'i-lucide-list-checks' },
   },
   {
-    // Field tools catalogue. No nav label — reached via the header's
-    // radio-icon entry point (it's a cross-cutting capability, not a
-    // primary destination).
+    // The Field tools page folded into the catalogue's "On the radio"
+    // filter. Redirect so an old link still lands on what it meant.
     path: '/field',
     name: 'field',
-    component: () => import('./views/FieldToolsView.vue'),
+    redirect: { path: '/recipes', query: { view: 'radio' } },
   },
   {
     // Per-wizard runner. No `meta.label` so it doesn't appear in the
-    // nav; the library is the entry point and links into here.
+    // nav; the catalogue is the entry point and links into here.
     path: '/wizard/:id',
     name: 'wizard-runner',
     component: () => import('./views/WizardRunnerView.vue'),
   },
   {
+    // The one catalogue: every wizard the tool bundles, bringup's steps
+    // included and free. `?view=radio` narrows it to the entries with a
+    // radio version.
     path: '/recipes',
     name: 'recipes',
     component: () => import('./views/RecipesView.vue'),
