@@ -68,6 +68,21 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-08: **The exit ceremony, run end to end on a sealed drone with an owner key — the first time either was true.** Settings restored **14/14, none missing, none differing**, and `BRD_OPTIONS` came back as **1** where the drone had 1025: the seal-bit fix working on real hardware, so the drone that was wiped in order to unseal it did not quietly ask to be sealed again.
+
+  **What this proved.** The unlock ran against genuinely read-protected silicon through the tool's own `DfuClient`, in a browser, rather than a Python mirror of it — and triggered the silicon mass erase, which happens only on a real RDP 1→0 transition. That closes a TODO standing since the DFU work landed: *"has never been run against a genuinely read-protected board"*.
+
+  **Four defects, and every one in the handover between steps rather than in the crypto.** All four were in paths SITL structurally cannot reach.
+
+  - **`WritableStream is already locked` on connect.** A WritableStream takes one writer and `send()` awaits while holding it, so two callers that don't await each other collide — and asking for telemetry on connect had put a second sender beside the AUTOPILOT_VERSION request. The comment there asserted this couldn't happen, that the only sender "serialises by construction"; nothing enforced it. Sends now chain. **The E2E suite runs over a WebSocket, which has no such lock** — this is a transport the tests cannot reach, which is exactly where an assumption like that survives.
+  - **A file dialog with nothing in it.** `accept=".hex"` hid every other file, so choosing the recovery image could fail with no filename, no error, and a Start button disabled for no stated reason. Filter removed: being told which file and why beats not being allowed to pick it.
+  - **The wipe working is what broke the wizard.** Dropping readout protection takes the board off the USB bus entirely — that is how the wipe proves it worked — and it needs a physical replug. The wizard polled 30 s, gave up, and said *keep it plugged in*: the one instruction guaranteed not to work, at the point where the drone is in its most broken state. It now asks and waits, with no stopwatch.
+  - **`FTP RESET_SESSIONS timed out after 1500ms`** on the restore. Freeing FTP slots is the first thing to touch FTP after a reboot, and a drone brings its filesystem up well after it answers heartbeats — widest on a first boot after a mass erase, which is exactly when the restore runs. Retried rather than lengthened, since resetting twice is harmless by definition. There were no FTP unit tests at all before this.
+
+  **The gap left open:** the ceremony has no resume. `runExitCeremony()` starts by reading settings over MAVLink and a wiped drone has none, so a failure after the erase leaves a board the wizard can only describe. The Firmware page finishes it and the copy now points there, but the fix belongs in the ceremony that holds the backup. Logged.
+
+  **One thing worth stating plainly:** the drone came back as the SFD fork built vanilla — unsigned, no secure regions, `TBS_LUCID_H7` target — because that is what the recovery image was built from. Functionally an exited drone, and the GPL position holds, but it is not the upstream ArduCopter artefact September used. 430 unit.
+
 - 2026-09-08: **Sealed the bench board, and the test found the bug reasoning had missed.** Decision 42's whole claim is that a signed grant still works on a sealed drone. It did not.
 
   `apply_owner_grant()` passed every check and then called `set_owner_key()`, where the presence rule lives — already-owned **and** sealed means refuse. That rule is decision 39 and is right for a claim authorised by somebody at the drone; it is wrong for one authorised by SFD, which is the entire way back for a sealed drone whose owner key was lost. The counter already distinguished them, so the seal now blocks only the presence path.

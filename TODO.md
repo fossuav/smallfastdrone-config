@@ -22,11 +22,13 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 - _Done 2026-05-27 → PROGRESS.md._ **Firmware flashing / DFU.** Both paths
   landed and are hardware-verified on TBS_LUCID_H7, routed through the security
   uploader seam.
-- `[firmware]` **Bench-verify the DFU unlock (read-unprotect).** `DfuClient.readUnprotect()`
-  and the recovery tab's unlock disclosure are unit-tested only — there is no
-  SITL substitute for DFU, and the path has never been run against a genuinely
-  read-protected board. Needs a locked H7 to confirm, including that the
-  "success looks like a stall" reading holds on real silicon.
+- _Done 2026-09-08 → PROGRESS.md._ **Bench-verify the DFU unlock
+  (read-unprotect).** Run against a genuinely read-protected TBS_LUCID_H7 —
+  sealed earlier the same day — through the tool's own `DfuClient`, in a
+  browser, not a Python mirror of it. The unlock triggered the silicon mass
+  erase, which happens only on a real RDP 1→0 transition, so the
+  "success looks like a stall" reading holds. Everything that failed
+  afterwards was handover, not the unlock.
 - `[firmware]` **Wider-board hardware coverage for flashing.** Only TBS_LUCID_H7
   has been exercised. MatekH743 / CubeOrange / CubeOrangePlus are wired in
   `board-flash-map.ts` but unverified; non-H7 parts (F4, F7, H723 single-bank)
@@ -395,6 +397,16 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   print it. **Capture the ack before fixing**, rather than filtering the
   message and calling it done — this is the same shape as the enable
   timeout bug, where success was reported as failure.
+
+- `[ui]` **The exit ceremony cannot resume after the wipe.**
+  `runExitCeremony()` starts at `backing-up`, which reads the drone's settings
+  over MAVLink — and a wiped drone has no MAVLink. So a failure anywhere after
+  the erase leaves a blank board the wizard can only describe, never finish;
+  the outcome says "your drone needs finishing" and offers nothing that can.
+  Hit on the bench 2026-09-08. The Firmware page's recovery tab finishes the
+  job and the copy now points there, but the ceremony holding the backup is
+  where it belongs. Wants a resume that skips to flash-and-restore with the
+  backup it already has.
 
 - `[tooling]` **`ArtifactKind` has drifted from the doc.**
   `src/security/uploader.ts` declares `'firmware' | 'lua-applet' | 'mission'`;
