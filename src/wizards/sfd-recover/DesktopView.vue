@@ -100,13 +100,17 @@ async function chooseImage(event: Event): Promise<void> {
   if (!file)
     return
   imageError.value = null
+  image.value = null
   try {
     const parsed = parseIntelHex(await file.text())
     image.value = { hex: parsed, filename: file.name }
   }
   catch (e) {
-    image.value = null
-    imageError.value = e instanceof Error ? e.message : 'That file couldn\'t be read.'
+    // Name the file that failed. An operator with several downloads
+    // needs to know which one this was about, and a bare parse error
+    // reads as though the tool is broken rather than the choice wrong.
+    const said = e instanceof Error ? e.message : 'it couldn\'t be read'
+    imageError.value = `${file.name}: ${said}`
   }
 }
 
@@ -306,7 +310,13 @@ function cancel(): void {
           The drone is wiped right down to the software that starts it, so this
           has to be a full install file (one ending <code>_with_bl.hex</code>).
         </p>
-        <input type="file" accept=".hex" class="text-sm" @change="chooseImage">
+        <!-- Deliberately unfiltered. `accept=".hex"` hides everything
+             else, and a dialog showing no files at all is a dead end
+             with nothing to read: an operator who picks the wrong thing
+             should be told so, not left with an empty folder. Reported
+             from a real bench, where the file was on the other side of a
+             WSL boundary and the picker simply showed nothing. -->
+        <input type="file" class="text-sm" @change="chooseImage">
         <p v-if="image" class="text-success text-xs">
           Ready: {{ image.filename }}
         </p>
