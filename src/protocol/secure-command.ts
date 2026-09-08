@@ -81,6 +81,7 @@ export const OWNER_STATUS = {
   OTHER_DRONE: 8,
   UNSIGNED: 9,
   STALE: 10,
+  NO_MEMORY: 11,
 } as const
 const IDENTITY_REPLY_LEN = IDENTITY_UID_LEN + IDENTITY_KEY_LEN
 
@@ -315,6 +316,7 @@ function ownerRefusal(result: MavResult, data: Uint8Array): SecureCommandError {
     [OWNER_STATUS.OTHER_DRONE]: 'That permission was issued for a different drone.',
     [OWNER_STATUS.UNSIGNED]: 'This drone doesn\'t recognise who issued that permission. It has to come from SmallFastDrone.',
     [OWNER_STATUS.STALE]: 'That permission has been superseded — a newer one was already used on this drone. Ask for a fresh one.',
+    [OWNER_STATUS.NO_MEMORY]: 'Your drone hasn\'t enough free memory while it\'s running its own scripts. Turn off scripting on the Settings page, do this, then turn it back on.',
   }[status]
   if (message !== undefined)
     return new SecureCommandError(SECURE_OP.SET_OWNER_KEY, result, message)

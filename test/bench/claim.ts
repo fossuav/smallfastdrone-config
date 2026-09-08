@@ -71,6 +71,7 @@ const OWNER_STATUS: Record<number, string> = {
   8: 'that permission was issued for a different drone',
   9: 'that permission is not signed by a key this drone trusts',
   10: 'that permission has been superseded — a newer one was already applied',
+  11: 'not enough free memory — turn Lua scripting off, then retry',
 }
 
 function hex(bytes: Uint8Array): string {
