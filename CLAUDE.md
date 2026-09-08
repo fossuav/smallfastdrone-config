@@ -17,6 +17,8 @@ A secondary, longer-term objective is a secured environment for signed firmware 
 See [docs/UX.md](docs/UX.md) for the full operator-first design playbook. Practical implications when implementing anything user-facing:
 
 - **Recipes hide parameters.** Operators choose named outcomes ("Indoor cinewhoop"); the tool picks the params.
+- **One catalogue.** Everything the tool can do to a drone is listed in **Recipes** — bringup steps (free), tuning, securing, paid entries. "Wizard" is the internal primitive; the operator never meets the word. The guided ordered walk stays the bringup meta-wizard.
+- **A control must be justified by a recipe that could not do it.** If a recipe can determine the value, there is no control (PLAN decision 44). Corollary: **generous with showing, stingy with asking** — read-only surfaces are not bloat, controls are.
 - **Visuals are utility.** 3D drone model, motor highlighting, animated cal illustrations, live spectrum — not decoration. Each visual exists to make a decision easier.
 - **Expert mode is a deliberate toggle**, off by default, per-session. Param browser, raw MAVLink, manual protocol switching, raw 4-way ESC settings, operator-supplied firmware DFU all live behind it.
 - **Microcopy contains zero parameter names or MAVLink terms.** Internally `ATC_RAT_PIT_P`; in the UI "Pitch responsiveness".
@@ -103,6 +105,7 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 - **Operator-first copy.** No parameter names, no MAVLink message names, no acronyms in user-facing strings. "Pitch responsiveness" not `ATC_RAT_PIT_P`. "Loading drone settings…" not "Fetching PARAM_VALUE stream". See [docs/UX.md](docs/UX.md) microcopy guidelines.
 - **Every wizard step needs a visual.** No bare text-only wizard steps. SVG illustration, Tres.js 3D, animation, or live data — pick one. If you can't think of a visual, the step probably needs rethinking.
 - **Expert mode is opt-in.** Anything power-user (param table, raw protocol, manual mode switch, operator-supplied firmware) lives behind the expert toggle. Default UX shows none of it.
+- **Adding a surface needs a reason in writing.** A new top-level page, tab, or toggle has to pass PLAN decision 44 — a recipe could not have done it — and the reason goes in the decision log. The default home for anything new is a surface that already exists. Two surfaces rendering the same object with different chrome are one surface with a filter.
 - **Treat the security seam as load-bearing.** Even though crypto isn't implemented in v1, all artifact uploads route through `src/security/uploader.ts`. **DFU firmware flashing is the primary v1 use case** for this seam. Don't add direct upload paths.
 - **Protocol mode switching is explicit.** When the same port carries multiple protocols (MAVLink → MSP → 4-way → MAVLink for BLHeli passthrough), state transitions are explicit and reversible. There is always a guaranteed exit path back to the starting protocol, even on error.
 - **MSP scope is minimal.** We support exactly what BLHeli passthrough needs — not a general MSP client. If you want to add an MSP feature unrelated to BLHeli, propose a PLAN.md decision first.

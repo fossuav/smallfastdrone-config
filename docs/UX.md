@@ -25,6 +25,8 @@ Operators may **become** experts over time. The tool accommodates growing sophis
 6. **Recoverable mistakes.** Every change is reversible — wizard back-button restores prior state; param writes are batched with a "revert this batch" affordance.
 7. **Live feedback always.** Wherever the FC reports something useful (vibration, link health, sensor health), the tool shows it visually and continuously. No buried status pages.
 8. **Eye-candy is utility, not decoration.** Every animation, 3D model, or visual exists to make a decision easier or to give the operator confidence the tool is working — not to look cool. (It can also look cool.)
+9. **Generous with showing, stingy with asking.** Read-only surfaces are not bloat — firmware version, frame, what's calibrated, what's on the radio, the log list. Controls are. The knife that keeps the tool small cuts questions, not information.
+10. **A control must be justified by a recipe that could not do it.** If a recipe can determine the value, there is no control (PLAN decision 44). This is "configure, don't ask" as a gate rather than a preference: bloat is never decided, it is the absence of a decision, so the only defence is a test that adding has to pass. The health metric is **how often an operator has to open the param browser** — high means the recipe library has a hole, and the fix is a recipe, not a control. "They can use expert mode" is never a reason to skip building one.
 
 ## Expert mode
 
@@ -40,6 +42,17 @@ Power-users get a toggle (top-right of the app shell) that exposes:
 - **Developer detail**: System ID, raw link byte counters, firmware git hash, dev hints like the SITL transport URL. An operator never needs these; an expert sometimes does. Default surfaces show what the operator needs to decide or confirm; raw FC / build / link metadata goes here.
 
 Expert mode is **off by default** and **per-session** — re-enable each session. Operators must not stumble into expert UI by accident.
+
+## One catalogue
+
+There is **one** operator-facing catalogue, called **Recipes**, and it lists everything the tool can do to a drone. Bringup's steps are in it, free. Tuning recipes are in it. Securing is in it. Paid entries are in it, greyed. Internally they are all the same object (a wizard manifest — see [WIZARDS.md](WIZARDS.md)); the operator never meets that word.
+
+The tool previously had three catalogues — a wizard library, a Recipes page and a Field tools page — each rendering the same object with different chrome. That was not a decision, it was accretion, and it is the shape competing configurators bloat into. PLAN decision 43 collapsed it.
+
+Two things are deliberately kept out of the collapse:
+
+- **The guided sequence.** Bringup is ordered and has a done-state — the frame builds the mixer, so a motor check before a frame choice is meaningless, and *"this drone has never had its motors checked"* is a safety fact. It stays a meta-wizard with its own ribbon, listed in the catalogue as the guided path. Its steps are individually runnable for an operator who already knows what they want. An order-free grid of everything would push the ordering back onto the operator, and then need explanatory UI to fix that — bloat arriving through the back door.
+- **Read-only chrome.** The header still shows how many tools are on the radio, the security badge still shows posture. Showing is cheap; asking is what we ration.
 
 ## Settings vs procedures — when to use a wizard
 
@@ -143,13 +156,15 @@ The rule: never present routine FC chatter as something demanding attention. The
 
 Some procedures benefit from "no laptop at the field" — installed onto the FC, run from the transmitter's CRSF menu. The operator-facing model:
 
-- **One global home, not per-wizard panels.** `FieldToolsView` is the catalogue, reached from a header radio-icon entry point. The operator's question is *"what can I run from the radio?"*, which spans wizards (and later settings); per-wizard install panels fragment it.
+- **It is a property of a recipe, not a place.** The operator's question is *"can I run this one from the radio?"*, and the answer belongs on the thing itself. A field-capable card carries a green **"On the radio"** badge when installed, else an info-blue **"Field-capable"**; the catalogue has an **On the radio** filter that narrows to those entries and gives each an Install / Remove control; the per-wizard chrome carries the same inline toggle. This replaced a dedicated Field tools page (2026-09-08, PLAN decision 43) — a whole surface for what is one attribute of a catalogue entry.
 - **Selective.** The operator installs only what they pick — never an all-or-nothing bundle. Each row has its own Install / Remove.
-- **Field-install is a property *of the wizard*, not a separate concern.** Each field-capable wizard's chrome carries an inline **"On the radio"** toggle (info-blue, top-right of the runner header) — flipping it installs / removes the field tool right there, no detour to the catalogue. The library card shows a matching green **"On the radio"** badge when installed, else **"Field-capable"**. The toggle, the badge, the catalogue, and the header count badge all read the same `useFieldToolsStore`, so a change anywhere reflects everywhere. Field tools (the page) is the central *manager* — the home for the catalogue, paid Pro entries, custom applets, and scripting management — for when the operator wants the bigger picture, not the per-wizard switch.
-- **Commercial gating reuses the wizard library's `locked` seam.** A paid field tool is a Pro row, greyed with "Unlock" until entitled. No new gating mechanism.
+- **One store.** The badge, the filter, the chrome toggle and the header count all read `useFieldToolsStore`, so a change anywhere reflects everywhere.
+- **Scripting is handled in place.** Field tools run as scripts; if scripting is off, the filtered view offers to turn it on (write → reboot → auto-reconnect, no babysitting) rather than sending the operator to Settings.
+- **Commercial gating reuses the catalogue's `locked` seam.** A paid field tool is a Pro card in the same catalogue. No second gating mechanism, and no second "coming soon" stub demonstrating the same seam twice.
 - **Custom (operator-supplied) tools live behind expert mode**, same posture as operator-supplied firmware DFU.
+- **An applet SmallFastDrone sent for this drone** is not expert-gated — the operator cannot read or write it, but being given one is an ordinary thing for a customer. It sits with the catalogue, because that is what it is: a recipe made for one airframe alone.
 
-Catalogue contract + extensibility seams: see `docs/WIZARDS.md` "Field tools catalogue".
+Catalogue contract + extensibility seams: see `docs/WIZARDS.md` "Field-capable wizards".
 
 ## Anti-patterns we won't ship
 
@@ -161,6 +176,8 @@ Catalogue contract + extensibility seams: see `docs/WIZARDS.md` "Field tools cat
 - Numeric values in units the operator doesn't intuit (centidegrees, raw stick units, MAVLink enums).
 - Making the operator babysit a reboot — separate Restart/Reconnect buttons, or a manual reconnect as the default after a restart. One confirm, then the tool handles restart + reconnect.
 - "Are you sure?" prompts that don't say what will actually happen.
+- **A new capability earning a new page.** The default home for anything new is an existing surface. A new top-level destination needs a reason a reader of PLAN decision 44 would accept, written down.
+- **Two surfaces rendering the same object with different chrome.** If they are the same thing, they are one surface with a filter.
 
 ## Future tuning sophistication
 

@@ -189,21 +189,25 @@ The applet `require`s the firmware's `crsf_helper`, which isn't in SITL's ROMFS,
 
 The correction/decision maths in the applet must mirror the tool-side TS it duplicates (e.g. motor-check's `compute_corrections` ↔ `computeCorrections`). **Testability:** the spin/param/reboot mechanics and "applet loads + registers its menu" are SITL-verifiable; the menu interaction rides the CRSF radio link (no transmitter in SITL) so it's hardware-verified — call it out in the applet's `.md`.
 
-### Field tools catalogue
+### Field-capable wizards (run from the radio)
 
-Field-install is a **cross-cutting** capability, not a per-wizard one: the operator's question is "what can I run from the radio?", which spans wizards *and* (later) settings. So it's promoted out of the individual wizards to a dedicated **Field tools** page (`src/views/FieldToolsView.vue`, route `/field`), reached from a radio-icon **entry point in the app header**. The per-wizard "Run at the field" panels collapse into it.
+Field-install is an **attribute of a wizard**, declared as `field_capable: true` on the manifest. It used to be a page of its own (`/field`, `FieldToolsView`); PLAN decision 43 folded it into the one catalogue, because a whole surface for one manifest flag is exactly the accretion that decision exists to stop.
 
-Two requirements shape it:
+How it surfaces:
 
-- **Selective.** The operator installs only the tools they pick — never an all-or-nothing bundle. So it's a **catalogue** (`src/workflow/field-tools.ts`), not a single install. Each tool is an independent applet: install = upload its applet (+ shared modules) and `restartScripting()`; remove = delete + restart. Installing one never drags in another.
-- **Extensible after the fact (custom + paid).** The catalogue is **registry-driven**, so tools can be added without rebuilding around them:
-  - **Built-in** tools carry their Lua assets as `?raw` imports and are installable immediately.
-  - **Paid** tools are `locked: true` entries — they reuse the **same commercial gating seam as the wizard library** (Pro badge, greyed "Unlock", entitlement check). A locked entry advertises itself but ships no assets to a non-entitled build; entitlement is where the assets + install become available. v1 ships the seam, not a payment integration.
-  - **Custom** (operator-supplied Lua) comes in behind **expert mode**, the same posture as operator-supplied firmware DFU. The data-driven registry is what lets a custom or downloaded tool slot in.
+- **In the catalogue** (`src/views/RecipesView.vue`) — a badge on the card ("On the radio" / "Field-capable"), and an **On the radio** filter that narrows to field-capable entries and renders each with its own Install / Remove. The filter view also owns the scripting gate: field tools run as scripts, so if scripting is off it offers to turn it on in place.
+- **In the wizard's chrome** — the inline "On the radio" toggle in the runner header, so the operator can flip it without a detour.
 
-All asset uploads go through the lua-engine, which is the consumer of the **security uploader seam** (`src/security/uploader.ts`) — the same path DFU uses, and where signed/encrypted Lua for paid tools lands later. So a paid field tool = entitlement + (future) encrypted-Lua-over-the-seam.
+Both read the shared `useFieldToolsStore`, as does the header's installed count.
 
-**Future:** a header badge (count of installed tools — needs a small shared store so the chrome and the page agree); enable/disable without removing, by **moving applets between `APM/scripts` (active) and `APM/scripts/disabled`** (presence = enabled, FTP-only, never touching the firmware's scripting internals — the `listDirectory` primitive is the building block); and cross-script concerns (heap budgeting, version/update, orphan cleanup) once the catalogue is busy.
+Two requirements shape the registry behind it:
+
+- **Selective.** The operator installs only the tools they pick — never an all-or-nothing bundle. So `src/workflow/field-tools.ts` is a registry of independent applets keyed by wizard id: install = upload the applet (+ shared modules) and `restartScripting()`; remove = delete + restart. Installing one never drags in another. The registry holds the **Lua assets** a manifest cannot carry; it is not a second catalogue, and the operator-facing list comes from the wizard registry.
+- **Extensible after the fact (custom + paid).** Paid entries are `locked: true` **wizard manifests** — the same commercial gating seam as everything else in the catalogue, not a parallel one. A locked entry advertises itself but ships no assets to a non-entitled build. **Custom** (operator-supplied Lua) comes in behind **expert mode**, the same posture as operator-supplied firmware DFU.
+
+All asset uploads go through the lua-engine, which is the consumer of the **security uploader seam** (`src/security/uploader.ts`) — the same path DFU uses, and the path an encrypted `.lxa` from SFD takes. So a paid field tool = entitlement + encrypted Lua over the seam.
+
+**Future:** enable/disable without removing, by **moving applets between `APM/scripts` (active) and `APM/scripts/disabled`** (presence = enabled, FTP-only, never touching the firmware's scripting internals — the `listDirectory` primitive is the building block); and cross-script concerns (heap budgeting, version/update, orphan cleanup) once the catalogue is busy.
 
 ## Capability detection
 
@@ -243,7 +247,9 @@ A recipe is a wizard with:
 - A `DesktopView` that renders the param diff + a single confirm button
 - No live state
 
-Recipes can ship as data (`recipe.json`) and the runtime wraps them in a generated manifest. Operator never sees the distinction between "wizard" and "recipe" — both are cards in the library, both run through the same runtime, both write via the param store's dirty/confirm path.
+Recipes can ship as data (`recipe.json`) and the runtime wraps them in a generated manifest. Operator never sees the distinction between "wizard" and "recipe" — both are cards in the catalogue, both run through the same runtime, both write via the param store's dirty/confirm path.
+
+**Vocabulary, since decision 43:** *wizard* is the internal primitive and the name of this contract; **Recipes** is the single operator-facing catalogue (`/recipes`) and lists every wizard, bringup steps included, free. There is no separate "wizard library" page and no separate "field tools" page.
 
 ## Bringup as meta-wizard
 
@@ -260,7 +266,9 @@ The bringup workflow is a meta-wizard at `src/wizards/bringup/`. Its engine is `
 9. `mode-setup`
 10. `verify`
 
-The meta-wizard's job is sequencing + gating; sub-wizards do the actual work and own their own state. An experienced operator can launch any sub-wizard standalone from the library.
+The meta-wizard's job is sequencing + gating; sub-wizards do the actual work and own their own state. An experienced operator can launch any sub-wizard standalone from the catalogue.
+
+The sequence is why bringup stays a meta-wizard rather than dissolving into the catalogue's grid (decision 43): its steps are **ordered** — the frame builds the mixer, so a motor check before a frame choice is meaningless — and its completion is a **safety fact** worth holding. A grid cannot express either. So the catalogue lists bringup as the guided path and its children as individually runnable entries.
 
 ## Commercial gating (v1)
 
