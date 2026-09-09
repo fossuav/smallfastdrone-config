@@ -91,7 +91,7 @@ Where depth is the point:
 - **Sensor cal (not built):** animated tilt showing the next orientation the operator must put the airframe in. This is the strongest remaining case: the operator has to copy a pose.
 - **Mode setup (not built):** a brief animation of what each flight mode "feels like".
 
-Implementation: **Tres.js** (`@tresjs/core` + `@tresjs/cientos`) — Vue-3-native three.js wrapper, declarative scene composition via Vue components. One generic drone model with frame-class variants; no per-board models.
+Implementation: **Tres.js** (`@tresjs/core`) — Vue-3-native three.js wrapper, declarative scene composition via Vue components. One generic drone model with frame-class variants; no per-board models.
 
 ### 2D illustrations
 

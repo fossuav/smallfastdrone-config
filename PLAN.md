@@ -68,7 +68,7 @@ See [docs/UX.md](docs/UX.md) for the operator-first design playbook.
 | 18 | Audience | Operators, not experts | Drives every UX decision. See [docs/UX.md](docs/UX.md). |
 | 19 | Primary surfaces | **One catalogue (Recipes) + the guided bringup**; param browser is expert-mode-only | Operators choose outcomes, not parameter assignments. Param table is a safety hatch. Revised 2026-09-08 (decision 43): the catalogue was three pages and is now one. |
 | 20 | Expert mode | Per-session toggle, off by default | Hides param browser, raw MAVLink, manual protocol switch, raw 4-way ESC settings, etc. |
-| 21 | 3D visualization | `@tresjs/core` + `@tresjs/cientos` | Vue-3-native three.js wrapper. **Narrowed 2026-09-09 by decision 45**: flat SVG is the default, 3D only where depth is the point. Today that is the Connect screen's rotating drone; sensor cal, where the operator must copy a pose, is the strongest remaining case. |
+| 21 | 3D visualization | `@tresjs/core` (Tres.js) | Vue-3-native three.js wrapper. `@tresjs/cientos`, its helper-component package, was dropped 2026-09-09 having never been imported once — the scenes here are small enough to compose from `@tresjs/core` alone. **Narrowed 2026-09-09 by decision 45**: flat SVG is the default, 3D only where depth is the point. Today that is the Connect screen's rotating drone; sensor cal, where the operator must copy a pose, is the strongest remaining case. |
 | 22 | Composition utils | `@vueuse/core` | Modern Vue standard for `useRafFn`, debounce, `useElementSize`, etc. Saves rolling our own. |
 | 23 | Coding standards (Vue) | **Vue.js official Style Guide**, Priority A + B | The authoritative Vue conventions doc. Adopted to avoid AI-generated drift. See [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md). |
 | 24 | Coding standards (TS) | `@antfu/eslint-config` defaults + strict TS | No single canonical TS guide is universally adopted; antfu's TS rules encode current community best practices. |
@@ -95,7 +95,7 @@ Keep this list short. Adding a transitive-heavy lib (lodash, date-fns, three, d3
 - `pinia`
 - `@nuxt/ui` (4) + `tailwindcss` (4)
 - `@vueuse/core` — composition utilities
-- `@tresjs/core` + `@tresjs/cientos` — 3D drone visualization (pulls `three`)
+- `@tresjs/core` — 3D drone visualization (pulls `three`)
 - `node-mavlink` + `mavlink-mappings` — MAVLink v2 parsing, typed message classes, serialize for sending (browser via polyfills, see decision 4)
 - `@noble/ciphers` + `@noble/hashes` — XChaCha20-Poly1305 and BLAKE2b, for reading `.sfx` artefacts only; WebCrypto has neither (decision 40)
 
@@ -132,7 +132,7 @@ That's it for the planned v1 surface. New deps land via PR with a one-line justi
 - Pinia (Setup Stores), vue-router 4, `@vueuse/core`, Vitest, Playwright.
 - `eslint` + `@antfu/eslint-config` configured per [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md); `.editorconfig` in repo root.
 - `vite-plugin-mkcert` for HTTPS dev; `vite-plugin-pwa` for service-worker / installable shell.
-- `@tresjs/core` + `@tresjs/cientos` integrated; placeholder generic drone 3D model rotating on the Connect screen.
+- `@tresjs/core` integrated; placeholder generic drone 3D model rotating on the Connect screen. (`@tresjs/cientos` was installed alongside it and never used; dropped 2026-09-09.)
 - App shell: Connect / Wizard / Recipes / Logs / Firmware / EscTools routes (placeholders).
 - Expert-mode toggle in shell (off by default; per-session); reveals a Params route when on.
 - Operator-first microcopy in place from day one (no MAVLink jargon in any user-facing string).
