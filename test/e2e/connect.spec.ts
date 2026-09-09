@@ -88,3 +88,22 @@ test('Connect view talks to SITL, decodes heartbeat + AUTOPILOT_VERSION', async 
   await page.getByRole('button', { name: 'Disconnect' }).click()
   await expect(page.getByRole('button', { name: 'Connect drone' })).toBeVisible()
 })
+
+test('The drone model goes live once the drone says which way up it is', async ({ page }) => {
+  // The whole chain in one assertion: the view asks for an ATTITUDE
+  // stream on connect (SET_MESSAGE_INTERVAL), the drone starts sending
+  // it, and the model stops idling and starts mirroring. The invitation
+  // to tip the drone is shown only while that is actually true, so its
+  // presence is the proof — there is nothing else to assert against a
+  // WebGL canvas.
+  await page.goto(SITL_URL)
+  await expect(page.getByText('Tip your drone')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText('Connected to your Quadcopter')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Tip your drone')).toBeVisible({ timeout: 15_000 })
+
+  // And it stops claiming to be live when there is no drone.
+  await page.getByRole('button', { name: 'Disconnect' }).click()
+  await expect(page.getByText('Tip your drone')).toHaveCount(0, { timeout: 10_000 })
+})

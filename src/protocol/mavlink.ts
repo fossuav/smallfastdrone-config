@@ -139,6 +139,10 @@ export const MSGID_STATUSTEXT = common.StatusText.MSG_ID
 // SYS_STATUS — per-subsystem present/enabled/healthy bitmasks. Drives
 // the operator-facing status panel on the Connect view.
 export const MSGID_SYS_STATUS = common.SysStatus.MSG_ID
+// ATTITUDE - the drone's own estimate of which way up it is, in radians.
+// Streamed on demand (see workflow/attitude.ts), never by default: it is
+// the one message here worth tens of packets a second.
+export const MSGID_ATTITUDE = common.Attitude.MSG_ID
 
 // Subset of MAV_SYS_STATUS_SENSOR bit values we surface to the operator.
 // Full enum has 30+ bits; the ones below are the "is the drone ready"

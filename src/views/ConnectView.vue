@@ -15,10 +15,16 @@
  */
 
 // Connect view — the operator's landing screen. Renders a hero card with
-// the rotating drone, a Connect/Disconnect action, and (once a heartbeat
-// arrives) the parsed vehicle line, firmware string, and the system
-// status panel of subsystem readiness icons. All state comes from the
-// session store; this view contains no protocol or transport logic.
+// the drone, a Connect/Disconnect action, and (once a heartbeat arrives)
+// the parsed vehicle line, firmware string, and the system status panel
+// of subsystem readiness icons. All state comes from the session store;
+// this view contains no protocol or transport logic.
+//
+// The drone turns idly until there is a connected one to mirror, and
+// then it mirrors it. That is the first useful thing this tool says: an
+// operator who tips their drone and watches the picture tip the same way
+// has confirmed the board is mounted the way the firmware thinks and the
+// IMU is answering, before touching a single setting.
 
 import { computed } from 'vue'
 import { useSessionStore } from '../stores/session'
@@ -26,9 +32,13 @@ import { useUiStore } from '../stores/ui'
 import SecurityBadge from '../ui/components/SecurityBadge.vue'
 import SystemStatus from '../ui/components/SystemStatus.vue'
 import Drone3D from '../ui/visuals/Drone3D.vue'
+import { useAttitude } from '../workflow/use-attitude'
 
 const session = useSessionStore()
 const ui = useUiStore()
+// Live only while this view is mounted; the stream is stopped on the way
+// out (see workflow/attitude.ts).
+const { attitude, live } = useAttitude()
 
 const buttonLabel = computed(() => {
   if (session.connecting)
@@ -67,12 +77,18 @@ function toggle() {
   <div class="flex items-center justify-center py-12">
     <UCard class="w-full max-w-md">
       <template #header>
-        <!-- Hero visual: gentle X-quad rotation. The fixed-height wrapper
-             gives the WebGL canvas something to fill; if WebGL fails the
-             div is just empty space and the rest of the card still works. -->
+        <!-- Hero visual: the drone itself once there is one to mirror,
+             a gentle rotation until then. The fixed-height wrapper gives
+             the WebGL canvas something to fill; if WebGL fails the div is
+             just empty space and the rest of the card still works. -->
         <div class="mx-auto h-40 w-full max-w-xs">
-          <Drone3D />
+          <Drone3D :attitude="live ? attitude : null" />
         </div>
+        <!-- Said once, only while it is true: an instruction to check
+             something, not a status line to keep on the screen. -->
+        <p v-if="live" class="text-muted text-center text-xs">
+          Tip your drone — the picture should follow.
+        </p>
       </template>
 
       <p class="text-center text-muted">

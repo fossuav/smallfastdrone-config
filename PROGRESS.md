@@ -68,6 +68,18 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-09: **The drone model on the Connect screen now mirrors the drone.** Operator direction, after both Betaflight Configurator and ArduConfigurator — and the first thing this tool says that is worth anything before a single setting is touched. Tip the drone; the picture tips the same way. If it doesn't, or it leans the wrong way, the operator has learned in one second that the board is mounted at an angle the firmware doesn't know about, or that the IMU isn't answering. No wizard, no parameter, no question.
+
+  It is also the case that earns 3D under decision 45, which the same day had ruled 3D out of the motor test: the answer genuinely depends on depth, because the operator is comparing a picture against an object in their hands.
+
+  **`ATTITUDE` is asked for, and given back.** Unlike `SYS_STATUS` it is tens of packets a second, so `src/workflow/use-attitude.ts` requests it at 20 Hz on mount and stops it (`SET_MESSAGE_INTERVAL` with -1) when the last consumer goes; consumers are reference-counted so two views can't cut each other off. It re-asks whenever a drone appears rather than only on mount — the operator usually opens the view before plugging anything in, and a drone that reboots comes back having forgotten.
+
+  **Three things that make it readable, each of which it was missing at first.** The model has a **nose** and coloured front arms: a four-fold-symmetric quad makes roll and pitch look identical and yaw look like nothing at all. It is viewed **from behind, nose away**, because from the front every roll reads backwards — that is what makes screen-right the drone's right. And **yaw is relative to where the drone was pointing when the picture went live**, not a compass heading: absolute heading would leave the model facing north while the drone faces the operator, and fixing that with a "reset view" button is exactly the control decision 44 wouldn't allow.
+
+  **The yaw sign was backwards** and nothing about it looked wrong. MAVLink counts yaw clockwise from above; a positive rotation about a right-handed scene's up axis turns the nose the other way. So the convention is now a pure function in `src/workflow/attitude.ts` with unit tests that rotate the aircraft's own landmarks — nose, right wing, belly — and ask where they ended up, rather than restating the three numbers. Seven of them.
+
+  E2E: the Connect spec asserts the picture goes live on connect and stops claiming to be live on disconnect, which is the whole chain — stream requested, drone answering, view following. 452 unit, 30 E2E green.
+
 - 2026-09-09: **The motor test's 3D scene became a flat schematic, and simpler turned out to be more accurate.** Operator direction after looking at ArduConfigurator's motor map (PLAN decision 45, `docs/UX.md` "Flat before 3D").
 
   What went was not really a three.js scene — it was everything the scene made necessary. A vendored 750 KB quad-X mesh from Betaflight. A **second**, procedural hub-and-arms model for every frame that mesh could not honestly represent, which is every frame except quad X. A spinning prop. And the position labels, which were HTML divs placed by projecting world coordinates through a `PerspectiveCamera` whose fov and position had to be kept in step with the scene's camera *by hand*, with a comment saying so.
