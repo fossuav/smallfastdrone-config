@@ -19,7 +19,7 @@ Operators may **become** experts over time. The tool accommodates growing sophis
 
 1. **One choice at a time, with a picture.** Each wizard step asks for one decision. Each decision has a visual that makes the answer obvious.
 2. **Pre-decided defaults.** Recipes hide parameter complexity behind named, illustrated choices: "Indoor cinewhoop", "Outdoor freestyle", "Throw-launched scout". The operator picks an outcome; the tool picks the params.
-3. **Show, don't list.** A 3D drone model rotates and highlights the active motor during motor test. A drawn frame illustrates which way to orient the drone for compass cal. A live spectrum shows filter effect in real time.
+3. **Show, don't list.** A schematic of the drone from above highlights the motor under test and which way it is turning. A drawn frame illustrates which way to orient the drone for compass cal. A live spectrum shows filter effect in real time. **Pick the simplest drawing that answers the question** — see "Flat before 3D" below.
 4. **No raw jargon in operator copy.** Operator-facing strings never contain parameter names, MAVLink message names, or units the operator doesn't need. Internally we may call it `ATC_RAT_PIT_P`; in the UI it's "Pitch responsiveness".
 5. **Safe by default.** Defaults are conservative. Dangerous combinations are blocked outright or require explicit "I know what I'm doing" confirmation in expert mode.
 6. **Recoverable mistakes.** Every change is reversible — wizard back-button restores prior state; param writes are batched with a "revert this batch" affordance.
@@ -75,15 +75,21 @@ Definitions live in `src/assets/css/main.css` (`@theme` block) and are wired int
 
 Don't reach for raw Tailwind colour classes (`bg-blue-500`, etc.) in components — go through Nuxt UI's semantic tokens (`color="primary"`, `text-default`, `bg-elevated`) so a theme change here is the only place to update.
 
+### Flat before 3D
+
+**Default to a flat SVG schematic. Reach for 3D only when the answer genuinely depends on depth** — an orientation the operator has to reproduce with the airframe in their hands, or a rotation they need to see. Everything else reads better flat, and reads better on a bench.
+
+This was learned the expensive way (2026-09-09, PLAN decision 45). Motor test was a three.js scene: a vendored quad-X mesh, a second procedural hub-and-arms model for every frame the mesh could not honestly represent, a spinning prop, and position labels placed in HTML by projecting world coordinates through a camera whose parameters had to be kept in sync with the scene by hand. The flat schematic that replaced it is unambiguous from any angle, frame-agnostic by construction rather than by a second code path, and puts its labels in the drawing instead of over it. **Simpler was also more accurate.**
+
+The flat idiom, shared by the frame-select thumbnails (`src/wizards/frame-select/`) and the motor map (`src/ui/visuals/MotorMap.vue`): top-down, nose up and marked; arms out from a hub at their true airframe angles; a ring per motor; colour from semantic tokens via `currentColor`, so a motor's meaning survives a theme change; motion only where motion is the information, and off under `prefers-reduced-motion`.
+
 ### 3D drone model
 
-The hero element. Used in:
+Where depth is the point:
 
-- **Frame phase:** rotate to confirm frame class/type matches the operator's actual drone.
-- **Sensor cal:** animated tilt arrows showing the next required orientation.
-- **Motor test:** highlight the active motor; show prop direction.
-- **Mode setup:** brief animation showing what each flight mode "feels like".
-- **Connect screen:** a slow rotation while waiting for the FC.
+- **Connect screen:** a slow rotation while waiting for the FC — the one place it is frankly decorative, and it earns that as the brand moment.
+- **Sensor cal (not built):** animated tilt showing the next orientation the operator must put the airframe in. This is the strongest remaining case: the operator has to copy a pose.
+- **Mode setup (not built):** a brief animation of what each flight mode "feels like".
 
 Implementation: **Tres.js** (`@tresjs/core` + `@tresjs/cientos`) — Vue-3-native three.js wrapper, declarative scene composition via Vue components. One generic drone model with frame-class variants; no per-board models.
 
@@ -124,7 +130,7 @@ Not a v1 polish target, but baseline:
 | View | Hero visual |
 |---|---|
 | `ConnectView` | Animated USB icon + drone silhouette during scan; 3D drone appears once connected. |
-| `WizardView` | 3D drone model + per-phase illustration; phase progress rail along one edge. |
+| `WizardView` | Per-phase visual — a flat schematic by default, 3D only where depth is the point (see "Flat before 3D"); phase progress rail along one edge. |
 | `RecipesView` | Recipe cards with illustrations; before/after summary on hover or focus. |
 | `ParamsView` | **Expert mode only.** Plain searchable table. This is the safety hatch, not a primary surface. |
 | `LogsView` | Log catalog with date / duration / size; download button per row. |

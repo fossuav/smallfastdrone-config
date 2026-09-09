@@ -36,10 +36,9 @@
 // left spinning.
 
 import type { CommandAck } from 'mavlink-mappings/dist/lib/common'
-import type { MotorVisual } from '../../ui/visuals/MotorCheck3D.vue'
+import type { MotorVisual } from '../../ui/visuals/MotorMap.vue'
 import type { CorrectionPlan } from '../../workflow/motor-check'
 import type { FrameGeometry, FrameMotor, MotorPosition, Spin } from '../../workflow/motor-geometry'
-import { PerspectiveCamera, Vector3 } from 'three'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { buildMotorTest, buildMotorTestStop, MOTOR_TEST_PWM_SPIN } from '../../protocol/motors'
@@ -47,7 +46,7 @@ import { useParamsStore } from '../../stores/params'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import WizardSteps from '../../ui/components/WizardSteps.vue'
-import MotorCheck3D from '../../ui/visuals/MotorCheck3D.vue'
+import MotorMap from '../../ui/visuals/MotorMap.vue'
 import {
   applyReverseMask,
   collectMotorChannels,
@@ -56,7 +55,7 @@ import {
   REVERSE_MASK_PARAM,
   servoFunctionParam,
 } from '../../workflow/motor-check'
-import { expectedSpin, frameGeometry, frameVariants, motorTopdownXY, positionLabel, spinLabel } from '../../workflow/motor-geometry'
+import { expectedSpin, frameGeometry, frameVariants, positionLabel, spinLabel } from '../../workflow/motor-geometry'
 import { sleep, STORAGE_SETTLE_MS, useReconnect } from '../../workflow/reconnect'
 import EscSetup from './EscSetup.vue'
 
@@ -71,8 +70,6 @@ const COMP_ID_AUTOPILOT = 1
 const MSGID_COMMAND_ACK = 77
 const MAV_CMD_DO_MOTOR_TEST = 209
 const MAV_RESULT_ACCEPTED = 0
-const FRAME_CLASS_QUAD = 1
-const FRAME_TYPE_X = 1
 // Generous spin so the operator has time to look + answer without the
 // motor cutting out mid-thought. Stopped explicitly when stepping/leaving.
 const SPIN_TIMEOUT_SEC = 20
@@ -124,12 +121,6 @@ const motors = ref<FrameMotor[]>([])
 const frameLabel = ref('')
 // Full geometry kept so the review step can compute corrections.
 const geometry = ref<FrameGeometry | null>(null)
-// The vendored airframe model is a quad-X; use it only for that frame and
-// draw a simple accurate arms-per-motor model for everything else.
-const useArmsModel = computed(() =>
-  !(geometry.value?.frameClass === FRAME_CLASS_QUAD && geometry.value?.frameType === FRAME_TYPE_X),
-)
-
 const propsOff = ref(false)
 // Propeller orientation the operator is building for. Default props-in
 // (ArduPilot standard); the toggle switches to props-out (Betaflight
@@ -518,7 +509,8 @@ const displaySpin = computed<Spin>(() => {
   return sel ? motorExpectedSpin(sel) : 'cw'
 })
 
-// 3D states. While testing, the graphic mirrors the operator's answer:
+// What the map should say about each motor. While testing, it mirrors
+// the operator's answer:
 // the motor they've selected as "the one that moved" is highlighted and
 // its prop spins the way they say (defaulting to the expected direction
 // until they pick). In review, motors go green/red by result.
@@ -536,26 +528,16 @@ const motorVisuals = computed<MotorVisual[]>(() =>
       const r = results.value.find(x => x.motor.testOrder === m.testOrder)
       state = r && r.positionOk && r.spinOk ? 'done' : 'mismatch'
     }
-    return { key: m.testOrder, angleDeg: m.angleDeg, spin, state }
+    return {
+      key: m.testOrder,
+      angleDeg: m.angleDeg,
+      spin,
+      state,
+      label: positionLabel(m.position),
+      number: m.motorIndex + 1,
+    }
   }),
 )
-
-// Project each motor's world position onto the (square) canvas so a text
-// label can sit precisely over it. Camera params MUST match the
-// TresPerspectiveCamera in MotorCheck3D.vue. RING_R/RING_Y mirror its
-// motor placement; the +0.4 lifts the label just above the motor.
-const projCam = new PerspectiveCamera(50, 1, 0.1, 1000)
-projCam.position.set(0, 3.25, 1.05)
-projCam.lookAt(0, 0, 0)
-projCam.updateMatrixWorld()
-function labelStyle(angleDeg: number): Record<string, string> {
-  const { x, y: sy } = motorTopdownXY(angleDeg)
-  const ndc = new Vector3(x * 1.05, 0.12 + 0.65, sy * 1.05).project(projCam)
-  return {
-    left: `${(ndc.x * 0.5 + 0.5) * 100}%`,
-    top: `${(-ndc.y * 0.5 + 0.5) * 100}%`,
-  }
-}
 </script>
 
 <template>
@@ -655,19 +637,8 @@ function labelStyle(angleDeg: number): Record<string, string> {
         </UButton>
       </div>
 
-      <div class="relative mx-auto aspect-square w-full max-w-sm">
-        <MotorCheck3D :motors="motorVisuals" :arms="useArmsModel" />
-        <div
-          v-for="m in motors"
-          :key="m.testOrder"
-          class="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium"
-          :class="selPosition === m.position
-            ? 'bg-amber-500 text-white shadow'
-            : 'bg-black/55 text-white/90'"
-          :style="labelStyle(m.angleDeg)"
-        >
-          {{ positionLabel(m.position) }}
-        </div>
+      <div class="mx-auto aspect-square w-full max-w-sm">
+        <MotorMap :motors="motorVisuals" />
       </div>
 
       <UAlert v-if="errorMessage" color="warning" :description="errorMessage" />
@@ -743,7 +714,7 @@ function labelStyle(angleDeg: number): Record<string, string> {
     <!-- review -->
     <div v-else-if="phase === 'review'" class="space-y-4">
       <div class="mx-auto aspect-square w-full max-w-xs">
-        <MotorCheck3D :motors="motorVisuals" :arms="useArmsModel" />
+        <MotorMap :motors="motorVisuals" />
       </div>
 
       <div v-if="allOk" class="space-y-2 py-2 text-center">

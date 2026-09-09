@@ -1,18 +1,15 @@
 # Vendored 3D models — credits
 
-## quad_x.gltf
+Nothing is vendored here right now.
 
-Quad-X airframe model, vendored from the **Betaflight Configurator** project
-(`resources/models/quad_x.gltf`).
+`quad_x.gltf`, the Betaflight Configurator quad-X airframe, was removed on
+2026-09-09 when the motor-check wizard's three.js scene was replaced by a flat
+schematic (`src/ui/visuals/MotorMap.vue`). The schematic draws any frame from
+its own motor angles, so there is no mesh to vendor and no second code path for
+the frames a quad-X mesh could not honestly represent.
 
-- Source: https://github.com/betaflight/betaflight-configurator
-- License: GNU General Public License v3.0 — the same licence this project
-  ships under, so redistribution here is compatible.
-- Used by the motor-check wizard (`src/ui/visuals/MotorCheck3D.vue`) as the
-  drone body. Per-motor highlighting is overlaid by us; the model itself is
-  unmodified.
-
-Betaflight's own airframe models (quad/hex/etc.) carry no separate
-third-party model licence in the source tree — only the explicitly
-third-party assets (`airplane`, `car`) do — so they are treated as
-Betaflight-authored work under the project's GPLv3.
+This file stays because the next vendored asset needs somewhere to be credited,
+and because a removed attribution should say what it was rather than vanish.
+The original entry: quad-X airframe model from
+https://github.com/betaflight/betaflight-configurator (`resources/models/quad_x.gltf`),
+GNU General Public License v3.0 — the same licence this project ships under.

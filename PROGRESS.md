@@ -68,6 +68,18 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-09: **The motor test's 3D scene became a flat schematic, and simpler turned out to be more accurate.** Operator direction after looking at ArduConfigurator's motor map (PLAN decision 45, `docs/UX.md` "Flat before 3D").
+
+  What went was not really a three.js scene — it was everything the scene made necessary. A vendored 750 KB quad-X mesh from Betaflight. A **second**, procedural hub-and-arms model for every frame that mesh could not honestly represent, which is every frame except quad X. A spinning prop. And the position labels, which were HTML divs placed by projecting world coordinates through a `PerspectiveCamera` whose fov and position had to be kept in step with the scene's camera *by hand*, with a comment saying so.
+
+  `src/ui/visuals/MotorMap.vue` draws the same drone as an SVG: hub, one arm per motor at its true airframe angle, nose marked, a ring per motor with its number in it and its position under it, and — on the motor under test — a curved arrow around the outside showing which way it is turning, its dashes travelling the same way so the arrow and the motion always agree. Colour is state and nothing else, taken from semantic tokens through `currentColor` so it survives a theme change; the animation stops under `prefers-reduced-motion`.
+
+  **The accuracy argument is the one worth keeping.** The 3D scene had to fake the frames it had no mesh for; the schematic cannot, because it is built from the angles the firmware reports. One drawing path instead of two, unambiguous from any angle, which is what somebody looking down at a drone on a bench actually needs.
+
+  The arc maths is `src/ui/visuals/spin-arc.ts`, ported from ArduConfigurator's `motor-spin-arc.ts` (GPLv3, same licence) and credited in the file — an arc centred on the motor's *outward* direction, so a front motor's arrow domes above it and a rear motor's below, the way people sketch prop directions on a frame. It has its own unit tests, because the sweep direction is the one thing in the drawing that could be silently backwards. 445 unit tests, 29 E2E green.
+
+  `MotorCheck3D.vue` and `quad_x.gltf` are gone; `src/assets/models/CREDITS.md` stays and says what was removed rather than quietly losing the attribution. Tres.js stays for the Connect screen, and decision 21 is narrowed in place to say when it is the right tool.
+
 - 2026-09-08: **Three catalogues became one, and adding a control now has to pass a test.** Two operator decisions (PLAN 43 and 44) after watching a competing configurator bloat, then the collapse itself.
 
   The tool had grown **three catalogue surfaces for one object** — the wizard library (`/wizard`), the Recipes ribbon (`/recipes`) and Field tools (`/field`), each rendering the same manifest with different chrome and different gating. Nobody decided that; it accreted a slice at a time. They are now one catalogue at `/recipes`, and bringup's steps sit in it free, because bringup is the commoditised half of what this tool does: charging for it buys nothing, and giving it away puts a drone on our rails.
