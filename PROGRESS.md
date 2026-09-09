@@ -68,6 +68,14 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-09: **The live view uses Betaflight's own quad, not one made of boxes.** Operator direction — *"this should be the same 3D model that betaflight uses"* — and they were right for a reason worth writing down: the live-attitude view is a **convention operators already know**, from Betaflight Configurator and ArduConfigurator both, and an airframe assembled from cylinders and boxes reads as a diagram rather than as their drone. The mesh also solves for free the problem I had been solving by hand, since it carries green front props, red rear props and a printed nose arrow.
+
+  `quad_x.gltf` comes back, four commits after being deleted for having no consumer. That deletion was correct at the time and this is not a reversal of it: what changed is that something needs a real airframe again. `CREDITS.md` says both halves of that story rather than quietly re-appearing.
+
+  The hero is also **bigger** — 208px tall and wider — because the first report was *"I'm not seeing a 3D view, where would it be?"*, which is a legitimate answer to a 160-pixel band above a paragraph of text.
+
+  **The mesh flies down its own -Z**, and our attitude convention has the nose along +X. That was measured, not assumed: render it from directly above, see which way the green props and the arrow point. A quarter-turn error there would have made every roll read as a pitch — the same class of silent wrongness as the yaw sign earlier the same day, and the second reason this view's geometry is now written down rather than carried in someone's head.
+
 - 2026-09-09: **The drone model on the Connect screen now mirrors the drone.** Operator direction, after both Betaflight Configurator and ArduConfigurator — and the first thing this tool says that is worth anything before a single setting is touched. Tip the drone; the picture tips the same way. If it doesn't, or it leans the wrong way, the operator has learned in one second that the board is mounted at an angle the firmware doesn't know about, or that the IMU isn't answering. No wizard, no parameter, no question.
 
   It is also the case that earns 3D under decision 45, which the same day had ruled 3D out of the motor test: the answer genuinely depends on depth, because the operator is comparing a picture against an object in their hands.

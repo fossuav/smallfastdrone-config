@@ -87,15 +87,14 @@ The flat idiom, shared by the frame-select thumbnails (`src/wizards/frame-select
 
 Where depth is the point:
 
-- **Live attitude, on the Connect screen.** The model mirrors the drone as soon as one is connected. This is the strongest case in the tool for 3D, because the operator is comparing a picture against an object in their hands: they tip the drone, and either the picture tips the same way or they have just learned — in one second, with no wizard, no parameter and no question asked — that the board is mounted at an angle the firmware doesn't know about, or that the IMU isn't answering. It is the first useful thing the tool says.
+- **Live attitude, on the Connect screen.** The model mirrors the drone as soon as one is connected. The airframe is **Betaflight Configurator's quad-X mesh** (GPLv3, credited in `src/assets/models/CREDITS.md`) rather than one built from primitives — deliberately, because this view is a convention operators already know how to read from Betaflight and ArduConfigurator, and a shape made of boxes and cylinders reads as a diagram rather than as their drone. Its own green-front / red-rear props do the front/back job for free. This is the strongest case in the tool for 3D, because the operator is comparing a picture against an object in their hands: they tip the drone, and either the picture tips the same way or they have just learned — in one second, with no wizard, no parameter and no question asked — that the board is mounted at an angle the firmware doesn't know about, or that the IMU isn't answering. It is the first useful thing the tool says.
   - **Viewed from behind, nose away**, so screen-right is the drone's right. From the front every roll reads backwards.
-  - **The model has a nose and coloured front arms.** A four-fold-symmetric quad makes roll and pitch look identical and yaw look like nothing.
   - **Yaw is relative to where the drone was pointing when the picture went live**, not a compass heading. Absolute heading is true but unhelpful on a desk — the model would sit facing north while the drone faces the operator — and it would need a "reset view" button to make sense of, which is a control decision 44 would not let us add.
   - Until there's a drone, it turns slowly on the spot: the splash, something alive while the operator plugs in.
 - **Sensor cal (not built):** animated tilt showing the next orientation the operator must put the airframe in — the other case where a pose has to be copied.
 - **Mode setup (not built):** a brief animation of what each flight mode "feels like".
 
-The attitude convention (which way is +X, and why yaw is negated) lives in `src/workflow/attitude.ts` with unit tests, because it was wrong once and nothing about a wrong sign looks wrong on screen.
+The attitude convention (which way is +X, and why yaw is negated) lives in `src/workflow/attitude.ts` with unit tests, because it was wrong once and nothing about a wrong sign looks wrong on screen. The mesh's own forward axis is a second chance to get that wrong, so it was **measured** — render it from above, look at which way the green props and the printed arrow point — rather than assumed.
 
 Implementation: **Tres.js** (`@tresjs/core`) — Vue-3-native three.js wrapper, declarative scene composition via Vue components. One generic drone model with frame-class variants; no per-board models.
 

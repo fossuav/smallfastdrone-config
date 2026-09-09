@@ -1,15 +1,24 @@
 # Vendored 3D models — credits
 
-Nothing is vendored here right now.
+## quad_x.gltf
 
-`quad_x.gltf`, the Betaflight Configurator quad-X airframe, was removed on
-2026-09-09 when the motor-check wizard's three.js scene was replaced by a flat
-schematic (`src/ui/visuals/MotorMap.vue`). The schematic draws any frame from
-its own motor angles, so there is no mesh to vendor and no second code path for
-the frames a quad-X mesh could not honestly represent.
+Quad-X airframe model, vendored from the **Betaflight Configurator** project
+(`resources/models/quad_x.gltf`).
 
-This file stays because the next vendored asset needs somewhere to be credited,
-and because a removed attribution should say what it was rather than vanish.
-The original entry: quad-X airframe model from
-https://github.com/betaflight/betaflight-configurator (`resources/models/quad_x.gltf`),
-GNU General Public License v3.0 — the same licence this project ships under.
+- Source: https://github.com/betaflight/betaflight-configurator
+- License: GNU General Public License v3.0 — the same licence this project
+  ships under, so redistribution here is compatible.
+- Used by `src/ui/visuals/Drone3D.vue` as the drone on the Connect screen,
+  where it mirrors the connected drone's attitude. The model itself is
+  unmodified; we centre it, scale it, and rotate it so its nose lies along
+  the +X axis our attitude convention expects.
+
+Betaflight's own airframe models (quad/hex/etc.) carry no separate
+third-party model licence in the source tree — only the explicitly
+third-party assets (`airplane`, `car`) do — so they are treated as
+Betaflight-authored work under the project's GPLv3.
+
+It was briefly removed on 2026-09-09, when the motor-check wizard's three.js
+scene became a flat schematic and nothing else used it, and restored the same
+day when the Connect screen's live attitude view wanted a real airframe rather
+than one built from boxes and cylinders.

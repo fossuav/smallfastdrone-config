@@ -14,8 +14,8 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// An X-quad built from primitives, in the FOSS UAV palette. It does two
-// jobs, and which one depends on whether it is given an attitude.
+// The drone, in 3D. It does two jobs, and which one depends on whether
+// it is given an attitude.
 //
 // Without one it turns slowly on the spot: the Connect splash, something
 // alive to look at while the operator plugs in.
@@ -28,10 +28,16 @@
 // board is mounted at an angle the firmware doesn't know about, or that
 // the IMU isn't healthy - without a wizard, a parameter, or a question.
 //
-// Two details that make it readable:
+// The airframe is Betaflight Configurator's quad-X mesh (GPLv3, credited
+// in src/assets/models/CREDITS.md) - the same model an operator will
+// have seen there, which is the point: this view is a convention people
+// already know how to read, and a shape built out of boxes and cylinders
+// reads as a diagram rather than as their drone.
 //
-//   - It has a nose. The frame is four-fold symmetric, so without one
-//     roll and pitch look identical and yaw is invisible.
+// Two details that make an attitude readable:
+//
+//   - It is seen from behind, nose away, so screen-right is the drone's
+//     right. From the front every roll reads backwards.
 //   - Yaw is shown relative to wherever the drone was pointing when the
 //     picture went live, not as a compass heading. Absolute heading is
 //     true but unhelpful on a desk: the model would sit pointing north
@@ -39,10 +45,14 @@
 //     the question being asked - turn it, does the picture turn - and
 //     needs no "reset" button to make sense of.
 
+import type { Object3D } from 'three'
 import type { AttitudeSample } from '../../workflow/attitude'
 import { TresCanvas } from '@tresjs/core'
 import { useRafFn } from '@vueuse/core'
-import { computed, ref, watch } from 'vue'
+import { Box3, Vector3 } from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import modelUrl from '../../assets/models/quad_x.gltf?url'
 import { sceneRotation } from '../../workflow/attitude'
 
 const props = defineProps<{
@@ -51,32 +61,30 @@ const props = defineProps<{
   attitude?: AttitudeSample | null
 }>()
 
-const ARM_END = 0.35 // half-diagonal length where motors sit
-const Y_PROP = 0.05 // prop disc height above motor
-const NOSE = 0.5 // length of the nose cone, along +X
+// How much of the canvas the airframe fills once normalised.
+const MODEL_SPAN = 2.2
+// The mesh flies down its own -Z; our attitude convention has the nose
+// along +X. Measured by rendering the thing from above and looking at
+// which way its green props and its printed arrow pointed, rather than
+// assumed - a quarter turn either way is the kind of error that makes
+// every roll read as a pitch.
+const MODEL_YAW = -Math.PI / 2
 
-const PURPLE = '#4A1E80'
-const GOLD = '#C9A35F'
-// Front and back are told apart by colour as well as by the nose, which
-// is what makes an attitude readable in a thumbnail: at this size a
-// single spike is easy to miss, two gold arms are not. It is the same
-// trick as coloured front props on a real airframe.
-const FRONT = '#E0B978'
-
-// Motors on the diagonals of an X, nose (+X) between the front pair.
-const motors = [
-  { x: ARM_END, z: ARM_END, front: true },
-  { x: ARM_END, z: -ARM_END, front: true },
-  { x: -ARM_END, z: ARM_END, front: false },
-  { x: -ARM_END, z: -ARM_END, front: false },
-].map(m => ({
-  ...m,
-  // A box built along +X, swung round to point at this motor. Rotation
-  // about +Y takes +X toward -Z, hence the sign.
-  rotationY: -Math.atan2(m.z, m.x),
-  position: [m.x, 0.02, m.z] as [number, number, number],
-  propPosition: [m.x, Y_PROP, m.z] as [number, number, number],
-}))
+// The airframe, once loaded, centred on the origin and scaled to a known
+// size so the camera framing doesn't depend on the file's own units.
+const body = shallowRef<Object3D | null>(null)
+onMounted(() => {
+  new GLTFLoader().load(modelUrl, (gltf) => {
+    const scene = gltf.scene
+    const box = new Box3().setFromObject(scene)
+    const centre = box.getCenter(new Vector3())
+    const size = box.getSize(new Vector3())
+    const scale = MODEL_SPAN / (Math.max(size.x, size.z) || 1)
+    scene.scale.setScalar(scale)
+    scene.position.set(-centre.x * scale, -centre.y * scale, -centre.z * scale)
+    body.value = scene
+  })
+})
 
 const following = computed(() => props.attitude != null)
 
@@ -138,7 +146,7 @@ useRafFn(({ delta }) => {
       is the right wing. Viewed from the front, every roll would read
       backwards.
     -->
-    <TresPerspectiveCamera :position="[-1.0, 0.75, 0.5]" :look-at="[0, 0, 0]" />
+    <TresPerspectiveCamera :position="[-1.6, 1.15, 0.8]" :look-at="[0, 0, 0]" />
     <TresAmbientLight :intensity="0.6" />
     <TresDirectionalLight :position="[3, 5, 2]" :intensity="0.9" />
 
@@ -148,63 +156,19 @@ useRafFn(({ delta }) => {
       three's default XYZ order is not it. Nesting makes the order the
       structure of the scene instead of a convention to remember.
 
-      Nose is +X, up is +Y, so +Z is the aircraft's left. Hence pitch
-      about Z (nose toward up) and roll about X (left side toward up).
+      Nose is +X, up is +Y, so +Z is the aircraft's right (right =
+      forward x up, and X x Y = Z here). The angles themselves come from
+      sceneRotation, which is where that convention is written down and
+      tested.
     -->
     <TresGroup :rotation-y="following ? yaw : idleYaw">
       <TresGroup :rotation-z="following ? pitch : 0">
         <TresGroup :rotation-x="following ? roll : 0">
-          <!-- Centre body -->
-          <TresMesh>
-            <TresBoxGeometry :args="[0.28, 0.08, 0.28]" />
-            <TresMeshStandardMaterial :color="PURPLE" :metalness="0.3" :roughness="0.45" />
-          </TresMesh>
-
-          <!-- Nose. Without it the frame is four-fold symmetric and an
-               attitude is unreadable: roll and pitch look the same and
-               yaw looks like nothing at all. -->
-          <TresMesh :position="[NOSE / 2 + 0.09, 0.01, 0]" :rotation="[0, 0, -Math.PI / 2]">
-            <TresConeGeometry :args="[0.1, NOSE, 4]" />
-            <TresMeshStandardMaterial :color="FRONT" :metalness="0.5" :roughness="0.35" />
-          </TresMesh>
-
-          <!-- One arm per motor, so the front pair can be its own colour. -->
-          <TresGroup v-for="(m, i) in motors" :key="`a-${i}`" :rotation-y="m.rotationY">
-            <TresMesh :position="[ARM_END / 2, 0.01, 0]">
-              <TresBoxGeometry :args="[ARM_END, 0.045, 0.045]" />
-              <TresMeshStandardMaterial
-                :color="m.front ? FRONT : PURPLE"
-                :metalness="0.3"
-                :roughness="0.5"
-              />
-            </TresMesh>
+          <!-- The airframe. Turned once so its nose lies along +X,
+               which is what the attitude convention above assumes. -->
+          <TresGroup v-if="body" :rotation-y="MODEL_YAW">
+            <primitive :object="body" />
           </TresGroup>
-
-          <!-- Motors (gold cylinders) at the four corners -->
-          <TresMesh
-            v-for="(m, i) in motors"
-            :key="`m-${i}`"
-            :position="m.position"
-          >
-            <TresCylinderGeometry :args="[0.08, 0.08, 0.05, 24]" />
-            <TresMeshStandardMaterial :color="GOLD" :metalness="0.75" :roughness="0.25" />
-          </TresMesh>
-
-          <!-- Translucent props above motors -->
-          <TresMesh
-            v-for="(m, i) in motors"
-            :key="`p-${i}`"
-            :position="m.propPosition"
-          >
-            <TresCylinderGeometry :args="[0.19, 0.19, 0.005, 32]" />
-            <TresMeshStandardMaterial
-              :color="m.front ? FRONT : PURPLE"
-              :metalness="0.1"
-              :roughness="0.7"
-              :transparent="true"
-              :opacity="0.55"
-            />
-          </TresMesh>
         </TresGroup>
       </TresGroup>
     </TresGroup>

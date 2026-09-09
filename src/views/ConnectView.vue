@@ -81,7 +81,7 @@ function toggle() {
              a gentle rotation until then. The fixed-height wrapper gives
              the WebGL canvas something to fill; if WebGL fails the div is
              just empty space and the rest of the card still works. -->
-        <div class="mx-auto h-40 w-full max-w-xs">
+        <div class="mx-auto h-52 w-full max-w-sm">
           <Drone3D :attitude="live ? attitude : null" />
         </div>
         <!-- Said once, only while it is true: an instruction to check
