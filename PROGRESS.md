@@ -68,6 +68,14 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-10: **The live model is on the bringup pre-flight step too**, which is where it earns the most. That step's whole job is *does this drone look right before we change anything*, and everything else on it — vehicle, autopilot, sensor row — is what the drone **says** about itself. The model is the only part an operator can contradict, by picking the airframe up and tipping it.
+
+  Nothing new in the plumbing: `useAttitude()` already reference-counts consumers and re-asks whenever a drone appears, so mounting it inside a wizard the ribbon renders inline works the same as mounting it in a top-level view. The bringup-ribbon E2E now asserts the invitation to tip the drone appears on the pre-flight tab, which is what proves that.
+
+  **It also opens a gap, logged in TODO.md rather than papered over:** the check can now tell an operator their board is mounted differently from what the drone believes, and the tool has no way to fix it — board-orientation setup doesn't exist. Showing beats not showing, but the gap is one an operator can see now, and it wants a recipe rather than a control (decision 44).
+
+  Housekeeping in the same change: three 3D items retired from TODO.md — live orientation is done, and the motor-graphic "donuts" and the hex/octo mesh items are moot now that the motor test is a flat schematic with no props and no per-frame mesh. `CLAUDE.md`'s tech-stack list still named `@tresjs/cientos`, dropped the day before.
+
 - 2026-09-09: **The live view uses Betaflight's own quad, not one made of boxes.** Operator direction — *"this should be the same 3D model that betaflight uses"* — and they were right for a reason worth writing down: the live-attitude view is a **convention operators already know**, from Betaflight Configurator and ArduConfigurator both, and an airframe assembled from cylinders and boxes reads as a diagram rather than as their drone. The mesh also solves for free the problem I had been solving by hand, since it carries green front props, red rear props and a printed nose arrow.
 
   `quad_x.gltf` comes back, four commits after being deleted for having no consumer. That deletion was correct at the time and this is not a reversal of it: what changed is that something needs a real airframe again. `CREDITS.md` says both halves of that story rather than quietly re-appearing.

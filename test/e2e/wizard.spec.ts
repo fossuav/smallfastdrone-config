@@ -136,6 +136,12 @@ test('Bringup ribbon walks preflight + frame-select + connections + motor-check 
   // Pre-flight tab is the default (first incomplete).
   await expect(page.getByRole('tab', { name: /Pre-flight check/ })).toBeVisible({ timeout: 15_000 })
 
+  // The live model is part of this step, and its invitation to tip the
+  // drone appears only while the attitude stream is actually arriving —
+  // so it doubles as proof the stream survives being requested from
+  // inside an inline-mounted wizard rather than a top-level view.
+  await expect(page.getByText('Pick your drone up and tip it')).toBeVisible({ timeout: 15_000 })
+
   // Complete preflight inline — no FC writes, just operator confirmation.
   // The button's leave() returns to the ribbon, which auto-advances.
   await page.getByRole('button', { name: /Looks good/ }).click()

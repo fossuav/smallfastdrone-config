@@ -19,15 +19,26 @@
 // subsystem readiness row so the operator can look it over before
 // bringup starts changing settings. "Looks good" records completion;
 // the back affordance returns to wherever the wizard was launched
-// from (library or bringup meta-wizard via returnTo).
+// from (the catalogue, or the bringup meta-wizard via returnTo).
+//
+// The live model belongs here more than anywhere: this is the step
+// whose whole job is "does the drone look right before we change it",
+// and tipping it is the one check that covers the board's mounting and
+// the IMU at once. The rest of the panel is what the drone *says* about
+// itself; this is the only part the operator can contradict.
 
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '../../stores/session'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import SystemStatus from '../../ui/components/SystemStatus.vue'
+import Drone3D from '../../ui/visuals/Drone3D.vue'
+import { useAttitude } from '../../workflow/use-attitude'
 
 const session = useSessionStore()
+// Live only while this step is on screen; the stream is stopped on the
+// way out (see workflow/use-attitude.ts).
+const { attitude, live } = useAttitude()
 const wizardProgress = useWizardProgressStore()
 const router = useRouter()
 const route = useRoute()
@@ -69,6 +80,22 @@ function cancel() {
       any settings — for instance, a failing barometer wants a fix, not a
       configuration on top.
     </p>
+
+    <!-- The drone as it says it is sitting right now. Fixed height so
+         the WebGL canvas has something to fill; if WebGL fails this is
+         empty space and the rest of the check still works. -->
+    <div class="border-default rounded-md border bg-elevated/50 p-3">
+      <div class="mx-auto h-48 w-full max-w-sm">
+        <Drone3D :attitude="live ? attitude : null" />
+      </div>
+      <p v-if="live" class="text-muted text-center text-sm">
+        Pick your drone up and tip it — the picture should tip the same way.
+        If it doesn't, the board isn't mounted the way your drone thinks it is.
+      </p>
+      <p v-else class="text-muted text-center text-sm">
+        Waiting for your drone to say which way up it is…
+      </p>
+    </div>
 
     <dl class="border-default grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md border bg-elevated/50 p-3 text-sm">
       <dt class="text-muted">

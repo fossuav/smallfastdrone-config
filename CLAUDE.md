@@ -59,7 +59,7 @@ Modern stack, no legacy. Same family as `../betaflight-configurator/` minus its 
 - **Pinia** for state (Setup Stores style)
 - **vue-router 5** for navigation
 - **`@vueuse/core`** for composition utilities (`useRafFn`, debounce, `useElementSize`, etc.)
-- **`@tresjs/core` + `@tresjs/cientos`** for 3D drone visualization (Vue-native three.js)
+- **`@tresjs/core`** for 3D drone visualization (Vue-native three.js). Flat SVG is the default drawing; 3D only where depth is the point — PLAN decision 45.
 - **node-mavlink** (TS) for the MAVLink protocol — primary
 - **MSP** + **BLHeli 4-way interface** — own implementations, minimal MSP scope (just what BLHeli passthrough needs)
 - **DFU** — own STM32 DFU class implementation, ref betaflight-configurator

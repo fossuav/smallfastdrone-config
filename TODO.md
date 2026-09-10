@@ -182,15 +182,19 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 ## 3D / visuals
 
-- `[3d]` **Drop the motor "donuts" in the copter graphic.** The ring indicators
-  are redundant once we spin the actual props — let the spinning prop show motor
-  state directly instead of an overlaid donut.
-- `[3d] [ux]` **Connect screen uses the X-quad graphic, and live orientation.**
-  Use the X-quad model on Connect; once connected, drive the model's orientation
-  from the live vehicle attitude so it reflects the real copter orientation.
-- `[3d]` **Better hex/octo frame models.** Non-quad-X frames use the simpler
-  accurate procedural arms model rather than a true geometry-specific 3D model
-  (deliberate — accurate beats fudging the X model). Revisit with proper models.
+- _Done 2026-09-09 → PROGRESS.md._ **Connect screen uses the X-quad graphic,
+  and live orientation.** The model is Betaflight's quad-X mesh and mirrors the
+  drone's reported attitude, on Connect and on the pre-flight step.
+- _Moot 2026-09-09 (PLAN decision 45)._ **Drop the motor "donuts" in the copter
+  graphic** and **better hex/octo frame models.** Both were about the motor
+  test's 3D scene, which is now a flat SVG schematic drawn from the firmware's
+  own motor angles — there are no donuts, no props to spin, and no per-frame
+  mesh to improve, because the drawing is frame-agnostic by construction.
+- `[3d] [ux]` **Nothing to do when the picture doesn't follow.** The pre-flight
+  step now shows an operator that their board is mounted differently from what
+  the drone believes — and offers no way to fix it, because board-orientation
+  setup doesn't exist yet. Showing beats not showing, but the gap is now one an
+  operator can see. Wants a recipe, not a control (PLAN decision 44).
 
 ## Wizards / bringup
 
