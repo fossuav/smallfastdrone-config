@@ -118,6 +118,29 @@ test('The retired library and field-tools URLs land where they meant', async ({ 
   await expect(page.getByRole('heading', { name: 'Recipes', exact: true })).toBeVisible()
 })
 
+test('Pre-flight keeps developer detail behind expert mode', async ({ page }) => {
+  // The same operator-first rule the Connect card has followed since
+  // 2026-05-25, which this view had quietly been breaking: the firmware
+  // *version* is something an operator checks against a release note, the
+  // build hash and the drone's serial number are not.
+  await page.goto(SITL_URL)
+  await page.getByRole('button', { name: 'Connect drone' }).click()
+  await expect(page.getByText(/Connected to your \w+/)).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('link', { name: 'Bringup', exact: true }).click()
+
+  const hash = /4\.\d+\.\d+(?:-alpha|-beta|-rc|-dev)? \([0-9a-f]{6,}\)/
+  // Wait for the version to arrive before concluding the hash is absent —
+  // otherwise this passes on an empty panel.
+  await expect(page.getByText(/SmallFastDrone/).first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(hash)).toHaveCount(0)
+  await expect(page.getByText('FC ID:')).toHaveCount(0)
+
+  // Expert mode is what reveals them.
+  await page.getByRole('switch', { name: 'Expert' }).click()
+  await expect(page.getByText(hash)).toBeVisible()
+  await expect(page.getByText('FC ID:')).toBeVisible()
+})
+
 test('Bringup ribbon walks preflight + frame-select + connections + motor-check and marks itself complete', async ({ page }) => {
   // Two reboot-free reconfigs + a hexa motor walk — give it room.
   test.setTimeout(120_000)

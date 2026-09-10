@@ -29,7 +29,9 @@
 
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { withoutBuildHash } from '../../protocol/mavlink'
 import { useSessionStore } from '../../stores/session'
+import { useUiStore } from '../../stores/ui'
 import { useWizardProgressStore } from '../../stores/wizardProgress'
 import SystemStatus from '../../ui/components/SystemStatus.vue'
 import Drone3D from '../../ui/visuals/Drone3D.vue'
@@ -40,6 +42,7 @@ const session = useSessionStore()
 // way out (see workflow/use-attitude.ts).
 const { attitude, live } = useAttitude()
 const wizardProgress = useWizardProgressStore()
+const ui = useUiStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -48,10 +51,21 @@ const route = useRoute()
 // flows back into the meta-wizard mid-bringup.
 const returnTo = computed(() => String(route.query.returnTo ?? '/recipes'))
 
+// The firmware version, minus the build hash unless expert mode is on.
+// The version is what an operator checks against a release note; the
+// hash is developer detail (docs/UX.md), and the Connect card has hidden
+// it since 2026-05-25 — this view had been showing it all along.
+const firmwareLine = computed(() => {
+  const version = session.firmwareVersion
+  if (!version)
+    return null
+  return ui.expert ? version : withoutBuildHash(version)
+})
+
 // Truncate the FC uid for display — the full hex is unambiguous but
-// noisy in a sidebar. Operators don't need to recognise the value,
-// just see that it's been received and (across reconnects) that it
-// stayed the same.
+// noisy in a sidebar. Expert-only: an operator never needs to recognise
+// this value, and the pre-flight question is whether the drone looks
+// right, not what its serial number is.
 const shortFcUid = computed(() => {
   if (!session.fcUid)
     return 'Waiting for it…'
@@ -109,7 +123,7 @@ function cancel() {
       </dt>
       <dd class="text-default">
         {{ session.autopilotLabelText ?? 'Unknown' }}
-        <span v-if="session.firmwareVersion" class="text-muted">{{ session.firmwareVersion }}</span>
+        <span v-if="firmwareLine" class="text-muted">{{ firmwareLine }}</span>
       </dd>
       <dt class="text-muted">
         State:
@@ -117,12 +131,16 @@ function cancel() {
       <dd class="text-default">
         {{ session.systemStatusText ?? 'Unknown' }}
       </dd>
-      <dt class="text-muted">
-        FC ID:
-      </dt>
-      <dd class="text-default font-mono text-xs">
-        {{ shortFcUid }}
-      </dd>
+      <!-- The drone's serial number is developer detail — expert only,
+           the same posture as the Connect card's System ID row. -->
+      <template v-if="ui.expert">
+        <dt class="text-muted">
+          FC ID:
+        </dt>
+        <dd class="text-default font-mono text-xs">
+          {{ shortFcUid }}
+        </dd>
+      </template>
     </dl>
 
     <div class="border-default border-t pt-3">

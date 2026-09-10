@@ -27,6 +27,7 @@
 // IMU is answering, before touching a single setting.
 
 import { computed } from 'vue'
+import { withoutBuildHash } from '../protocol/mavlink'
 import { useSessionStore } from '../stores/session'
 import { useUiStore } from '../stores/ui'
 import SecurityBadge from '../ui/components/SecurityBadge.vue'
@@ -51,8 +52,8 @@ const buttonLabel = computed(() => {
 // Combine in JS rather than via a Vue `<template>` between interpolations —
 // the latter drops the separating whitespace once the linter reformats it.
 // The firmware string carries a trailing git hash ("4.7.0-beta (210fe947)")
-// — useful to a developer, noise to an operator — so strip the parenthetical
-// outside expert mode.
+// — useful to a developer, noise to an operator — so it comes off outside
+// expert mode, via the shared rule in protocol/mavlink.
 const autopilotLine = computed(() => {
   const base = session.autopilotLabelText
   if (!base)
@@ -60,8 +61,7 @@ const autopilotLine = computed(() => {
   const version = session.firmwareVersion
   if (!version)
     return base
-  const shown = ui.expert ? version : version.replace(/\s*\([^)]*\)\s*$/, '')
-  return `${base} ${shown}`
+  return `${base} ${ui.expert ? version : withoutBuildHash(version)}`
 })
 
 // Click handler for the single Connect / Disconnect button — the

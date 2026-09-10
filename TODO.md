@@ -248,12 +248,6 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   frame" gives no marker for the layout the drone is currently set to, so the
   operator can't see what they already have. Highlight the active frame. (UX
   audit.)
-- `[wizard] [ux]` **Pre-flight wizard still shows developer detail.** The
-  pre-flight check view displays the firmware git hash and the FC ID — the same
-  operator-first leak fixed on the Connect screen (2026-05-25). Apply the same
-  expert-gating: keep the firmware *version* (useful pre-flight), hide the hash
-  + FC ID outside expert mode. Surfaced when the ribbon prototype mounted
-  preflight inline.
 - `[wizard] [ux]` **Pre-arm readiness shows in phase 00.** The pre-flight
   view's SystemStatus panel surfaces the pre-arm-checks subsystem + "Not ready
   to arm yet", but arm-readiness is a phase-05 (pre-first-flight) gate, not an

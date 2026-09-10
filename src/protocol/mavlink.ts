@@ -459,6 +459,19 @@ export function decodeFirmwareVersion(swVersion: number, customVersion: ArrayLik
   return hash ? `${ver} (${hash})` : ver
 }
 
+// The same string with the build hash taken off: "4.7.0-beta (d0615774)"
+// becomes "4.7.0-beta".
+//
+// The version is something an operator needs - it is what they compare
+// against a release note - and the hash is something only a developer
+// does. Every surface that shows a firmware version therefore shows it
+// through here unless expert mode is on, and it lives beside the
+// function that built the string so the two halves of the rule cannot
+// drift apart.
+export function withoutBuildHash(version: string): string {
+  return version.replace(/\s*\([^)]*\)\s*$/, '')
+}
+
 // Build a COMMAND_LONG that asks the target FC to send a specific message.
 // We use this immediately after the first heartbeat to ask for
 // AUTOPILOT_VERSION (msgid 148) so the UI can show firmware details.

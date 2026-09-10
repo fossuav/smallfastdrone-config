@@ -68,6 +68,10 @@ Test infrastructure (cross-cutting, lands during Phase 0 alongside the app shell
 
 ## Recent log
 
+- 2026-09-10: **Pre-flight stops showing developer detail.** The firmware build hash and the drone's serial number were on that panel with expert mode off — the same operator-first leak fixed on the Connect card in May, which this view had been quietly reproducing ever since. The firmware *version* stays, because it is what an operator checks against a release note; the hash and the FC ID now need the expert toggle, the same posture as the Connect card's System ID row.
+
+  The rule is one function now (`withoutBuildHash`, next to `decodeFirmwareVersion` that builds the string), rather than a regex copy-pasted into a second view — which is how it drifted the first time: Connect was fixed and pre-flight was not, and nothing noticed for four months. Unit tests on the pair, and an E2E that asserts both directions on the pre-flight tab: hidden by default, revealed by the toggle. A one-sided "it isn't there" check would have passed on an empty panel.
+
 - 2026-09-10: **The live model is on the bringup pre-flight step too**, which is where it earns the most. That step's whole job is *does this drone look right before we change anything*, and everything else on it — vehicle, autopilot, sensor row — is what the drone **says** about itself. The model is the only part an operator can contradict, by picking the airframe up and tipping it.
 
   Nothing new in the plumbing: `useAttitude()` already reference-counts consumers and re-asks whenever a drone appears, so mounting it inside a wizard the ribbon renders inline works the same as mounting it in a top-level view. The bringup-ribbon E2E now asserts the invitation to tip the drone appears on the pre-flight tab, which is what proves that.
