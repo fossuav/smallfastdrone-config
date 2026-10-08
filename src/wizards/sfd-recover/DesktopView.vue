@@ -303,7 +303,6 @@ async function finishInstall(backup: ParamBackup): Promise<void> {
     phase.value = 'done'
   }
   catch (e) {
-    phase.value = 'stopped'
     stopped.value = e instanceof RecoverError
       ? e
       : new RecoverError('flash-failed', e instanceof Error ? e.message : String(e), backup, true)
