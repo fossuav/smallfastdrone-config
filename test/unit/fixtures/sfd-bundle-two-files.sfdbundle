@@ -1,0 +1,17 @@
+{
+  "schema": "sfd-bundle/1",
+  "product": "fixture_product",
+  "title": "Fixture product",
+  "version": "pack_lua fixture",
+  "uid": "350053000551333530343432",
+  "files": [
+    {
+      "path": "scripts/fixture_app.lxa",
+      "data": "TFhBMi4wNQBTAAVRMzUwNDQyhApmAwbG7WpmSPK2AkekPBwIjXL8yI9EqjDsTgUw3mSs3pg3YTrG1Y602HkB57CCIXvRZbKEb3UUUHo6+/SE/IOkVZ/kZm5HuhGaVkQFLvEx/Q1wLCvLIvQsSMfwv2KudWrGOefm3joQT/dYcWOOuSS3SahI2XeL0vT92zqUiYBe20RH9DFTs+V+NnKhK0bK/98W9I47sdA3H2+QzoNlB1c6p/jJTStUtOis3DOscSLiuw=="
+    },
+    {
+      "path": "scripts/modules/fixture_helper.lxa",
+      "data": "TFhBMi4wNQBTAAVRMzUwNDQyuzp3fo9iRYMnwEPuRT2ABosQnx6bKdRN31Ly/aSKChH1lNbOBHSV49oymKR3rEr7jZt0mZucqJA2YLL/MSKgflTlYyYVlS2oqNyx5AsRK4x7TjYMzEKs3+81ZHAvw58baowEq0DeuTObXGkyAxiyC5HHxufN4amm3SKR05NDB0bEytoe"
+    }
+  ]
+}

@@ -397,6 +397,14 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 ## Tooling
 
+- `[test]` **The param browser's first E2E asserts a message that may never be
+  seen.** `params.spec.ts` "Param browser fetches and displays params from
+  SITL" waits up to 5 s for "Fetching parameters", a state that lasts only as
+  long as the download. It fails on every run on this WSL dev machine against
+  a SITL built from the current pin — on plain `HEAD` too (checked 2026-10-08)
+  — and passes in CI. Assert the loaded state, or make the transient one
+  observable, rather than racing it.
+
 - `[test]` **Bringup-meta E2E is flaky under SITL load.** `wizard.spec.ts`'s
   "Bringup meta-wizard chains…" test (last + heaviest in the suite, after the
   motor-check specs reboot SITL several times) intermittently times out with a

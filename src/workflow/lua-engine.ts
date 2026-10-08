@@ -41,6 +41,7 @@
 //     to leave orphans behind, premature.
 
 import type { CommandAck, NamedValueFloat, ParamValue } from 'mavlink-mappings/dist/lib/common'
+import type { BundleFile } from '../protocol/sfd-bundle'
 import type { ScriptStorageStatus } from './script-storage'
 import { MavFtp, MavFtpError } from '../protocol/ftp'
 import { buildScriptingRestart } from '../protocol/mavlink'
@@ -302,6 +303,52 @@ export function useLuaEngine() {
     })
   }
 
+  /*
+    Install a script product SFD packed for this drone (PLAN decision 46).
+
+    Every member is a `.lxa` for this drone, and the bundle says which
+    folder each one goes in. Each goes through the security seam.
+
+    A plaintext `.lua` of the same name beside a member is removed once
+    the member has landed. The module path tries `?.lua` before `?.lxa`,
+    so a leftover would be found first - and on a signed build then
+    refused by the decryptor - and at top level both copies would run.
+    Upload first and delete second, so a failure part way leaves the old
+    file behind rather than a gap.
+
+    Returns the plaintext files it removed, so the operator can be told.
+  */
+  async function installBundle(files: readonly BundleFile[]): Promise<string[]> {
+    const ftp = getFtp()
+    for (const dir of ['APM', 'APM/scripts', MODULES_DIR]) {
+      await ftp.createDirectory(dir).catch((e) => {
+        if (e instanceof MavFtpError && e.errCode === 8)
+          return
+        throw e
+      })
+    }
+    const present = new Map<string, Set<string>>()
+    for (const dir of new Set(files.map(f => f.dir))) {
+      const entries = await ftp.listDirectory(dir)
+      present.set(dir, new Set(entries.filter(e => !e.isDir).map(e => e.name)))
+    }
+
+    const replaced: string[] = []
+    for (const f of files) {
+      await putThroughSeam(f.path, `APM/${f.path}`, f.bytes)
+      const plain = `${f.stem}.lua`
+      if (present.get(f.dir)?.has(plain)) {
+        await ftp.removeFile(`${f.dir}/${plain}`).catch((e) => {
+          if (e instanceof MavFtpError && e.errCode === 10)
+            return
+          throw e
+        })
+        replaced.push(plain)
+      }
+    }
+    return replaced
+  }
+
   // Is a wizard's applet currently present on the FC? Install-and-keep
   // (field / CRSF) wizards use this to show install status. Uses a
   // directory LISTING (a session-less FTP op) rather than opening the
@@ -497,6 +544,7 @@ export function useLuaEngine() {
     uploadModule,
     installEncryptedApplet,
     removeEncryptedApplet,
+    installBundle,
     isAppletInstalled,
     installedApplets,
     restartScripting,

@@ -97,7 +97,7 @@ Two facts about how applets load drive the wizard lifecycle (and the test):
 
 The **only** reboot in the Lua flow is the one-time **enable** of `SCR_ENABLE` when it's off — which the drone-settings page owns (write → reboot → auto-reconnect). Wizards treat scripting-on as a precondition and point the operator at Drone settings if it isn't.
 
-The "scripting isn't enabled" fallback path is covered inside the catalogue's "On the radio" filter (it renders a "Turn on scripting" affordance when `SCR_ENABLE=0`; the field-install spec exercises both branches via its `if (turnOn.isVisible())` guard). Because the shared SITL instance carries scripting state across specs, the field-install spec tolerates scripting being already on.
+The "scripting isn't enabled" fallback path is covered inside the catalogue's "On the radio" filter (it renders a "Turn on scripting" affordance when `SCR_ENABLE=0`; the field-install spec exercises both branches via its `if (turnOn.isVisible())` guard). Because the shared SITL instance carries scripting state across specs, the field-install spec tolerates scripting being already on. **Spec files run in file-name order against that one SITL**, so a spec that changes persistent state constrains which specs may sort after it: `settings-scripting.spec.ts` needs scripting *off* when it starts, so any spec that turns scripting on — the field install, `sfd-product.spec.ts` — must sort after it.
 
 ## BLHeli params in SITL
 
@@ -150,6 +150,7 @@ Most E2E specs are written against SITL's *fixture*, not just against a vehicle 
 | `connect.spec.ts` | Asserts SITL's "Quadcopter" and the "SmallFastDrone" banner. A board on a different frame or upstream firmware is a different, correct answer. |
 | `wizard.spec.ts` (connections ×2) | Asserts SERIAL3 reads "GPS" — SITL's wiring. The real board reported DJI OSD on SERIAL3, which the table rendered correctly. |
 | `wizard-motor-check.spec.ts` (×5, incl. ESC setup) | Needs a configured frame and ESCs. |
+| `sfd-product.spec.ts` | Reads SITL's own working folder to check where each file landed, so it skips itself under `BENCH=1`. On a signed board the real check is that the product runs. |
 | `security-badge.spec.ts` | Asserts an ordinary drone shows *no* padlock — which is the point of it. A secured board correctly shows one, so this is SITL-only by design. |
 
 **Specs are not idempotent against real hardware.** SITL is rebuilt per run, so a spec can write freely; a board keeps every write. A full `BENCH=1` run leaves `FRAME_CLASS`, `FRAME_TYPE`, `SCR_ENABLE`, `SERIAL1_*` and `RTL_ALT*` changed, and re-running some specs then fails on their own leftovers — `settings-scripting` needs `SCR_ENABLE` to start at 0 and leaves it at 1, so it passes once and then can't. Until a bench fixture snapshots and restores around the run (TODO.md), **put the board back yourself afterwards** — `param.pck` carries the firmware's own defaults, so restoring is mechanical rather than guesswork.

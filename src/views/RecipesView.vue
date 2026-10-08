@@ -41,6 +41,7 @@ import type { WizardCategory } from '../workflow/wizard-runtime'
 import { computed, onMounted, ref, useTemplateRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { isLxa, LxaError, lxaMatchesFc, parseLxaHeader } from '../protocol/lxa'
+import { bundleMatchesFc, looksLikeBundle, parseBundle } from '../protocol/sfd-bundle'
 import { useFieldToolsStore } from '../stores/fieldTools'
 import { useSessionStore } from '../stores/session'
 import { useUiStore } from '../stores/ui'
@@ -202,6 +203,11 @@ const radioEntries = computed(() =>
   anything, is the drone written on the outside - so choosing the wrong
   file says so immediately rather than after an upload, a scripting
   restart, and a warning in a log nobody is watching.
+
+  The same picker takes a whole product (PLAN decision 46): one file SFD
+  packed for this drone, holding an applet and the modules it needs, each
+  scrambled for this drone alone. The operator installs a product, not a
+  list of files.
 */
 const appletInput = useTemplateRef<HTMLInputElement>('appletInput')
 const appletState = ref<'idle' | 'working' | 'done' | 'failed'>('idle')
@@ -218,8 +224,12 @@ async function chooseApplet(event: Event): Promise<void> {
   appletMessage.value = null
   try {
     const bytes = new Uint8Array(await file.arrayBuffer())
+    if (!isLxa(bytes) && looksLikeBundle(bytes)) {
+      await installProduct(bytes)
+      return
+    }
     if (!isLxa(bytes))
-      throw new LxaError('That file isn\'t an applet from SmallFastDrone. They end in .lxa.')
+      throw new LxaError('That file isn\'t an applet from SmallFastDrone. They end in .lxa or .sfdbundle.')
     const header = parseLxaHeader(bytes)
     if (!lxaMatchesFc(header, session.fcUid)) {
       throw new LxaError(
@@ -236,6 +246,28 @@ async function chooseApplet(event: Event): Promise<void> {
     appletState.value = 'failed'
     appletMessage.value = e instanceof Error ? e.message : String(e)
   }
+}
+
+// A product: check the packing list and the drone it was made for, then
+// put every file where it belongs. Errors are worded for the operator and
+// left for chooseApplet to show.
+async function installProduct(bytes: Uint8Array): Promise<void> {
+  const bundle = parseBundle(bytes)
+  if (!bundleMatchesFc(bundle, session.fcUid)) {
+    throw new LxaError(
+      `That package was made for a different drone (${bundle.uid.slice(0, 12)}…). `
+      + 'Only the drone it was made for can read it.',
+    )
+  }
+  const replaced = await lua.installBundle(bundle.files)
+  await lua.restartScripting()
+  appletState.value = 'done'
+  appletMessage.value = `${bundle.title} is on your drone. It will run from now on.`
+  const which = replaced.join(', ')
+  if (replaced.length === 1)
+    appletMessage.value += ` It replaced an unscrambled ${which} that would have got in its way.`
+  else if (replaced.length > 1)
+    appletMessage.value += ` It replaced unscrambled copies of ${which} that would have got in its way.`
 }
 
 onMounted(() => {
@@ -583,7 +615,7 @@ onMounted(() => {
                 Install one…
               </UButton>
             </div>
-            <input ref="appletInput" type="file" accept=".lxa" class="hidden" @change="chooseApplet">
+            <input ref="appletInput" type="file" accept=".lxa,.sfdbundle" class="hidden" @change="chooseApplet">
             <UAlert
               v-if="appletState === 'done'"
               color="success"
