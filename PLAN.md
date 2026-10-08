@@ -232,6 +232,7 @@ Two upload paths, one security seam — see [docs/FIRMWARE.md](docs/FIRMWARE.md)
 - ✅ `src/workflow/drone-identity.ts` — identity file build/serialise/parse/compare, byte-compatible with the firmware repo's `sfd_identity.py`.
 - ✅ Enable and recovery wizards (`src/wizards/sfd-enable/`, `src/wizards/sfd-recover/`). Enable is in the catalogue and is the optional last tab of the bringup ribbon; recovery is catalogue-only, deliberately — a destructive escape hatch is not a setup step.
 - ✅ Encrypted applet install routed through `security/uploader.ts` as `kind: 'lua-applet'` — the tool moves an opaque blob and never inspects it; `src/protocol/lxa.ts` reads only the target drone's address, to refuse somebody else's applet before uploading it.
+- 🔄 **Script products** (decision 46, 2026-10-08) — a multi-file product, every file encrypted for one drone, as one `sfd-bundle/1`. ✅ Packed by `pack_lua.py` (F16) and installed through the same "Install one…" (T12); first product manifest (acro_fence) in SFD's private script repo. **Pending:** acro_fence running on the sealed bench board; then autoacro, which needs a firmware branch with both its C++ and this phase's security work.
 
 **Ordering is load-bearing:** identity generated and *verified* before the lock; params backed up before anything destructive; the unlock never requires an SFD signature.
 
