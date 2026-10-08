@@ -19,6 +19,17 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
 
 ## Firmware / SITL
 
+- `[security] [docs]` **SECURITY.md's "Applet encryption (`.lxa` v2)" section
+  describes a scheme that was never built.** It specifies magic `LUA2.0`, the
+  UID inside the nonce, and an ephemeral key and nonce derived from an
+  `sfd_master` secret so every artefact is reproducible ("what exactly did we
+  ship to drone 47?"). What landed (F5, `encrypt_lua.py`) is magic `LXA2.0`,
+  the UID in its own field, and a random ephemeral key and nonce — documented
+  correctly further down, in "The `.lxa` v2 script format". PLAN decision 32
+  carries the same derived-key wording. Reconcile both; and whether the lost
+  reproducibility matters is the operator's call, since there is no server to
+  keep a record of what was shipped instead.
+
 - _Done 2026-05-27 → PROGRESS.md._ **Firmware flashing / DFU.** Both paths
   landed and are hardware-verified on TBS_LUCID_H7, routed through the security
   uploader seam.
@@ -197,6 +208,18 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   operator can see. Wants a recipe, not a control (PLAN decision 44).
 
 ## Wizards / bringup
+
+- `[wizard] [security]` **Motor-check's radio version uploads `crsf_helper.lua` in
+  the clear, which a signed SFD drone should refuse to load.** On a signed build
+  `searcher_Lua` sends every `require`d module through
+  `load_encrypted_script()`, which rejects anything without the `LXA2.0` magic —
+  so `require('crsf_helper')` in the field applet would fail on an SFD-enabled
+  drone. Read from the firmware, not seen on the board; SITL compiles no
+  encryption, so CI cannot show it. Fix with decision 46's path (ship the
+  helper encrypted for the drone) or the drone's encrypt-on-load option
+  (`SCR_LD_ENCRYPT`), and bench it either way. A script product that installs
+  `crsf_helper.lxa` will also delete a plaintext `crsf_helper.lua` this tool
+  put there, and the two installers need to agree on who owns it.
 
 - `[wizard] [ux]` **Stronger bringup ordering + graphic.** Vertical tabbed
   layout with each step's name + done-state in the tab header; the UI responds

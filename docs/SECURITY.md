@@ -850,6 +850,95 @@ as a symmetric key — a key present in every bootloader, so anyone with the
 firmware could read any script. Keeping a reader for it would keep that path
 alive for no benefit, and nothing has shipped that writes it.
 
+### Script products: one bundle per drone (`sfd-bundle/1`)
+
+Decision 46. A product SFD sells is rarely one file. autoacro is two applets,
+five modules of its own and two ArduPilot helpers, the last seven loaded with
+`require`, across two folders. Handing a customer nine `.lxa` files and a list
+of where each goes is a support ticket per sale, so a product travels as **one file per product per
+drone**, and the tool installs it.
+
+**Every file in it is encrypted for that drone, helpers included.** On a signed
+build the module searcher sends *every* module through
+`load_encrypted_script()` (`searcher_Lua` in `lua/src/loadlib.c`), plaintext or
+not, and a plaintext module fails the magic check — so `require('crsf_helper')`
+works only if `crsf_helper` arrived as `.lxa` for this drone. The packer
+encrypts public ArduPilot helpers alongside the product rather than leaning on
+the drone's encrypt-on-load option (`SCR_LD_ENCRYPT`), which would also work
+but is a second path to test and changes a setting nobody asked about.
+
+The format is JSON with base64 members — the same shape as an `.apj` — so the
+tool reads it with what it already has:
+
+```json
+{
+  "schema": "sfd-bundle/1",
+  "product": "acro_fence",
+  "title": "Acro fence",
+  "version": "ap_lua 3f2a9c1",
+  "uid": "350053000551333530343432",
+  "files": [
+    { "path": "scripts/acro_fence.lxa", "data": "<base64 .lxa v2>" }
+  ]
+}
+```
+
+- `uid` is the drone every member is encrypted for, in lower-case hex, as in
+  the identity file. The tool refuses a bundle addressed to another drone, and
+  one whose members disagree with its header.
+- `path` is relative to `APM/` and must be `scripts/<name>.lxa` or
+  `scripts/modules/<name>.lxa`, with `<name>` limited to letters, digits and
+  `_`. Those are the only two places the firmware loads a script or module
+  from, and the whitelist means a malformed bundle can misplace nothing.
+- `product`, `title` and `version` are for the operator. `title` is what the
+  UI shows.
+
+**The tool is still a courier** (decision 10). It reads the header and each
+member's `.lxa` address, never the contents, and the drone enforces both the
+address and the encryption whatever the tool concluded. The header is not
+signed: tampering with it can only mislabel the product or move a file between
+the two allowed folders — a nuisance, not a key — and verifying a signature
+would put SFD's public key in the tool for no gain over the drone's own check.
+
+**A member replaces a same-named plaintext `.lua` beside it.** The module path
+tries `?.lua` before `?.lxa`, so a leftover `crsf_helper.lua` is found first
+and then refused by the decryptor, breaking the product; at top level both
+copies would run. The tool deletes the plaintext file first and tells the
+operator it did.
+
+**Packing is offline, at SFD.** `Tools/scripts/signing/pack_lua.py` (F16)
+takes a product manifest — kept beside the scripts in SFD's private script
+repo — and the drone's `sfd-identity/1` file, and encrypts each file with the
+same code as `encrypt_lua.py`:
+
+```json
+{
+  "product": "acro_fence",
+  "title": "Acro fence",
+  "files": [
+    { "src": "acro_fence.lua", "dest": "scripts/acro_fence.lua" }
+  ]
+}
+```
+
+`src` is relative to the manifest; an `ardupilot:` prefix makes it relative to
+the firmware tree the packer runs from instead, which is where public helpers
+such as `libraries/AP_Scripting/modules/crsf_helper.lua` come from. `dest`
+names the plaintext file; the bundle carries it as `.lxa`.
+
+**Open:**
+
+- **Memory.** The loader decrypts a whole file into one contiguous buffer before
+  compiling it. `autoacro_maneuvers.lua` is 336 KB, and a 128 KB contiguous
+  request already fails with Lua running (TODO.md, the bootloader write). Until
+  a large module has loaded on the board, assume it will not; decrypting in
+  chunks into `lua_load` is the likely fix.
+- **Listing and removing.** The first slice installs. Knowing what is installed
+  from any laptop needs a record on the drone (the live FC is truth, decision
+  7), and removing one product must not take a helper another still uses.
+- **Firmware.** acro_fence runs on `SmallFastDrone-4.7-config` today. autoacro
+  needs C++ that is only on `auto-acro-4.7`; no branch carries both yet.
+
 ### Why the identity commands are unsigned
 
 Upstream `SECURE_COMMAND` requires every operation to be signed by a private key
@@ -998,7 +1087,7 @@ Companion to this document, landing on the **`SmallFastDrone-4.7-config`**
 branch in `../smallfastdrone/` (origin `fossuav/smallfastdrone`) — that is
 `pr-lua-encryption` rebased onto the 4.7 beta line plus the BLHeli-in-SITL
 enablement, and it is the branch the `vendor/smallfastdrone/` submodule tracks.
-Ordered by dependency, not priority. **Status 2026-10-08: everything has landed except F14**, deferred by operator decision. F1–F10 are the inbound arc, F11–F14 the outbound arc (params and logs to the owner keypair), and F15 — ownership grants — is under "Remote key exchange", "As built". **Bench-verified on a TBS_LUCID_H7** running a signed SmallFastDronev1 build on a signed bootloader: F1–F4 and F9 on 2026-09-04 (the drone generated its identity, refused to generate a second, and returned the same public key after a reboot); F5, F6 and F10 on 2026-09-05, with a microSD in; F11–F13 on 2026-09-07; F15 on 2026-09-07, and on a sealed drone 2026-09-08. F8 is exercised by F5's decrypt path rather than tested on its own. **F7 is not bench-verified** — it would mean deliberately emptying a keyed board's keys to see it refuse.
+Ordered by dependency, not priority. **Status 2026-10-08: everything through F15 has landed except F14**, deferred by operator decision; **F16 is next**. F1–F10 are the inbound arc, F11–F14 the outbound arc (params and logs to the owner keypair), and F15 — ownership grants — is under "Remote key exchange", "As built". **Bench-verified on a TBS_LUCID_H7** running a signed SmallFastDronev1 build on a signed bootloader: F1–F4 and F9 on 2026-09-04 (the drone generated its identity, refused to generate a second, and returned the same public key after a reboot); F5, F6 and F10 on 2026-09-05, with a microSD in; F11–F13 on 2026-09-07; F15 on 2026-09-07, and on a sealed drone 2026-09-08. F8 is exercised by F5's decrypt path rather than tested on its own. **F7 is not bench-verified** — it would mean deliberately emptying a keyed board's keys to see it refuse.
 
 | # | Change | Where | Notes |
 |---|---|---|---|
@@ -1017,12 +1106,13 @@ Ordered by dependency, not priority. **Status 2026-10-08: everything has landed 
 | F13 | Encrypted log writer | `AP_Logger_File.cpp`, and the envelope in `AP_CheckFirmware_outbound.cpp` | ✅ **Landed and bench-verified 2026-09-07** (`0d908dd9ba` envelope, `bcb268939c` logger, `4a4559c8ad` reader). Header written and fsync'd before any log data, and the open **fails** if it does not land — half a file cannot be read at all. Body encrypted **in place in the write buffer, in whole 64-byte blocks**: in place so a short write costs nothing (what the filesystem declines stays encrypted and the next pass carries on), whole blocks because the counter is a block counter. The sub-64-byte remainder waits, and is discarded at close — which is what `stop_logging()` already does to it, so this costs at most 63 bytes more than before. Listing and download are **unchanged**, as predicted. File backend only; block backends are on internal flash, already behind the seal. |
 | — | `Tools/scripts/signing/decrypt_sfx.py` | ✅ **Landed 2026-09-07** (`4a4559c8ad`). The owner-side reader, and the independent check on the construction — see the F13 verification note below. |
 | F14 | Encrypted parameter endpoint | `GCS_FTP.cpp`, `AP_Param` | ⏸ **Deferred by operator decision 2026-09-07** — logs first, params when there is a reason. The rest of the outbound arc does not wait on it. When taken up: `@PARAM/param.sfx` alongside `@PARAM/param.pck`, and withdrawal of the cleartext endpoint (and of `PARAM_REQUEST_LIST`, and of the mission / rally / fence protocols) once an owner key is set. **Scope is an open product decision** — everything, or only the location-bearing subset; the first makes the drone unreadable by any other ground station. |
+| F16 | Pack a script product for one drone | `Tools/scripts/signing/pack_lua.py`, with `encrypt_lua.py` made importable | ⏳ **Next** (decision 46, 2026-10-08). Product manifest + identity file in, one `sfd-bundle/1` out — see "Script products". |
 
 ## Tool work list
 
 Companion to the firmware list above. **T1–T7 are the inbound arc and T8–T10
 the outbound arc** (decision 36); T11, applying an ownership grant, is under
-"Remote key exchange", "As built". **All have landed** (status 2026-10-08).
+"Remote key exchange", "As built". **T1–T11 have landed; T12 is next** (status 2026-10-08).
 
 | # | Module | Purpose |
 |---|---|---|
@@ -1036,6 +1126,7 @@ the outbound arc** (decision 36); T11, applying an ownership grant, is under
 | T8 | Owner keypair custody | ✅ **Landed 2026-09-07.** `src/workflow/owner-key.ts` + `owner-key-store.ts`, with `Tools/scripts/signing/owner_key.py` making the key offline. Imported **non-extractable**, so the browser performs the agreement and refuses to return the key; the tests exercise real WebCrypto because a stub would assert that property into existence, and one of them asks for the key back and requires the failure. Import also checks the file's halves belong together, by agreeing a secret both ways against a throwaway pair — a non-extractable private key cannot be asked for its public half, and the public half is what gets written into a drone. **Superseded plan:** Generate the operator's X25519 keypair and keep the private half out of the tool's own storage — WebAuthn with the PRF extension is the preferred route (Chromium-only, which we already are, and PLAN.md decision 13 installed mkcert "WebAuthn-ready" in anticipation). A non-extractable WebCrypto key in IndexedDB is the fallback, at the cost of dying with the browser profile. An exported key file is the fallback's fallback and is the one shape that genuinely puts key material in the tool. See PLAN.md decision 37. |
 | T9 | Owner key provisioning in the enable ceremony | ✅ **Landed 2026-09-07**, and driven through the UI against the bench board. **Superseded plan:** One more step in `sfd-enable`: after the identity is generated and verified, write the owner public key, verify it by read-back the same way, and only then offer the seal. Identity, ownership and seal in one sitting is not a convenience — it is what closes the claiming window in F12. |
 | T10 | Outbound decryption on the read paths | ✅ **Landed 2026-09-07.** `src/protocol/sfx.ts`, with the Logs view as its first surface — downloading recordings is still Phase 4, but an operator who copies one off the card can turn it back into a flight log today. Tested against a fixture **produced by the firmware's own monocypher** at the firmware's offsets, and verified beyond that by opening a real 32,640-byte bench log byte-identically to `decrypt_sfx.py`. Needed a crypto dependency (decision 40): Chromium has X25519 but neither ChaCha20 nor BLAKE2b. Custody survives it — both agreements happen in WebCrypto and only their results reach the library. **Superseded plan:** `.sfx` open for `@PARAM/param.sfx` and for downloaded logs. This is where decision 10 actually changes, and it is worth being blunt in review: the moment this lands, the tool performs cryptography. It should be one module, it should take the agreement from T8's custody layer rather than a raw key, and nothing else in `src/` should import a cipher. |
+| T12 | Install a script product | ⏳ **Next** (decision 46, 2026-10-08). `src/protocol/sfd-bundle.ts` reads an `sfd-bundle/1` header and checks every member is addressed to the connected drone; the install puts each member in `APM/scripts/` or `APM/scripts/modules/` through the security seam, replacing a same-named plaintext `.lua`. Reached through the catalogue's existing "Install one…" rather than a new surface (decision 44). |
 
 Encrypted applet install routes through the existing seam — the tool moves an
 opaque blob and never inspects it. **Landed 2026-09-07** (`kind: 'lua-applet'`,
