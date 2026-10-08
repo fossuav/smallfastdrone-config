@@ -110,7 +110,7 @@ bun run lua:check src/wizards/motor-check/applet.lua src/wizards/motor-check/crs
 
 ## What's here right now
 
-A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV brand palette: purple `#4A1E80` + gold `#C9A35F`), ESLint via `@antfu/eslint-config`, and a nav-bar shell (SFD logo top-left). Phases 0–2 are complete; Phase 3 (recipes + Lua engine), Phase 5 (firmware) and Phase 7 (SFD enablement) are in progress. See [PROGRESS.md](PROGRESS.md) for the detail.
+A Vite + Vue 3 + TypeScript app with Nuxt UI 4 + Tailwind 4 styling (FOSS UAV brand palette: purple `#4A1E80` + gold `#C9A35F`), ESLint via `@antfu/eslint-config`, and a nav-bar shell (SFD logo top-left). Phases 0–2 are complete. SFD enablement (Phase 7) and encrypted logs (Phase 8) meet their done-when on a real board; recipes + Lua engine (Phase 3), log handling (Phase 4) and firmware (Phase 5) are in progress. See [PROGRESS.md](PROGRESS.md) for the detail.
 
 - **Connect** (`/`) — a 3D quad (Betaflight Configurator's airframe model, GPLv3) that turns idly until a drone is connected and then **mirrors it**: tip the drone and the picture tips the same way, which checks the board's mounting and the IMU before you touch a setting. Plus a live "Connect drone" button. Talks to a real USB drone (Web Serial) or SITL via the WebSocket bridge, parses heartbeats, and reports vehicle type, autopilot (with "SmallFastDrone" detection from the boot banner), firmware version and state.
 - **Bringup** (`/wizard/bringup`) — the guided path, and the tool's only sequence: a **ribbon** of tabs per area, each with a live config panel and its child wizard mounted inline. Walks pre-flight → frame → connections → motors, marking itself complete as it goes. The nav entry lands here directly.
@@ -129,7 +129,7 @@ Each route lazy-loads as its own chunk. State lives in Pinia setup stores. Statu
 
 The app is an installable PWA — `vite-plugin-pwa` generates a service worker, web manifest, and icons. Drop into Chrome's "Install" menu to get a standalone window.
 
-Still to come, in rough order: seed recipes, the ESC throttle-calibration step, the rest of Phase 4 (a narrow in-tool `.bin` parser and the first log-engine wizard), BLHeli ESC passthrough (Phase 6), and remote key exchange — provisioning a drone's owner key without somebody standing next to it, which is the one piece of the security design with no construction yet. See [PLAN.md](PLAN.md) for the full plan.
+Still to come, in rough order: seed recipes, the ESC throttle-calibration step, the rest of Phase 4 (a narrow in-tool `.bin` parser and the first log-engine wizard), and BLHeli ESC passthrough (Phase 6). See [PLAN.md](PLAN.md) for the full plan.
 
 ## Project layout
 

@@ -151,7 +151,7 @@ Actual `package.json` scripts (run with `bun run <name>`):
 - `bun run ftp:smoke` — MAVLink-FTP round-trip smoke test against a running SITL
 - `bun run params:rebuild` — regenerate `src/protocol/param-metadata.json` from the submodule (after a bump)
 
-Not yet present (planned — see PLAN.md / docs/TESTING.md): `test:integration`, `test:hil`, a combined `test`, and the CI workflow.
+Not yet present (planned — see PLAN.md / docs/TESTING.md): `test:integration`, `test:hil`, and a combined `test`. CI (`.github/workflows/ci.yml`) runs lint, typecheck, unit, build and the SITL E2E suite on every push to `main` and every PR.
 
 ## Out of scope (don't drift here)
 
