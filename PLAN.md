@@ -110,6 +110,7 @@ Keep this list short. Adding a transitive-heavy lib (lodash, date-fns, three, d3
 - `typescript`
 - `vue-tsc`
 - `@types/bun` (for `test/sitl/bridge.ts` and future Bun CLI scripts)
+- `@types/three` — types for the `three` imports in `Drone3D.vue`, pinned to the `three` that `@tresjs/core` resolves. Until 2026-09-09 it arrived transitively through `@tresjs/cientos`, and dropping cientos dropped it.
 
 **External (via git submodule, not npm):**
 - `vendor/smallfastdrone/` — SFD firmware, used to build SITL for tests
