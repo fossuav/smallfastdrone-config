@@ -232,8 +232,11 @@ test('The radio filter installs Motor check; the catalogue card reflects it', as
   // The header's radio indicator links into the filter.
   await page.getByRole('link', { name: 'On the radio' }).click()
   await expect(page).toHaveURL(/view=radio/)
-  // Settled: Install (scripting on) or Turn on (scripting off).
-  const installBtn = page.getByRole('button', { name: 'Install' }).first()
+  // Settled: Install (scripting on) or Turn on (scripting off). Exact,
+  // because "Install one…" (an applet SmallFastDrone made for this drone)
+  // sits on the same view whenever scripting is on, and a substring match
+  // takes it for this row's button.
+  const installBtn = page.getByRole('button', { name: 'Install', exact: true }).first()
   const turnOn = page.getByRole('button', { name: 'Turn on' })
   await expect(installBtn.or(turnOn)).toBeVisible({ timeout: 30_000 })
   // Belt-and-braces in case a prior spec left scripting off.
@@ -255,7 +258,7 @@ test('The radio filter installs Motor check; the catalogue card reflects it', as
   // specs).
   await page.getByRole('button', { name: 'On the radio' }).click()
   await page.getByRole('button', { name: 'Remove' }).click()
-  await expect(page.getByRole('button', { name: 'Install' })).toBeVisible({ timeout: 30_000 })
+  await expect(installBtn).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: 'All', exact: true }).click()
   await expect(card.getByText('Field-capable')).toBeVisible({ timeout: 15_000 })
 })
