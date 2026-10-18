@@ -144,6 +144,30 @@ This tool is for SmallFastDrone, not vanilla ArduPilot. Defaults and recipes ass
 
 When a recipe or phase has SFD-specific reasoning, link to the relevant doc in `../smallfastdrone/` (e.g. `ArduCopter/CLAUDE.md` indoor playbook) in the recipe description, so the operator can audit the rationale.
 
+## Finding what's plugged in (in development — PLAN decision 49)
+
+The Connections step shows which ports carry traffic, then asks the operator what each one is. With the battery in and the transmitter on — the state the motor measurement already needs — the drone can listen on its own ports and say.
+
+**How.** Every port whose role isn't already working is given to a Lua applet (role Scripting), and the drone restarts. The applet listens on all of them at once, cycling through baud rates — 420000 and 416666 for ELRS / Crossfire and Ghost, 115200 for iBUS and re-configured ELRS, and 9600 to 460800 for a GPS — and recognises each device by its frames, checksums included, so noise can't pass for a device. The tool shows what it found against the ports, sets each found port's role and baud in one batch, puts every port where nothing was found back as it was, and restarts again. ArduPilot's own drivers then confirm it: a GPS reporting, stick input arriving.
+
+| Device | Recognised by | Needs |
+|---|---|---|
+| ELRS / Crossfire receiver | Frames to the flight controller (`0xC8`) with a valid CRC | Transmitter on and bound — a receiver with no link is silent |
+| Ghost receiver | Frames to the flight controller (`0x82`) with a valid CRC | Transmitter on |
+| FlySky iBUS receiver | 32-byte `0x20 0x40` frames with a valid checksum | Transmitter on |
+| GPS | NMEA sentences with a valid checksum, or u-blox binary with a valid checksum | Nothing — a GPS talks as soon as it has power |
+
+**Never touched:** USB, the port the tool talks through, a port with any other role (telemetry, video, ESC telemetry), and a GPS or receiver port whose device is already working. A cancelled run puts every port back.
+
+**Not seen by a script:** SBUS, analog VTX control (SmartAudio, Tramp) and FPort/SmartPort need the port's inversion or single-wire mode, which a script can't set. A port with traffic nobody recognised is the candidate for a second pass with ArduPilot's own receiver detection, which tries inverted SBUS itself.
+
+**Slices:**
+
+1. **RC and GPS** — the applet, an expert-only screen, the two-restart flow. SITL can simulate a CRSF receiver (`--serial5=sim:crsf`) and a GPS, so both are proven end to end there.
+2. **MSP and MAVLink** — HD video air units (which ask the flight controller for data over MSP), MSP sensors, telemetry radios; the harmless active probes.
+3. **The second pass** for traffic nobody recognised.
+4. **Fold it into the Connections step**, in place of "Check what's plugged in".
+
 ## Securing (optional, last)
 
 The bringup ribbon ends with **Secure your drone** (`sfd-enable`), which gives an

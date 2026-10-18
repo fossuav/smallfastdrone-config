@@ -69,10 +69,14 @@ OUTCOME="TODO: what the operator has achieved when this finishes."
 
 # Escape a string for the replacement side of sed s///.
 esc() { printf '%s' "$1" | sed -e 's/[\/&\]/\\&/g'; }
+# The title as it goes inside a single-quoted string - the TS manifest and
+# the Lua load message both use one - so "what's" doesn't end the string.
+TITLE_Q="${TITLE//\'/\\\'}"
 
 subst() {
   sed \
     -e "s/__ID__/$(esc "$ID")/g" \
+    -e "s/__TITLE_Q__/$(esc "$TITLE_Q")/g" \
     -e "s/__TITLE__/$(esc "$TITLE")/g" \
     -e "s/__CATEGORY__/$(esc "$CATEGORY")/g" \
     -e "s/__HERO__/$(esc "$HERO")/g" \
@@ -114,7 +118,7 @@ import type { WizardManifest } from '../../workflow/wizard-runtime'
 
 export const manifest: WizardManifest = {
   id: '__ID__',
-  title: '__TITLE__',
+  title: '__TITLE_Q__',
   description: '__DESC__',
   category: '__CATEGORY__',
   hero: '__HERO__',
@@ -248,7 +252,7 @@ local function update()
   return update, RUN_MS
 end
 
-gcs:send_text(6, '__TITLE__ applet loaded')
+gcs:send_text(6, '__TITLE_Q__ applet loaded')
 return update, IDLE_MS
 TPL
 fi

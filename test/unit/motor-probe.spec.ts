@@ -28,9 +28,9 @@ import {
   probeValueName,
   readProbe,
   spinFromYaw,
-  storageProblemText,
   suggestSpin,
 } from '../../src/workflow/motor-probe'
+import { storageProblemText } from '../../src/workflow/script-storage'
 
 // Quad X, test order: T1 front-right 45° ccw, T2 rear-right 135° cw,
 // T3 rear-left 225° ccw, T4 front-left 315° cw.

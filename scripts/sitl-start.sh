@@ -71,11 +71,16 @@ echo "Starting SITL in $WORK"
 # --model X is a quad-X physics model, matching the X frame we boot via the
 # FRAME_TYPE overlay above (--model only sets SIM physics, not the
 # autopilot's FRAME_TYPE — that needs the param). --speedup 1 = real-time.
+#
+# --serial5=sim:crsf puts a simulated ELRS / Crossfire receiver on SERIAL5,
+# for the port probe to find (PLAN decision 49). SERIAL5 has no role by
+# default, so the port is never opened and the receiver stays silent until
+# something gives the port a role — no other spec sees it.
 (
   : ;
   trap 'pkill -P $$ 2>/dev/null; exit 0' INT TERM
   while true; do
-    "$BIN" --model X --speedup 1 --defaults "$DEFAULTS,$WORK/frame.parm" </dev/null >>sitl.log 2>&1 || true
+    "$BIN" --model X --speedup 1 --serial5=sim:crsf --defaults "$DEFAULTS,$WORK/frame.parm" </dev/null >>sitl.log 2>&1 || true
     # Brief pause so a crash-loop doesn't peg the CPU.
     sleep 0.5
   done

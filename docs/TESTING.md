@@ -150,6 +150,7 @@ Most E2E specs are written against SITL's *fixture*, not just against a vehicle 
 | `connect.spec.ts` | Asserts SITL's "Quadcopter" and the "SmallFastDrone" banner. A board on a different frame or upstream firmware is a different, correct answer. |
 | `wizard.spec.ts` (connections ×2) | Asserts SERIAL3 reads "GPS" — SITL's wiring. The real board reported DJI OSD on SERIAL3, which the table rendered correctly. |
 | `wizard-motor-check.spec.ts` (×5, incl. ESC setup) | Needs a configured frame and ESCs. |
+| `wizard-port-probe.spec.ts` | Skips itself: it hands a real board's ports to a script and restarts the board twice. SITL carries a simulated receiver on SERIAL5 (`sitl-start.sh`) for it to find. |
 | `wizard-motor-probe.spec.ts` | Skips itself: it spins every motor, and on a real drone the props may be on. The bench run of the probe is the operator's, through the UI. |
 | `sfd-product.spec.ts` | Reads SITL's own working folder to check where each file landed, so it skips itself under `BENCH=1`. On a signed board the real check is that the product runs. |
 | `security-badge.spec.ts` | Asserts an ordinary drone shows *no* padlock — which is the point of it. A secured board correctly shows one, so this is SITL-only by design. |

@@ -24,7 +24,6 @@
 // pure so the tests need no drone.
 
 import type { FrameGeometry, FrameMotor, Spin } from './motor-geometry'
-import type { ScriptStorageStatus } from './script-storage'
 
 // The wizard id, which is also the applet's name on the drone.
 export const MOTOR_PROBE_ID = 'motor-probe'
@@ -200,15 +199,4 @@ export function suggestSpin(results: ProbeMotorResult[]): { slowest: number, arm
   const slowest = Math.max(...results.map(r => r.start!))
   const arm = Math.round((slowest + SPIN_ARM_MARGIN) * 100) / 100
   return { slowest, arm, min: Math.round((arm + SPIN_MIN_ABOVE_ARM) * 100) / 100 }
-}
-
-// Why there's nowhere to put the applet, in the operator's terms.
-export function storageProblemText(status: ScriptStorageStatus): string | null {
-  switch (status) {
-    case 'ok': return null
-    case 'no-card': return 'Your flight controller has no SD card for the test to run from. Insert a formatted SD card, reconnect, and try again.'
-    case 'unformatted': return 'Your flight controller can\'t read its SD card. Format it as FAT32, reconnect, and try again.'
-    case 'readonly': return 'Your flight controller\'s SD card is read-only. Check the card, reconnect, and try again.'
-    default: return 'Your flight controller has nowhere to put the test. Check its SD card, reconnect, and try again.'
-  }
 }

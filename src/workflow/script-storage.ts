@@ -48,3 +48,15 @@ export function storageProblemFromError(e: unknown): ScriptStorageProblem | null
   }
   return null
 }
+
+// Why there's nowhere to put a test the tool runs on the drone, in the
+// operator's terms. Null when there is.
+export function storageProblemText(status: ScriptStorageStatus): string | null {
+  switch (status) {
+    case 'ok': return null
+    case 'no-card': return 'Your flight controller has no SD card for the test to run from. Insert a formatted SD card, reconnect, and try again.'
+    case 'unformatted': return 'Your flight controller can\'t read its SD card. Format it as FAT32, reconnect, and try again.'
+    case 'readonly': return 'Your flight controller\'s SD card is read-only. Check the card, reconnect, and try again.'
+    default: return 'Your flight controller has nowhere to put the test. Check its SD card, reconnect, and try again.'
+  }
+}
