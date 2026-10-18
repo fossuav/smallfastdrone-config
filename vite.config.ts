@@ -49,6 +49,17 @@ export default defineConfig({
       'three/examples/jsm/loaders/GLTFLoader.js',
     ],
   },
+  server: {
+    watch: {
+      // Under `bun dev`, a change to any file in the project reloads every
+      // open page - a markdown file the app never imports included,
+      // measured. So a doc edited while the E2E suite runs, or a failing
+      // test's error-context.md landing in test-results/, resets the page
+      // a later test is in the middle of. Nothing the app imports lives in
+      // either, and the submodule is the firmware, not the tool.
+      ignored: ['**/*.md', '**/test-results/**', '**/playwright-report/**', '**/vendor/**'],
+    },
+  },
   plugins: [
     vue(),
     ui({
