@@ -228,6 +228,12 @@ assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 1), 'could not add p
 assert(param:add_param(PARAM_TABLE_KEY, 1, 'ACTIVE', 0), 'could not add ACTIVE param')
 local active = Parameter('WIZ_ACTIVE')
 
+-- A PARAM_SET saves to storage, so a 1 left from before a reboot would
+-- restart the wizard's work unasked. Every load starts dormant.
+if active:get() ~= 0 then
+  active:set_and_save(0)
+end
+
 local RUN_MS = 200
 local IDLE_MS = 1000
 

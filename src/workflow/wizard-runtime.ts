@@ -87,6 +87,10 @@ export interface WizardManifest {
   // in v1.
   locked?: boolean
   unlock_blurb?: string
+  // Shown and runnable only in expert mode. For a tool still being proven
+  // on the bench (the props-on motor probe) - not a gating seam for
+  // finished features, which belong in front of every operator.
+  expert_only?: boolean
   // Render this wizard in the runner's wider canvas (max-w-5xl vs the
   // default max-w-3xl). For wizards whose surface is a dashboard rather
   // than a single-column flow — e.g. the bringup ribbon's tabs + config

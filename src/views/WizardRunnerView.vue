@@ -25,6 +25,7 @@ import type { Component } from 'vue'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useSessionStore } from '../stores/session'
+import { useUiStore } from '../stores/ui'
 import FieldEnabledToggle from '../ui/components/FieldEnabledToggle.vue'
 import {
   checkPrereqs,
@@ -33,6 +34,7 @@ import {
 
 const route = useRoute()
 const session = useSessionStore()
+const ui = useUiStore()
 
 // Lazy-loaded view component. Held in shallowRef so Vue doesn't try
 // to make the component reactive (Vue components shouldn't be deeply
@@ -80,6 +82,11 @@ const prereqs = computed(() =>
 // library so the experience is consistent.
 const isLocked = computed(() => wizard.value?.manifest.locked === true)
 
+// An expert-only tool reached by URL outside expert mode says so rather
+// than running. Turning expert mode off mid-run unmounts it the same way,
+// and its own cleanup stops whatever it was doing.
+const needsExpert = computed(() => wizard.value?.manifest.expert_only === true && !ui.expert)
+
 // Load the DesktopView once we have a manifest, prereqs pass, and the
 // wizard isn't locked. Crucially, once a view is mounted we keep it —
 // even if prereqs transiently fail — until the route id changes or the
@@ -89,9 +96,9 @@ const isLocked = computed(() => wizard.value?.manifest.locked === true)
 // be torn down and re-mounted mid-flight. Watching the specific signals
 // (not watchEffect) keeps body reads of desktopView/mountedId untracked.
 watch(
-  [wizardId, isLocked, () => prereqs.value.ok, () => Boolean(wizard.value)],
-  async ([id, locked, prereqOk, haveWizard], prev) => {
-    if (!haveWizard || locked) {
+  [wizardId, isLocked, () => prereqs.value.ok, () => Boolean(wizard.value), needsExpert],
+  async ([id, locked, prereqOk, haveWizard, expertGated], prev) => {
+    if (!haveWizard || locked || expertGated) {
       desktopView.value = null
       mountedId.value = null
       loadError.value = null
@@ -170,6 +177,21 @@ watch(
       </p>
       <p v-if="wizard.manifest.unlock_blurb" class="text-muted mt-3 text-sm italic">
         {{ wizard.manifest.unlock_blurb }}
+      </p>
+    </UCard>
+
+    <!-- Expert-only tool, outside expert mode. -->
+    <UCard v-else-if="needsExpert">
+      <template #header>
+        <div class="flex items-center gap-3">
+          <UIcon :name="wizard.manifest.hero" class="text-muted size-6" />
+          <h1 class="text-highlighted text-xl font-semibold">
+            {{ wizard.manifest.title }}
+          </h1>
+        </div>
+      </template>
+      <p class="text-muted">
+        This tool is still being tested. Turn on Expert in the header to use it.
       </p>
     </UCard>
 

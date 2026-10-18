@@ -110,8 +110,11 @@ const GROUPS: readonly Group[] = [
 ]
 
 // The bringup meta-wizard is the banner, not a card - listing it beside
-// its own steps would say there are two ways to do the same thing.
-const entries = computed(() => getWizards().filter(w => w.manifest.id !== 'bringup'))
+// its own steps would say there are two ways to do the same thing. A tool
+// still being proven on the bench appears only in expert mode.
+const entries = computed(() => getWizards().filter(w =>
+  w.manifest.id !== 'bringup' && (!w.manifest.expert_only || ui.expert),
+))
 const unlocked = computed(() => entries.value.filter(w => !w.manifest.locked))
 const locked = computed(() => entries.value.filter(w => w.manifest.locked))
 

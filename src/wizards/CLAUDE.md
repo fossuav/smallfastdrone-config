@@ -21,6 +21,9 @@ Wizard-specific conventions on top of the ArduPilot guidance:
 - The applet self-arms on a `WIZ_<ID>_ACTIVE` parameter (registered via `param:add_table` / `param:add_param`); the DesktopView drives it via `useLuaEngine().setParam`. While `ACTIVE` is 0 the applet sits dormant with a long `return update, <ms>` interval.
 - Progress + results flow desktop-ward as `NAMED_VALUE_FLOAT` (`gcs:send_named_float`) — names are max 10 chars. The DesktopView subscribes via `useLuaEngine().subscribeNamedValue`.
 - The applet must tolerate being killed mid-run (operator abort, USB unplug, FC reboot) and return owned params to a sane resting value on its exit path. See WIZARDS.md "Resource discipline".
+- Force the control param to 0 at load (`set_and_save(0)` if it isn't): a PARAM_SET saves to storage, so a 1 survives a reboot and would restart the applet's work unasked. An applet that moves anything also stops when `gcs:last_seen()` goes stale; the view sends the heartbeat. See WIZARDS.md.
+- An applet reporting many values (one set per motor) is read with `useLuaEngine().subscribeNamedValues`, not a subscription per name.
+- Changing `param:add_table`'s count needs a reboot, not a scripting restart — ArduPilot keeps a script's table for the whole boot, and the reloaded applet fails at load with "could not add param".
 
 ## Operator-first, always
 

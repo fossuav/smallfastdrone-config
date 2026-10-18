@@ -532,6 +532,18 @@ export function useLuaEngine() {
     })
   }
 
+  // Subscribe to every NAMED_VALUE_FLOAT, whatever its name. For an applet
+  // that reports dozens of names (one set per motor) - a subscription per
+  // name would run that many callbacks on every message the drone sends.
+  function subscribeNamedValues(cb: (name: string, value: number) => void): () => void {
+    return session.subscribeMessages((msg) => {
+      if (msg.msgid !== MSGID_NAMED_VALUE_FLOAT)
+        return
+      const nvf = msg.data as NamedValueFloat
+      cb(nvf.name.replace(/\0.*$/, '').trim(), nvf.value)
+    })
+  }
+
   return {
     appletFilename,
     appletPath,
@@ -552,5 +564,6 @@ export function useLuaEngine() {
     waitForControlParam,
     setParam,
     subscribeNamedValue,
+    subscribeNamedValues,
   }
 }

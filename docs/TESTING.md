@@ -81,7 +81,7 @@ The leading `:` (true) is load-bearing — without it bash optimises away the su
 
 Lua-engine wizards **are** testable end-to-end against SITL. The radio-filter E2E (`test/e2e/wizard-motor-check.spec.ts` → "The radio filter installs Motor check…") drives the full Lua flow against a real SITL — turn scripting on (write `SCR_ENABLE=1` + reboot + auto-reconnect), FTP the applet + its shared module to `APM/scripts`, restart scripting to rescan, verify the applet is on the FC. (An earlier note here claimed end-to-end Lua testing was impossible due to `SCR_ENABLE`'s `AP_PARAM_FLAG_ENABLE` "landing too late"; that was a misdiagnosis. Scripting initialises fine after `SCR_ENABLE=1`, whether set via the boot defaults *or* via `PARAM_SET` + reboot.)
 
-The first end-to-end Lua-engine wizard was `imu-noise` (a vibration-check demo that exercised the transient upload → arm → run → remove pattern). It's been retired — operator-useful only as a Lua-engine proof, which the motor-check field path now covers. The install-and-keep pattern (used by field tools) is the path that ships; the transient pattern's plumbing remains in `src/workflow/lua-engine.ts` ready for a future wizard that genuinely needs it.
+The first end-to-end Lua-engine wizard was `imu-noise` (a vibration-check demo that exercised the transient upload → arm → run → remove pattern). It's been retired — operator-useful only as a Lua-engine proof, which the motor-check field path now covers. The install-and-keep pattern (used by field tools) is the path that ships for radio applets; the transient pattern is used again by the props-on motor probe (`test/e2e/wizard-motor-probe.spec.ts`), which uploads its applet, runs it over a parameter, and removes it when done.
 
 The thing that actually blocked it was a **path mismatch unique to SITL**:
 
@@ -139,7 +139,7 @@ BENCH=1 bun run test:e2e         # run the E2E suite against the board, not SITL
 
 **A bench board is not a drone.** `bench-check` reports `SKIP`, not `PASS`, for anything the board in front of it structurally cannot answer — no microSD means no writable filesystem, so no FTP write and no Lua wizard; no ESCs means no motor check. A skip is a bench condition, never a defect, and it must never read as a pass. The same applies to `BENCH=1 bun run test:e2e`: specs needing a configured frame, ESCs or storage are SITL-only, and a bare board failing them says nothing about the code.
 
-**Nothing here arms anything.** Every check is read-only except the parameter write (one benign parameter, restored afterwards) and the reboot (of a disarmed board). Motor tests stay in SITL and in the props-off bringup wizard, where the operator is present.
+**Nothing here arms anything.** Every check is read-only except the parameter write (one benign parameter, restored afterwards) and the reboot (of a disarmed board). Motor tests stay in SITL and in the wizards, where the operator is present — the props-off motor check, and the props-on motor probe, whose spec skips itself under `BENCH=1` because on a real drone the props may well be on.
 
 ### What `BENCH=1` can and can't run
 
@@ -150,6 +150,7 @@ Most E2E specs are written against SITL's *fixture*, not just against a vehicle 
 | `connect.spec.ts` | Asserts SITL's "Quadcopter" and the "SmallFastDrone" banner. A board on a different frame or upstream firmware is a different, correct answer. |
 | `wizard.spec.ts` (connections ×2) | Asserts SERIAL3 reads "GPS" — SITL's wiring. The real board reported DJI OSD on SERIAL3, which the table rendered correctly. |
 | `wizard-motor-check.spec.ts` (×5, incl. ESC setup) | Needs a configured frame and ESCs. |
+| `wizard-motor-probe.spec.ts` | Skips itself: it spins every motor, and on a real drone the props may be on. The bench run of the probe is the operator's, through the UI. |
 | `sfd-product.spec.ts` | Reads SITL's own working folder to check where each file landed, so it skips itself under `BENCH=1`. On a signed board the real check is that the product runs. |
 | `security-badge.spec.ts` | Asserts an ordinary drone shows *no* padlock — which is the point of it. A secured board correctly shows one, so this is SITL-only by design. |
 

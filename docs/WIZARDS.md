@@ -64,6 +64,11 @@ interface WizardManifest {
   // with description + Pro badge." Real entitlement check lands later.
   locked?: boolean
   unlock_blurb?: string // shown on the locked card
+
+  // Shown and runnable only in expert mode — for a tool still being proven
+  // on the bench (the props-on motor probe). Not a gating seam for finished
+  // features: those belong in front of every operator.
+  expert_only?: boolean
 }
 ```
 
@@ -118,7 +123,11 @@ FC reboot. The protocol primitives live in `src/workflow/lua-engine.ts`
 reboot anywhere in the Lua flow is the one-time `SCR_ENABLE` enable, owned by
 the drone-settings page.
 
-**Resource discipline.** A Lua wizard MUST tolerate being killed mid-run (operator Abort, USB unplugged, FC reboots) without leaving the FC in a bad param state. The applet's exit path always sets owned params to a sane resting value before returning nil. The runtime tracks `WIZ_<ID>_ACTIVE` at reconnect — if non-zero with no active session, the runtime offers a one-click "clean up previous wizard run."
+**Resource discipline.** A Lua wizard MUST tolerate being killed mid-run (operator Abort, USB unplugged, FC reboots) without leaving the FC in a bad param state. The applet's exit path always sets owned params to a sane resting value before returning nil. Settings it changes only for the run are changed with `param:set` (memory only), so a reboot puts them back even when the exit path never runs.
+
+**Start every load dormant.** A PARAM_SET saves to storage, so `WIZ_<ID>_ACTIVE = 1` survives a reboot — and an applet still on the FC would restart its work unasked at the next boot. The applet forces its control param to 0 when it loads. For one that moves anything (the props-on motor probe spins motors with props on) this is the difference between a reboot and an accident.
+
+**Stop without the operator.** An applet that moves anything stops when the ground station's heartbeat goes quiet (`gcs:last_seen()`), so an unplugged laptop can't leave it running with nobody watching. The tool sends no heartbeat by default; the wizard's view sends one (`buildGcsHeartbeat`, `src/protocol/gcs-heartbeat.ts`) for as long as the applet is installed. The runtime tracks `WIZ_<ID>_ACTIVE` at reconnect — if non-zero with no active session, the runtime offers a one-click "clean up previous wizard run."
 
 **Idle cost.** When `WIZ_<ID>_ACTIVE = 0` the applet `return`s with a long interval (≥ 1000 ms) and does effectively nothing — but the script file is still loaded. **The applet file is removed on completion**, not just deactivated, so a finished wizard reclaims its full resource footprint. Reactivation costs an FTP upload (~100 ms).
 
