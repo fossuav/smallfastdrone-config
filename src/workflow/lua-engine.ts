@@ -88,6 +88,11 @@ const MAV_PARAM_TYPE_INT8 = 2
 // enough that a stuck write doesn't hang a wizard for seconds.
 const PARAM_ACK_TIMEOUT_MS = 1500
 
+// How often to ask, and how far apart, before a storage probe that names
+// no problem is reported as unknown.
+const STORAGE_PROBE_ATTEMPTS = 4
+const STORAGE_PROBE_RETRY_MS = 500
+
 // Snapshot of the FC's scripting capability. `available` is false when
 // the FC doesn't expose SCR_ENABLE at all (vehicle / build without
 // scripting compiled in). `enabled` is true only when SCR_ENABLE is
@@ -169,16 +174,28 @@ export function useLuaEngine() {
   // exists, which comes back as FileExists (errCode 8) and confirms the
   // volume is writable. A FailErrno means there's nowhere to write;
   // storageProblemFromError names why (almost always a missing SD card).
+  //
+  // A failure that names no storage problem is asked again: straight after
+  // a restart the drone's FTP can lag its heartbeat (see
+  // MavFtp.resetSessions), and a probe that landed in that gap would
+  // otherwise tell the operator their SD card is missing.
   async function checkScriptStorage(): Promise<ScriptStorageStatus> {
     const ftp = getFtp()
-    try {
-      await ftp.createDirectory('APM')
-      return 'ok'
-    }
-    catch (e) {
-      if (e instanceof MavFtpError && e.errCode === 8)
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await ftp.createDirectory('APM')
         return 'ok'
-      return storageProblemFromError(e) ?? 'unknown'
+      }
+      catch (e) {
+        if (e instanceof MavFtpError && e.errCode === 8)
+          return 'ok'
+        const problem = storageProblemFromError(e)
+        if (problem)
+          return problem
+        if (attempt >= STORAGE_PROBE_ATTEMPTS)
+          return 'unknown'
+        await sleep(STORAGE_PROBE_RETRY_MS)
+      }
     }
   }
 
