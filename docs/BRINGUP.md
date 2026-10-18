@@ -45,6 +45,42 @@ Motors and ESCs are one operator task, so phase 04 is a single multi-phase wizar
 
 ESC setup comes **first** because the direction auto-fix (`SERVO_BLH_RVMASK`) only works on DShot ESCs — choosing the protocol up front makes the fix reliably available rather than silently absent. The in-field CRSF version covers only the order/direction check (ESC config isn't a radio-menu task). ESC *firmware* (BLHeli) settings are deferred to Phase 6 (4-way passthrough).
 
+### Props-on motor measurement (in development — PLAN decision 48)
+
+The props-off check above asks the operator, motor by motor, where it is and which way it turns — and still cannot see the commonest first-flight crash, a prop on the wrong motor or props-in and props-out mixed up. With the props on, the drone can answer all of it from its own gyro, with one confirm from the operator.
+
+**Setup the operator does:** battery in, props on, drone flat on the floor with its arms (or motor guards, or ducts) resting on it, nose away, everyone two metres back. A drone that rests on a hanging battery or a narrow body is effectively on a block, and the measurement below does not hold for it.
+
+**What one motor tells us:**
+
+| What the drone feels | What it means |
+|---|---|
+| That corner lifts, tipping the drone away from it | Where the motor is |
+| The corner never lifts, up to the cap | Its prop is pushing down — wrong prop, or upside down — or it is missing |
+| A yaw twitch as the motor spins up (the rotor's reaction) | Which way the motor turns |
+| RPM from the ESC (bidirectional DShot) | The output really is connected; the throttle at which it starts |
+
+**Why the floor and not a block.** Tilt measures turning force, and "this arm pushes up" turns the drone exactly as "the opposite arm pushes down" does. On a block, a drone with every prop reversed reads as four healthy motors each at the opposite corner, and the fix would be a flip on takeoff. An arm resting on the floor cannot go down, which breaks the tie: movement means lift. Opposite arms on a quad also spin the same way, so the yaw twitch cannot break it either.
+
+**Why pulses and not a slow ramp.** Lifting one corner off the floor needs roughly half the drone's weight on that motor — on some drones most of its throttle. As a pulse of tens of milliseconds the corner rises a millimetre or two and drops back, so the energy is bounded and the drone cannot run away. The response then arrives in a known window after each pulse; a lift has a signature a prop pushing into the floor cannot produce (a sharp tilt, then the knock of the landing); and the rotor's spin-up reaction is, on a back-of-envelope estimate for a 3" quad, several times the floor's grip where the steady drag of a ramp is not — which is what should make the direction readable at all. The bench decides that.
+
+**How the applet runs it**, per motor:
+
+1. Ramp from stopped until the ESC reports RPM — the motor's start throttle, the basis for spin-arm. Hold just above it as idle.
+2. A ladder of short pulses from idle, each a step stronger, until one clearly lifts (or the cap). Repeat that one to average.
+3. Stop that motor; settle; next.
+
+Throughout it holds the firmware's own motor test on a 0.15 s timer, re-sent every loop: if the applet stops for any reason the motor stops by itself. It stops everything at once on any tilt past the abort angle, or on movement while it should be idle. It raises the gyro filter cutoff for the run, in memory only, so a reboot restores it even if the applet dies, and puts it back when it ends. Spin-arm is measured (worst motor's start + margin); spin-min follows ArduPilot's rule (spin-arm + about 0.03) and is checked against the ESC's error rate on the jumps from idle. A motor that needs noticeably more throttle than the others to lift is a weak motor or a damaged prop.
+
+**Motor noise** comes from the firmware's gyro FFT, which runs at full gyro rate whether armed or not. Because one motor spins at a time, what it hears during a motor's pulses is that motor's noise. Lua has no binding to read it today; SFD adds one. Parsing the log in Lua was rejected: thousands of times slower, and an owned drone's logs are encrypted to a key it does not hold.
+
+**Slices:**
+
+1. **Probe** — the applet plus an expert-only screen that runs it and shows each motor's raw result: start and lift throttle, which way it tipped, the yaw twitch, RPM. Plumbing tested on SITL (which holds a grounded drone level, so no lift appears there); the physics and the thresholds settled on the bench.
+2. **SFD firmware** — a script binding for the gyro FFT's peaks.
+3. **Per-motor noise** in the applet.
+4. **Fold it into "Set up motors"** — the planner takes measured positions and directions instead of the operator's clicks, and the spin-arm / spin-min / noise results feed "Ready for first flight".
+
 ### Phase contract
 
 Phases are sub-wizards; the contract lives in [WIZARDS.md](WIZARDS.md). The bringup meta-wizard adds only sequencing + gating on top — walk sub-wizards in order, block on a sub-wizard's failed `verify`, persist progress to IndexedDB. Each sub-wizard is also independently runnable from the library.
@@ -88,7 +124,7 @@ Recipes never bypass the param store's dirty/write tracking — every change is 
 
 ## Operator safety rules (must hold across wizard and recipes)
 
-1. **Props-off mode is default during bringup.** UI states this explicitly. Phases that require power are explicitly flagged.
+1. **Props-off mode is default during bringup.** UI states this explicitly. Phases that require power are explicitly flagged. The one exception is props-on motor measurement (PLAN decision 48), which spins with props on by design — behind its own confirm, on a dead-man timer, bounded to short pulses, and stopped by the drone itself on any unexpected movement.
 2. **No write without read.** Always read the current value before writing; show before/after on confirm.
 3. **Batch + commit, don't drip.** Stage param changes in the dirty set; present a single confirm-and-write.
 4. **Persist before reboot.** Always save params to flash before any operation that triggers reboot.
@@ -98,6 +134,7 @@ Recipes never bypass the param store's dirty/write tracking — every change is 
 
 This tool is for SmallFastDrone, not vanilla ArduPilot. Defaults and recipes assume:
 
+- **SFD firmware, any H7 board, anyone's airframe** (PLAN decision 47). The target is a drone with SFD installed, not an SFD-built drone. SFD's own board target (`SmallFastDronev1`) ships defaults that already set the frame, ESC protocol, motor directions and the RPM vibration filter — but no other board does, so bringup can never assume them. On that board those steps show as already done; everywhere else they run.
 - **Small frame class** (sub-300 mm typical), high power-to-weight.
 - **Indoor / confined-space flight** is common — tighter PIDs, conservative climb rates, careful failsafes.
 - **Throw-mode launching** is a primary use case; bringup must produce a throw-ready config.

@@ -8,7 +8,7 @@
 
 The target operator:
 
-- Has a SmallFastDrone they want to fly. May have built it themselves or received it pre-built.
+- Has a drone **running SmallFastDrone firmware** they want to fly — on any STM32H7 board, built by them or by somebody else (PLAN decision 47). It is not necessarily an airframe SFD built, so the tool cannot lean on SFD's own board defaults (operator direction, 2026-10-17; see [BRINGUP.md](BRINGUP.md) "SFD-specific bringup considerations").
 - Knows their drone is a quad / hex / etc., and roughly what they want to do (indoor freestyle, outdoor cinematic, throw-launched scout, etc.).
 - Does **not** know MAVLink, parameter names, PID values, filter design, EKF tuning, or coordinate frames.
 - Should not need to learn any of those things to get a good outcome.
