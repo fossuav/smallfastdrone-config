@@ -283,6 +283,8 @@ Tags: `[wizard]` `[firmware]` `[3d]` `[tooling]` `[ux]` `[test]` `[infra]`.
   panel sits below — and visually competes with — the primary "Start motor
   check". Collapse it behind a disclosure so the primary action stands alone.
   (UX audit.)
+- `[wizard]` **Li-ion packs are read as LiPo.** Voltage can't tell the two apart, and Li-ion wants lower thresholds (it still has charge at 3.5 V a cell), so a Li-ion drone gets LiPo settings and comes home early. The safe direction, but wrong. Wants a chemistry choice: the one battery fact no recipe can determine, so a control decision 44 allows. (`src/workflow/battery.ts`, 2026-10-17.)
+- `[wizard]` **The battery voltage itself isn't checked.** The cell count trusts the drone's voltage reading, and a wrong voltage multiplier on a board gives a wrong count. ESCs that report their supply voltage give an independent reading to cross-check against before the count is believed.
 - `[wizard]` **Force-cal for compass + accel.** *(Distinct from the restore fix
   of 2026-09-05: that tells the drone an already-restored calibration is valid,
   this is about offering the operator a fresh one.)* Offer a "redo calibration"

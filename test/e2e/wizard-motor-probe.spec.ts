@@ -16,7 +16,8 @@
 // End-to-end test for the props-on motor probe against SITL: the plumbing,
 // not the physics. SITL holds a grounded drone level, so no corner ever
 // lifts there and every motor reports "didn't lift" - which still proves
-// the whole chain: the card only in expert mode, the applet uploaded and
+// the whole chain: the card only in expert mode, the battery read from its
+// voltage and the settings that follow from it saved, the applet uploaded and
 // loaded, the run started over a parameter, the firmware's motor test
 // driven from Lua on every motor, results back as named values, the
 // ground-station heartbeat keeping the run alive, and the applet taken
@@ -59,6 +60,12 @@ test('The props-on motor probe runs every motor on SITL and reports each one', a
   if (await turnOn.isVisible())
     await turnOn.click()
   await expect(gate).toBeVisible({ timeout: 90_000 })
+
+  // The battery is read, not asked: SITL simulates a full 3S. One button
+  // sets everything that follows from the cell count, and then says so.
+  await expect(page.getByText(/3-cell LiPo, 12\.\d V, full/)).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Set up for a 3-cell battery' }).click()
+  await expect(page.getByText('Settings match this battery')).toBeVisible({ timeout: 15_000 })
 
   // Nothing spins until the operator says the safety list is done.
   const startBtn = page.getByRole('button', { name: 'Start', exact: true })

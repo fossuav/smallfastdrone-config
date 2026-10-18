@@ -19,14 +19,21 @@
 // each motor measured against where the frame expects it - on the motor
 // map while it runs, and as a table at the end. Expert-only: a measuring
 // instrument for settling the thresholds on the bench (PLAN decision 48).
-// It changes no setting the drone keeps.
+// The test itself changes no setting the drone keeps.
+//
+// The test needs the flight battery in, so the screen reads it: the cell
+// count comes from the voltage rather than a question, and one button
+// sets everything that follows from it (src/workflow/battery.ts).
 
 import type { MotorVisual } from '../../ui/visuals/MotorMap.vue'
+import type { BatteryRead } from '../../workflow/battery'
 import type { ProbeReading } from '../../workflow/motor-probe'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useParamsStore } from '../../stores/params'
+import { useSessionStore } from '../../stores/session'
 import MotorMap from '../../ui/visuals/MotorMap.vue'
+import { batteryEdits, batteryLabel, batterySummary, changedEdits, readAs, readBattery } from '../../workflow/battery'
 import { useLuaEngine } from '../../workflow/lua-engine'
 import { frameGeometry, positionLabel, spinLabel } from '../../workflow/motor-geometry'
 import { readProbe, stageLabel, storageProblemText, suggestSpin } from '../../workflow/motor-probe'
@@ -34,6 +41,7 @@ import { useMotorProbe } from '../../workflow/use-motor-probe'
 import appletSource from './applet.lua?raw'
 
 const params = useParamsStore()
+const session = useSessionStore()
 const lua = useLuaEngine()
 const router = useRouter()
 const route = useRoute()
@@ -160,6 +168,64 @@ const spinSuggestion = computed(() => suggestSpin(results.value))
 // Any motor whose corner never lifted - the case worth saying in words.
 const anyNoLift = computed(() => results.value.some(r => r.lift === null))
 
+// The flight battery, read from the drone's voltage. A drone with no
+// battery monitor can't say, so the checklist falls back to asking.
+const monitorOff = computed(() => params.effectiveValue('BATT_MONITOR') === 0)
+const reading = computed(() => readBattery(session.batteryVolts))
+// The count the operator picked, when two counts both fit the voltage.
+const pickedCells = ref<number | null>(null)
+const battery = computed<BatteryRead | null>(() => {
+  const r = reading.value
+  if (r.kind === 'read')
+    return r
+  if (r.kind === 'either' && pickedCells.value !== null && r.cells.includes(pickedCells.value))
+    return readAs(r.volts, pickedCells.value)
+  return null
+})
+// The test spins props on battery power; it waits for one.
+const noBattery = computed(() => !monitorOff.value && reading.value.kind === 'none')
+
+// The checklist's battery line, as measured rather than asked.
+const batteryLine = computed(() => {
+  const r = reading.value
+  if (monitorOff.value)
+    return 'Flight battery plugged in (this drone can\'t read its battery, so check it yourself)'
+  if (battery.value)
+    return batteryLabel(battery.value)
+  if (r.kind === 'none')
+    return 'Plug in the flight battery'
+  if (r.kind === 'unclear')
+    return `The battery reads ${r.volts.toFixed(1)} V — too flat to tell how many cells it has. Charge it first.`
+  if (r.kind === 'either')
+    return `The battery reads ${r.volts.toFixed(1)} V. How many cells is it?`
+  return ''
+})
+
+// The battery settings that differ from what the drone has now.
+const batteryPlan = computed(() => battery.value
+  ? changedEdits(batteryEdits(battery.value.cells, battery.value.chemistry), name => params.params.get(name)?.value)
+  : [])
+const batteryLines = computed(() => battery.value ? batterySummary(battery.value.cells, battery.value.chemistry) : [])
+const batteryApplying = ref(false)
+const batteryError = ref<string | null>(null)
+
+// Set everything that follows from the battery, in one batch. No restart.
+async function setUpBattery() {
+  if (batteryPlan.value.length === 0)
+    return
+  batteryApplying.value = true
+  batteryError.value = null
+  params.discardAll()
+  for (const e of batteryPlan.value)
+    params.setEdit(e.name, e.value)
+  await params.apply()
+  if (params.lastApplyFailed > 0) {
+    params.discardAll()
+    batteryError.value = 'We couldn\'t save the battery settings to your drone. Check the connection and try again.'
+  }
+  batteryApplying.value = false
+}
+
 // Finished with the test: take the applet back off the drone and leave.
 async function done() {
   await cleanup()
@@ -240,8 +306,25 @@ async function done() {
           <li class="flex gap-2">
             <UIcon name="i-lucide-fan" class="mt-0.5 size-4 shrink-0" />Props on, and tight
           </li>
-          <li class="flex gap-2">
-            <UIcon name="i-lucide-battery-full" class="mt-0.5 size-4 shrink-0" />Flight battery plugged in
+          <li class="flex gap-2" :class="battery || monitorOff ? '' : 'text-warning'">
+            <UIcon
+              :name="battery ? 'i-lucide-battery-full' : 'i-lucide-battery-warning'"
+              class="mt-0.5 size-4 shrink-0"
+              :class="battery ? 'text-success' : ''"
+            />
+            <span>{{ batteryLine }}</span>
+          </li>
+          <li v-if="reading.kind === 'either' && !battery" class="flex gap-2 pl-6">
+            <UButton
+              v-for="n in reading.cells"
+              :key="n"
+              size="xs"
+              color="neutral"
+              variant="outline"
+              @click="pickedCells = n"
+            >
+              {{ n }}-cell
+            </UButton>
           </li>
           <li class="flex gap-2">
             <UIcon name="i-lucide-move-down" class="mt-0.5 size-4 shrink-0" />Flat on the floor, resting on its arms — not on a battery hanging underneath
@@ -306,6 +389,33 @@ async function done() {
       icon="i-lucide-circle-x"
       :description="error"
     />
+
+    <!-- The battery decides a handful of settings; set them in one go. -->
+    <div v-if="battery && !running && readiness === 'ready'" class="border-default space-y-2 rounded-md border p-4">
+      <p class="text-highlighted font-medium">
+        Set up for this battery
+      </p>
+      <ul class="text-muted space-y-1 text-sm">
+        <li v-for="line in batteryLines" :key="line" class="flex gap-2">
+          <UIcon name="i-lucide-battery-medium" class="mt-0.5 size-4 shrink-0" />{{ line }}
+        </li>
+      </ul>
+      <p v-if="batteryPlan.length > 0" class="text-muted font-mono text-xs">
+        {{ batteryPlan.map(e => `${e.name} ${e.value}`).join(' · ') }}
+      </p>
+      <div class="flex items-center justify-end gap-2 pt-1">
+        <span v-if="batteryPlan.length === 0" class="text-success inline-flex items-center gap-1 text-sm">
+          <UIcon name="i-lucide-check" class="size-4" />Settings match this battery
+        </span>
+        <UButton v-else :loading="batteryApplying" @click="setUpBattery">
+          Set up for a {{ battery.cells }}-cell battery
+        </UButton>
+      </div>
+      <p v-if="batteryPlan.length > 0" class="text-muted text-xs">
+        Saves {{ batteryPlan.length }} settings to your drone. No restart needed.
+      </p>
+      <UAlert v-if="batteryError" color="error" variant="subtle" icon="i-lucide-circle-x" :description="batteryError" />
+    </div>
 
     <!-- What each motor measured. -->
     <div v-if="hasResults && !running" class="space-y-3">
@@ -387,7 +497,7 @@ async function done() {
       <UButton
         v-if="readiness === 'ready'"
         color="error"
-        :disabled="!confirmed"
+        :disabled="!confirmed || noBattery"
         @click="start"
       >
         {{ hasResults || phase === 'stopped' ? 'Run again' : 'Start' }}

@@ -130,6 +130,9 @@ export const useSessionStore = defineStore('session', () => {
   // Per-subsystem present/enabled/healthy status from SYS_STATUS. Drives
   // the operator-facing status panel on the Connect view.
   const subsystems = ref<SubsystemStatus[]>([])
+  // Battery voltage from SYS_STATUS, in volts. Null until the drone has
+  // reported one, and when it says it has no reading (UINT16_MAX).
+  const batteryVolts = ref<number | null>(null)
   // Intent flag the drone-settings page sets when it sends
   // PREFLIGHT_REBOOT_SHUTDOWN, so the UI knows to expect a connection
   // drop and render the reboot/reconnect flow rather than treating
@@ -268,6 +271,7 @@ export const useSessionStore = defineStore('session', () => {
         ss.onboardControlSensorsEnabled,
         ss.onboardControlSensorsHealth,
       )
+      batteryVolts.value = ss.voltageBattery === 0xFFFF ? null : ss.voltageBattery / 1000
     }
   })
 
@@ -306,6 +310,7 @@ export const useSessionStore = defineStore('session', () => {
     recentStatusTexts.value = []
     statusReadAt.value = 0
     subsystems.value = []
+    batteryVolts.value = null
     bytesReceived.value = 0
     versionRequested = false
     session.reset()
@@ -470,6 +475,7 @@ export const useSessionStore = defineStore('session', () => {
     recentStatusTexts,
     statusReadAt,
     subsystems,
+    batteryVolts,
     readyToArm,
     rebooting,
     vehicleLabel,
